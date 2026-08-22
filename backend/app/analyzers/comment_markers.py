@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.analyzers.base import Analyzer
 from app.models.finding import Finding, FindingCategory, FindingSeverity
+from app.security import is_lockfile
 
 
 class CommentMarkersAnalyzer(Analyzer):
@@ -91,6 +92,10 @@ class CommentMarkersAnalyzer(Analyzer):
 
             # Skip binary files
             if file_path.suffix.lower() in self.BINARY_EXTENSIONS:
+                continue
+
+            # Skip generated dependency-metadata lockfiles (filename-specific).
+            if is_lockfile(file_path):
                 continue
 
             # Scan file

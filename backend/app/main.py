@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field
 
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
-from app.services.repository import scan_repository
+from app.services.repository import (
+    get_analyzer_metadata,
+    get_registered_analyzers,
+    scan_repository,
+)
 
 
 app = FastAPI(
@@ -55,6 +59,21 @@ async def health() -> dict[str, str]:
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"message": "Code Sonar API", "version": "0.1.0"}
+
+
+@app.get("/api/analyzers")
+async def list_analyzers() -> dict[str, Any]:
+    """Public analyzer registry metadata.
+
+    Returns the list of registered analyzers with their public
+    metadata. Stable shape: each entry has ``name``, ``analyzer_id``,
+    ``category``, and ``threshold``. Threshold may be null when an
+    analyzer is rule-driven rather than numeric-threshold-driven.
+    """
+    return {
+        "count": len(get_registered_analyzers()),
+        "analyzers": get_analyzer_metadata(),
+    }
 
 
 @app.post("/api/scan", response_model=ScanResponse)

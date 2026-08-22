@@ -7,8 +7,10 @@ from pathlib import Path
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
 from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
+from app.analyzers.nesting_depth import NestingDepthAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
 from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
+from app.analyzers.testing_debt import TestingDebtAnalyzer
 from app.models.finding import Finding
 from app.security import (
     RepositoryValidationError,
@@ -21,12 +23,35 @@ from app.security import (
 
 
 def get_registered_analyzers() -> list[Analyzer]:
-    """Return all analyzers eligible to run against the target repository."""
+    """Return all analyzers eligible to run against the target repository.
+
+    Order is preserved for deterministic output: analyzers run in the
+    order they appear here, and finding IDs are stable across runs.
+    """
     return [
         CommentMarkersAnalyzer(),
         OversizedFilesAnalyzer(),
         OversizedFunctionsAnalyzer(),
         CyclomaticComplexityAnalyzer(),
+        NestingDepthAnalyzer(),
+        TestingDebtAnalyzer(),
+    ]
+
+
+def get_analyzer_metadata() -> list[dict]:
+    """Return public metadata for every registered analyzer.
+
+    Consumers (UI, CI, integrations) can introspect the analyzer
+    pipeline without importing analyzer modules directly.
+    """
+    return [
+        {
+            "name": analyzer.name,
+            "analyzer_id": analyzer.name,
+            "category": "general",
+            "threshold": getattr(analyzer, "threshold", None),
+        }
+        for analyzer in get_registered_analyzers()
     ]
 
 

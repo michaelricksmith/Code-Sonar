@@ -1,53 +1,63 @@
-"""Repository scanning service — orchestrates analyzers."""
+﻿"""Repository scanning service. Orchestrates analyzers with security gates."""
+
+from __future__ import annotations
 
 from pathlib import Path
 
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
 from app.models.finding import Finding
+from app.security import (
+    RepositoryValidationError,
+    assert_within_scan_limits,
+    is_safe_to_read,
+    redact_secrets,
+    truncate_evidence,
+    validate_repo_path,
+)
 
 
 def get_registered_analyzers() -> list[Analyzer]:
-    """Return list of all registered analyzers.
-    
-    To add a new analyzer:
-    1. Create analyzer class inheriting from Analyzer
-    2. Add instance to the list returned here
-    """
+    """Return all analyzers eligible to run against the target repository."""
     return [
         CommentMarkersAnalyzer(),
-        # Add more analyzers here as they're built
     ]
 
 
-def scan_repository(repo_path: Path) -> list[Finding]:
-    """Scan repository with all registered analyzers.
-    
-    Args:
-        repo_path: Path to repository root directory
-        
-    Returns:
-        Aggregated findings from all analyzers
+def _scan_path(repo_path: Path) -> list[Finding]:
+    """Run all analyzers against an already-validated repo path.
+
+    The analyzers themselves do their own file walks; the service is
+    responsible only for: (1) calling each analyzer, (2) enforcing the
+    file-count/size caps, (3) redaction and truncation of evidence.
     """
-    # Ensure path is resolved and exists
-    repo_path = repo_path.resolve()
-    if not repo_path.exists():
-        raise ValueError(f"Repository path does not exist: {repo_path}")
-    
-    if not repo_path.is_dir():
-        raise ValueError(f"Repository path is not a directory: {repo_path}")
-    
-    # Run all analyzers
-    all_findings: list[Finding] = []
-    analyzers = get_registered_analyzers()
-    
-    for analyzer in analyzers:
+    file_count = 0
+    total_size = 0
+    for path in repo_path.rglob("*"):
+        if not path.is_file():
+            continue
+        if not is_safe_to_read(path, repo_path):
+            continue
         try:
-            findings = analyzer.analyze(repo_path)
-            all_findings.extend(findings)
-        except Exception as e:
-            # Log error but continue with other analyzers
-            # In production, this should use proper logging
-            print(f"Analyzer {analyzer.name} failed: {e}")
-    
-    return all_findings
+            total_size += path.stat().st_size
+        except OSError:
+            continue
+        file_count += 1
+        assert_within_scan_limits(file_count, total_size)
+
+    findings: list[Finding] = []
+    for analyzer in get_registered_analyzers():
+        try:
+            produced = analyzer.analyze(repo_path)
+        except Exception:
+            continue
+        for finding in produced:
+            finding.evidence = truncate_evidence(redact_secrets(finding.evidence or ""))
+            findings.append(finding)
+    return findings
+
+
+def scan_repository(repo_path) -> list[Finding]:
+    """Validate, scan, and return aggregated findings from all analyzers."""
+    resolved = validate_repo_path(repo_path)
+    return _scan_path(resolved)

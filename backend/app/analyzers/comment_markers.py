@@ -171,7 +171,7 @@ class CommentMarkersAnalyzer(Analyzer):
                         
                         # Create finding
                         finding = Finding(
-                            id=f"finding_{uuid.uuid4().hex[:12]}",
+                            id=f"finding_{marker_type.lower()}_{hash((file_path.as_posix(), line_num)) & 0xFFFFFFFF:08x}",
                             rule_id=f"comment_markers:{marker_type.lower()}",
                             category=FindingCategory.MAINTAINABILITY,
                             severity=config["severity"],

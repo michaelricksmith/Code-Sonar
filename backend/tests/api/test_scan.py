@@ -42,7 +42,6 @@ class TestHealthEndpoint:
         assert data["version"] == "0.1.0"
 
 
-@pytest.mark.skip(reason="Waiting for /api/scan endpoint implementation")
 class TestScanEndpoint:
     """Test suite for /api/scan endpoint."""
 

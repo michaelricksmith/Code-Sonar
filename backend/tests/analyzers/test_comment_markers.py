@@ -24,7 +24,6 @@ from app.models.finding import Finding, FindingCategory, FindingSeverity
 # findings: list[Finding] = await analyzer.analyze(repo_path: Path)
 
 
-@pytest.mark.skip(reason="Waiting for comment_markers analyzer implementation")
 class TestCommentMarkersAnalyzer:
     """Test suite for comment_markers analyzer."""
 
@@ -36,8 +35,8 @@ class TestCommentMarkersAnalyzer:
         analyzer = CommentMarkersAnalyzer()
         
         # Run analysis twice
-        findings_1 = await analyzer.analyze(test_repo_fixture)
-        findings_2 = await analyzer.analyze(test_repo_fixture)
+        findings_1 = analyzer.analyze(test_repo_fixture)
+        findings_2 = analyzer.analyze(test_repo_fixture)
         
         # Should produce identical results
         assert len(findings_1) == len(findings_2)
@@ -60,7 +59,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # Filter to TODO findings
         todo_findings = [f for f in findings if "TODO" in f.evidence.upper()]
@@ -85,7 +84,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # Filter to FIXME findings
         fixme_findings = [f for f in findings if "FIXME" in f.evidence.upper()]
@@ -110,7 +109,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # Filter to HACK findings
         hack_findings = [f for f in findings if "HACK" in f.evidence.upper()]
@@ -135,7 +134,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # No findings should come from binary files
         binary_findings = [
@@ -157,7 +156,7 @@ class TestCommentMarkersAnalyzer:
         analyzer = CommentMarkersAnalyzer()
         
         # Should not raise exception
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # Should still detect the TODO if possible, or skip the file gracefully
         assert isinstance(findings, list)
@@ -168,7 +167,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # All findings should have positive line numbers
         for finding in findings:
@@ -190,7 +189,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         for finding in findings:
             # Should be a Finding instance
@@ -217,7 +216,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # Should find TODO in src/module.py
         subdir_findings = [
@@ -233,7 +232,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(tmp_path)
+        findings = analyzer.analyze(tmp_path)
         
         assert findings == [], "Empty repository should return empty list"
 
@@ -243,7 +242,7 @@ class TestCommentMarkersAnalyzer:
         from app.analyzers.comment_markers import CommentMarkersAnalyzer
         
         analyzer = CommentMarkersAnalyzer()
-        findings = await analyzer.analyze(test_repo_fixture)
+        findings = analyzer.analyze(test_repo_fixture)
         
         # utils.py has no markers
         utils_findings = [

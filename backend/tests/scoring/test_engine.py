@@ -14,112 +14,63 @@ import pytest
 from app.models.finding import Finding
 
 
-@pytest.mark.skip(reason="Waiting for scoring engine implementation")
 class TestScoringEngine:
     """Test suite for scoring engine (stub for future implementation)."""
 
     def test_deterministic_scoring(self, sample_findings_fixture):
-        """Test that scoring the same findings twice produces identical score."""
-        # from app.scoring.engine import ScoringEngine
-        # 
-        # engine = ScoringEngine()
-        # 
-        # score_1 = engine.calculate_score(sample_findings_fixture)
-        # score_2 = engine.calculate_score(sample_findings_fixture)
-        # 
-        # assert score_1 == score_2
-        pass
+        from app.scoring.engine import calculate_score
+        r1 = calculate_score(sample_findings_fixture)
+        r2 = calculate_score(sample_findings_fixture)
+        assert r1.score == r2.score
+        assert r1.grade == r2.grade
+        assert r1.total_debt_points == r2.total_debt_points
 
-    def test_score_range_0_to_1000(self, sample_findings_fixture):
-        """Test that scores are normalized to 0-1000 range."""
-        # from app.scoring.engine import ScoringEngine
-        # 
-        # engine = ScoringEngine()
-        # score = engine.calculate_score(sample_findings_fixture)
-        # 
-        # assert 0 <= score <= 1000
-        pass
+    def test_score_range_300_to_850(self, sample_findings_fixture):
+        from app.scoring.engine import calculate_score
+        r = calculate_score(sample_findings_fixture)
+        assert 300 <= r.score <= 850
 
     def test_empty_findings_returns_perfect_score(self):
-        """Test that no findings results in perfect score (e.g., 1000)."""
-        # from app.scoring.engine import ScoringEngine
-        # 
-        # engine = ScoringEngine()
-        # score = engine.calculate_score([])
-        # 
-        # assert score == 1000  # Perfect score
-        pass
+        from app.scoring.engine import calculate_score
+        r = calculate_score([])
+        assert r.score == 850
+        assert r.grade == "A"
 
-    def test_debt_points_affect_score(self, sample_findings_fixture):
-        """Test that higher debt points result in lower score."""
-        # from app.scoring.engine import ScoringEngine
-        # 
-        # engine = ScoringEngine()
-        # 
-        # # Score with sample findings
-        # score_with_findings = engine.calculate_score(sample_findings_fixture)
-        # 
-        # # Score with no findings (perfect)
-        # score_perfect = engine.calculate_score([])
-        # 
-        # assert score_with_findings < score_perfect
-        pass
+    def test_debt_points_lower_score(self, sample_findings_fixture):
+        from app.scoring.engine import calculate_score
+        with_findings = calculate_score(sample_findings_fixture)
+        perfect = calculate_score([])
+        assert with_findings.score < perfect.score
 
-    def test_severity_affects_score(self):
-        """Test that severity impacts score calculation."""
-        # from app.scoring.engine import ScoringEngine
-        # from app.models.finding import FindingSeverity
-        # 
-        # engine = ScoringEngine()
-        # 
-        # # Create two identical findings except severity
-        # finding_info = sample_findings_fixture[0].model_copy()
-        # finding_info.severity = FindingSeverity.INFO
-        # 
-        # finding_critical = sample_findings_fixture[0].model_copy()
-        # finding_critical.severity = FindingSeverity.CRITICAL
-        # finding_critical.id = "finding_critical"
-        # 
-        # score_info = engine.calculate_score([finding_info])
-        # score_critical = engine.calculate_score([finding_critical])
-        # 
-        # # Critical should impact score more than info
-        # assert score_critical < score_info
-        pass
+    def test_severity_affects_score(self, sample_findings_fixture):
+        from app.scoring.engine import calculate_score
+        from app.models.finding import FindingSeverity
+        info = sample_findings_fixture[0].model_copy(deep=True)
+        info.severity = FindingSeverity.INFO
+        critical = sample_findings_fixture[0].model_copy(deep=True)
+        critical.severity = FindingSeverity.CRITICAL
+        critical.id = "finding_critical"
+        r_info = calculate_score([info])
+        r_critical = calculate_score([critical])
+        assert r_critical.score < r_info.score
 
-    def test_category_weighting(self, sample_findings_fixture):
-        """Test that different categories can have different weights."""
-        # from app.scoring.engine import ScoringEngine
-        # from app.models.finding import FindingCategory
-        # 
-        # engine = ScoringEngine()
-        # 
-        # # Create findings in different categories
-        # finding_security = sample_findings_fixture[0].model_copy()
-        # finding_security.category = FindingCategory.SECURITY
-        # finding_security.id = "security_001"
-        # 
-        # finding_maintainability = sample_findings_fixture[0].model_copy()
-        # finding_maintainability.category = FindingCategory.MAINTAINABILITY
-        # finding_maintainability.id = "maintainability_001"
-        # 
-        # # Scores may differ based on category weighting
-        # score_security = engine.calculate_score([finding_security])
-        # score_maintainability = engine.calculate_score([finding_maintainability])
-        # 
-        # # Test that scoring handles both categories
-        # assert 0 <= score_security <= 1000
-        # assert 0 <= score_maintainability <= 1000
-        pass
+    def test_category_weighting_runs(self, sample_findings_fixture):
+        from app.scoring.engine import calculate_score
+        from app.models.finding import FindingCategory
+        sec = sample_findings_fixture[0].model_copy(deep=True)
+        sec.category = FindingCategory.SECURITY
+        sec.id = "security_001"
+        maint = sample_findings_fixture[0].model_copy(deep=True)
+        maint.category = FindingCategory.MAINTAINABILITY
+        maint.id = "maintainability_001"
+        r_sec = calculate_score([sec])
+        r_maint = calculate_score([maint])
+        assert 300 <= r_sec.score <= 850
+        assert 300 <= r_maint.score <= 850
 
-    def test_score_breakdown_by_category(self, sample_findings_fixture):
-        """Test that scoring engine provides breakdown by category."""
-        # from app.scoring.engine import ScoringEngine
-        # 
-        # engine = ScoringEngine()
-        # result = engine.calculate_score_detailed(sample_findings_fixture)
-        # 
-        # assert "overall_score" in result
-        # assert "breakdown" in result
-        # assert "by_category" in result["breakdown"]
-        pass
+    def test_breakdown_has_category_scores(self, sample_findings_fixture):
+        from app.scoring.engine import calculate_score
+        r = calculate_score(sample_findings_fixture)
+        assert "complexity" in r.category_scores
+        assert "security" in r.category_scores
+        assert "maintainability" in r.category_scores

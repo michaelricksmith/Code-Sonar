@@ -6,6 +6,8 @@ from pathlib import Path
 
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
+from app.analyzers.oversized_files import OversizedFilesAnalyzer
+from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
 from app.models.finding import Finding
 from app.security import (
     RepositoryValidationError,
@@ -21,6 +23,8 @@ def get_registered_analyzers() -> list[Analyzer]:
     """Return all analyzers eligible to run against the target repository."""
     return [
         CommentMarkersAnalyzer(),
+        OversizedFilesAnalyzer(),
+        OversizedFunctionsAnalyzer(),
     ]
 
 

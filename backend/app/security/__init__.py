@@ -49,6 +49,23 @@ BINARY_EXTENSIONS: frozenset = frozenset({
     ".ttf", ".woff", ".woff2", ".eot",
 })
 
+# Generated dependency-metadata files. Filename-specific (not extension-only)
+# so legitimate .json/.yaml source and config files remain analyzable.
+LOCKFILE_NAMES: frozenset = frozenset({
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "bun.lockb",
+    "poetry.lock",
+    "Pipfile.lock",
+    "composer.lock",
+    "Cargo.lock",
+    "Gemfile.lock",
+    "pdm.lock",
+    "uv.lock",
+})
+
 
 class RepositoryValidationError(ValueError):
     """Raised when a repository path fails security validation."""
@@ -113,6 +130,11 @@ def is_binary_content(path, sniff_bytes=8192):
     except OSError:
         return True
     return b"\x00" in chunk
+
+
+def is_lockfile(path):
+    """Return True for generated dependency-metadata filenames."""
+    return path.name in LOCKFILE_NAMES
 
 
 def is_excluded_directory(path):

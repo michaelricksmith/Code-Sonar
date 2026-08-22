@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
+from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
 from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
 from app.models.finding import Finding
@@ -25,6 +26,7 @@ def get_registered_analyzers() -> list[Analyzer]:
         CommentMarkersAnalyzer(),
         OversizedFilesAnalyzer(),
         OversizedFunctionsAnalyzer(),
+        CyclomaticComplexityAnalyzer(),
     ]
 
 

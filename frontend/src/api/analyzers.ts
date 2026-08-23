@@ -1,7 +1,9 @@
-// Code Sonar — analyzer registry / API client.
+// Code Sonar — analyzer registry / API client + drift API client.
 //
 // Provides a typed surface over the backend's analyzer registry
-// (`GET /api/analyzers`) and scan endpoint (`POST /api/scan`).
+// (`GET /api/analyzers`), scan endpoint (`POST /api/scan`),
+// history endpoints (`GET /api/history/list`, `GET /api/history/latest`,
+// `GET /api/history/{scan_id}`), and drift endpoint (`GET /api/drift`).
 
 export type Severity = "info" | "warning" | "error" | "critical";
 
@@ -12,6 +14,13 @@ export type Category =
   | "duplication"
   | "testing"
   | "maintainability";
+
+export type DriftClassification =
+  | "new"
+  | "resolved"
+  | "persistent"
+  | "worsened"
+  | "improved";
 
 export interface AnalyzerMetadata {
   name: string;
@@ -90,6 +99,72 @@ export interface SortState {
   direction: "asc" | "desc";
 }
 
+// --- Drift types (Checkpoint 6, Lane 3) -------------------------------------
+
+export interface DriftScanRef {
+  scan_id: string;
+  scanned_at: string;
+  score: number;
+  grade: string;
+  total_debt_points: number;
+  finding_count: number;
+}
+
+export interface DriftSummary {
+  score_delta: number;
+  debt_delta: number;
+  finding_delta: number;
+  new_count: number;
+  resolved_count: number;
+  persistent_count: number;
+  worsened_count: number;
+  improved_count: number;
+  baseline: DriftScanRef;
+  current: DriftScanRef;
+}
+
+export interface DriftFinding {
+  finding_id: string;
+  classification: DriftClassification;
+  rule_id: string;
+  category: Category;
+  analyzer: string;
+  severity: Severity;
+  confidence: number;
+  file_path: string;
+  line_start: number | null;
+  line_end: number | null;
+  symbol: string | null;
+  debt_points: number;
+  baseline_severity: Severity | null;
+  baseline_debt_points: number | null;
+  baseline_risk: number | null;
+  current_severity: Severity | null;
+  current_debt_points: number | null;
+  current_risk: number | null;
+  message: string;
+  suggestion: string | null;
+  risk_delta: number;
+}
+
+export interface DriftBucketCounts {
+  new: number;
+  resolved: number;
+  persistent: number;
+  worsened: number;
+  improved: number;
+  score_delta: number;
+  debt_delta: number;
+}
+
+export interface DriftResult {
+  summary: DriftSummary;
+  findings: DriftFinding[];
+  by_category: Record<string, DriftBucketCounts>;
+  by_analyzer: Record<string, DriftBucketCounts>;
+  by_severity: Record<string, DriftBucketCounts>;
+}
+
 const API_BASE = "/api";
 
 export async function fetchAnalyzers(): Promise<AnalyzerMetadata[]> {
@@ -120,6 +195,21 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
     throw new Error(data.detail ?? `Scan failed (HTTP ${res.status})`);
   }
   return data as ScanResponse;
+}
+
+export async function fetchDrift(
+  repoPath: string,
+  opts: { from_scan_id?: string; to_scan_id?: string } = {},
+): Promise<DriftResult> {
+  const params = new URLSearchParams({ repo_path: repoPath });
+  if (opts.from_scan_id) params.set("from_scan_id", opts.from_scan_id);
+  if (opts.to_scan_id) params.set("to_scan_id", opts.to_scan_id);
+  const res = await fetch(`${API_BASE}/drift?${params.toString()}`);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail ?? `Drift fetch failed (HTTP ${res.status})`);
+  }
+  return data as DriftResult;
 }
 
 export function severityRank(severity: Severity): number {
@@ -167,4 +257,12 @@ export const CATEGORIES: Category[] = [
   "duplication",
   "testing",
   "maintainability",
+];
+
+export const DRIFT_CLASSIFICATIONS: DriftClassification[] = [
+  "new",
+  "resolved",
+  "persistent",
+  "worsened",
+  "improved",
 ];

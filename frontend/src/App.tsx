@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   fetchAnalyzers,
+  fetchDrift,
   fetchHealth,
   runScan,
 } from "./api/analyzers";
 import type {
   AnalyzerMetadata,
+  DriftResult,
   Finding,
   FilterState,
   ScanResponse,
@@ -15,6 +17,7 @@ import type {
 
 import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
 import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
+import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
 import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
@@ -54,6 +57,9 @@ function App() {
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [analyzers, setAnalyzers] = useState<AnalyzerMetadata[]>([]);
+  const [drift, setDrift] = useState<DriftResult | null>(null);
+  const [driftLoading, setDriftLoading] = useState<boolean>(false);
+  const [driftError, setDriftError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHealth()
@@ -71,6 +77,8 @@ function App() {
     setScanning(true);
     setError(null);
     setResult(null);
+    setDrift(null);
+    setDriftError(null);
     try {
       const data = await runScan({ repo_path: repoPath });
       setResult(data);
@@ -78,6 +86,29 @@ function App() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function onShowDrift(): Promise<void> {
+    setDriftLoading(true);
+    setDriftError(null);
+    try {
+      const data = await fetchDrift(repoPath);
+      setDrift(data);
+    } catch (e) {
+      // Backend returns 400/404 when fewer than 2 scans exist; treat
+      // as "no drift yet" rather than an error in the UI.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("HTTP 400") || msg.includes("HTTP 404")) {
+        setDrift(null);
+        setDriftError(
+          "Need at least two scans of this repository to compute drift. Run another scan first.",
+        );
+      } else {
+        setDriftError(msg);
+      }
+    } finally {
+      setDriftLoading(false);
     }
   }
 
@@ -196,6 +227,31 @@ function App() {
               result={result}
               analyzerCount={analyzers.length}
             />
+
+            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Drift since previous scan</h2>
+                  <p className="text-xs text-slate-400">
+                    Compare the current scan against the most recent prior scan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onShowDrift}
+                  disabled={driftLoading}
+                  className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+                >
+                  {driftLoading ? "Loading drift…" : "Compare with previous scan"}
+                </button>
+              </div>
+              {driftError && (
+                <div className="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-2 text-sm text-amber-200">
+                  {driftError}
+                </div>
+              )}
+              {drift && <DriftView drift={drift} />}
+            </section>
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
               <h2 className="text-lg font-semibold mb-4">Category scores</h2>

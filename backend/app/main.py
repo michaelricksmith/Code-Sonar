@@ -1,12 +1,21 @@
-﻿"""FastAPI application entry point."""
+"""FastAPI application entry point."""
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.drift import compute_drift
+from app.history import (
+    InMemoryHistoryStore,
+    JsonlHistoryStore,
+    ScanRecord,
+    build_scan_record,
+    compute_repository_id,
+    display_name,
+)
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.services.repository import (
@@ -29,6 +38,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Process-wide history store. The MVP uses a single JSONL file in
+# the user's data dir; tests inject an InMemoryHistoryStore via
+# ``app.dependency_overrides`` (FastAPI) or by replacing this module
+# attribute before startup.
+_history_store: JsonlHistoryStore | InMemoryHistoryStore = JsonlHistoryStore()
+
+
+def get_history_store() -> JsonlHistoryStore | InMemoryHistoryStore:
+    """Return the process-wide history store. Pluggable for tests."""
+    return _history_store
+
+
+def set_history_store(store: JsonlHistoryStore | InMemoryHistoryStore) -> None:
+    """Replace the process-wide history store. Used by tests."""
+    global _history_store
+    _history_store = store
 
 
 class ScanRequest(BaseModel):
@@ -74,6 +101,44 @@ async def list_analyzers() -> dict[str, Any]:
     }
 
 
+def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
+    return {
+        "scan_id": record.scan_id,
+        "repository_id": record.repository_id,
+        "repository_path": record.repository_path,
+        "scanned_at": record.scanned_at,
+        "schema_version": record.schema_version,
+        "score": record.score,
+        "grade": record.grade,
+        "total_debt_points": record.total_debt_points,
+        "finding_count": record.finding_count,
+        "category_scores": record.category_scores,
+        "severity_distribution": record.severity_distribution,
+        "findings_by_category": record.findings_by_category,
+        "findings_source_breakdown": record.findings_source_breakdown,
+        "findings": [f.to_dict() for f in record.findings],
+    }
+
+
+def _record_summary(record: ScanRecord) -> dict[str, Any]:
+    """Return the summary fields only (no findings snapshot)."""
+    return {
+        "scan_id": record.scan_id,
+        "repository_id": record.repository_id,
+        "repository_path": record.repository_path,
+        "scanned_at": record.scanned_at,
+        "schema_version": record.schema_version,
+        "score": record.score,
+        "grade": record.grade,
+        "total_debt_points": record.total_debt_points,
+        "finding_count": record.finding_count,
+        "category_scores": record.category_scores,
+        "severity_distribution": record.severity_distribution,
+        "findings_by_category": record.findings_by_category,
+        "findings_source_breakdown": record.findings_source_breakdown,
+    }
+
+
 @app.post("/api/scan", response_model=ScanResponse)
 async def scan(request: ScanRequest) -> ScanResponse:
     try:
@@ -90,6 +155,24 @@ async def scan(request: ScanRequest) -> ScanResponse:
         raise HTTPException(status_code=500, detail="Scan failed: " + str(exc))
 
     scanned_at = datetime.now(timezone.utc).isoformat()
+
+    # Persist the scan into the history store. Failures are logged
+    # but do not break the live scan response (a history-store write
+    # failure is a side effect, not a scan failure).
+    try:
+        record = build_scan_record(
+            repository_id=compute_repository_id(repo_path),
+            repository_path=display_name(repo_path),
+            findings=findings,
+            scoring=scoring_result,
+            scanned_at=scanned_at,
+        )
+        get_history_store().append(record)
+    except Exception:
+        # History is best-effort; never block the scan on a write
+        # failure. Future enhancement: structured logging.
+        pass
+
     return ScanResponse(
         repository=str(repo_path),
         scanned_at=scanned_at,
@@ -113,3 +196,131 @@ async def scan(request: ScanRequest) -> ScanResponse:
             "by_category": scoring_result.findings_by_category,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# History + drift API (Checkpoint 6, Lane 1 + Lane 2)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/history/list")
+async def list_history(
+    repository_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Return a paginated list of historical scans (summaries only).
+
+    Ordered ascending by ``scanned_at`` then ``scan_id`` so the
+    response is deterministic.
+    """
+    records = get_history_store().load_all(repository_id)
+    if limit and len(records) > limit:
+        records = records[-limit:]
+    return {
+        "count": len(records),
+        "scans": [_record_summary(r) for r in records],
+    }
+
+
+@app.get("/api/history/latest")
+async def history_latest(
+    repo_path: str = Query(description="Repository path used to identify the scan history"),
+) -> dict[str, Any]:
+    """Return the most recent scan for ``repo_path`` (full record)."""
+    try:
+        repo_path_obj = validate_repo_path(repo_path)
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    record = get_history_store().latest(compute_repository_id(repo_path_obj))
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No historical scan for that repository",
+        )
+    return _record_to_dict(record)
+
+
+@app.get("/api/history/{scan_id}")
+async def history_get(scan_id: str) -> dict[str, Any]:
+    """Return the full record for a specific ``scan_id``."""
+    record = get_history_store().get(scan_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scan with scan_id={scan_id!r}",
+        )
+    return _record_to_dict(record)
+
+
+@app.get("/api/drift")
+async def drift(
+    repo_path: str = Query(description="Repository path whose history to compare"),
+    from_scan_id: str | None = Query(default=None),
+    to_scan_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Compute drift between two historical scans of ``repo_path``.
+
+    Defaults: ``from_scan_id`` = second-most-recent, ``to_scan_id`` =
+    most-recent. Returns the full DriftResult (aggregate summary +
+    per-finding classifications + drill-downs by category, analyzer,
+    and severity).
+    """
+    try:
+        repo_path_obj = validate_repo_path(repo_path)
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    store = get_history_store()
+    records = store.load_all(compute_repository_id(repo_path_obj))
+    if not records:
+        raise HTTPException(
+            status_code=404,
+            detail="No historical scan for that repository",
+        )
+
+    if to_scan_id is None:
+        if len(records) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Need at least two scans to compute drift; "
+                    "found only one"
+                ),
+            )
+        current = records[-1]
+        baseline = records[-2]
+    else:
+        current = cast(ScanRecord, next((r for r in records if r.scan_id == to_scan_id), None))
+        if current is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No scan with scan_id={to_scan_id!r}",
+            )
+        if from_scan_id is None:
+            # Use the scan immediately preceding ``current`` in time.
+            earlier = [r for r in records if r.scan_id != current.scan_id]
+            if not earlier:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Need at least two scans to compute drift; "
+                        "found only the specified scan"
+                    ),
+                )
+            baseline = earlier[-1]
+        else:
+            baseline = cast(
+                ScanRecord,
+                next(
+                    (r for r in records if r.scan_id == from_scan_id),
+                    None,
+                ),
+            )
+            if baseline is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No scan with scan_id={from_scan_id!r}",
+                )
+
+    result = compute_drift(baseline, current)
+    return result.to_dict()

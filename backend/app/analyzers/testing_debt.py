@@ -203,12 +203,27 @@ class TestingDebtAnalyzer(Analyzer):
         line_count: int,
     ) -> Finding:
         severity, debt_points = _severity_for_lines(line_count)
+        # Bucket the line count so the ID changes when the file
+        # crosses a severity boundary. Same file at 99 lines vs 100
+        # lines is the SAME finding (warning) -> PERSISTENT, but
+        # 99 -> 350 escalates to CRITICAL -> the prior ID is RESOLVED
+        # and a new ID is emitted. Buckets:
+        #   0 -> <=100    (warning)
+        #   1 -> 101-300  (error)
+        #   2 -> >300     (critical)
+        if line_count > 300:
+            lines_bucket = 2
+        elif line_count > 100:
+            lines_bucket = 1
+        else:
+            lines_bucket = 0
         finding_id = (
             "finding_testing_debt_"
-            f"{hash((rel, 'untested-module')) & 0xFFFFFFFF:08x}"
+            f"{hash((rel, 'untested-module', lines_bucket)) & 0xFFFFFFFF:08x}"
         )
         evidence = (
             f"module={rel} lines={line_count} "
+            f"lines_bucket={lines_bucket} "
             "expected_test_file=test_<module>.py or <module>_test.py"
         )
         message = (
@@ -238,6 +253,7 @@ class TestingDebtAnalyzer(Analyzer):
             metadata={
                 "module": rel,
                 "lines": line_count,
+                "lines_bucket": lines_bucket,
                 "rule": "untested-module",
             },
         )

@@ -58,6 +58,11 @@ export interface ScanResponse {
   category_scores: Record<Category, number>;
   severity_distribution: Record<Severity, number>;
   findings_by_category: Record<Category, number>;
+  findings_source_breakdown?: {
+    source: number;
+    test: number;
+    fixture: number;
+  };
   findings: Finding[];
   summary: ScanSummary;
 }

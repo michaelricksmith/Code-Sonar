@@ -17,6 +17,7 @@ import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
 import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
+import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
 
 const DEFAULT_REPO =
@@ -157,11 +158,11 @@ function App() {
                           ? "text-emerald-400"
                           : result.grade === "B"
                             ? "text-lime-400"
-                            : result.grade === "C"
-                              ? "text-yellow-400"
-                              : result.grade === "D"
-                                ? "text-orange-400"
-                                : "text-rose-500"
+                              : result.grade === "C"
+                                ? "text-yellow-400"
+                                : result.grade === "D"
+                                  ? "text-orange-400"
+                                  : "text-rose-500"
                       }`}
                     >
                       {result.grade}
@@ -174,44 +175,27 @@ function App() {
                 big={`${result.finding_count}`}
                 sub={`${result.total_debt_points} debt points`}
               />
-              <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-                <div className="text-xs uppercase tracking-wide text-slate-400">
-                  Severity mix
-                </div>
-                <div className="mt-3 space-y-1 text-sm">
-                  {(
-                    Object.keys(result.severity_distribution) as Array<
-                      keyof typeof result.severity_distribution
-                    >
-                  ).map((s) => (
-                    <div
-                      key={s}
-                      className="flex items-center justify-between"
-                    >
-                      <span
-                        className={
-                          "inline-flex rounded px-2 py-0.5 text-xs ring-1 " +
-                          ({
-                            info: "bg-sky-500/20 text-sky-300 ring-sky-500/40",
-                            warning:
-                              "bg-amber-500/20 text-amber-300 ring-amber-500/40",
-                            error:
-                              "bg-rose-500/20 text-rose-300 ring-rose-500/40",
-                            critical:
-                              "bg-fuchsia-600/30 text-fuchsia-200 ring-fuchsia-500/60",
-                          }[s])
-                        }
-                      >
-                        {s}
-                      </span>
-                      <span className="text-slate-200">
-                        {result.severity_distribution[s]}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <SummaryCard
+                title="Source breakdown"
+                big={`${
+                  (result.findings_source_breakdown?.source ?? 0) +
+                  (result.findings_source_breakdown?.test ?? 0) +
+                  (result.findings_source_breakdown?.fixture ?? 0)
+                }`}
+                sub={
+                  <span className="text-xs text-slate-400">
+                    source {result.findings_source_breakdown?.source ?? 0} ·
+                    test {result.findings_source_breakdown?.test ?? 0} ·
+                    fixture {result.findings_source_breakdown?.fixture ?? 0}
+                  </span>
+                }
+              />
             </section>
+
+            <ScoreChangeCallout
+              result={result}
+              analyzerCount={analyzers.length}
+            />
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
               <h2 className="text-lg font-semibold mb-4">Category scores</h2>

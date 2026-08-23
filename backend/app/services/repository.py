@@ -7,6 +7,7 @@ from pathlib import Path
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
 from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
+from app.analyzers.dead_code import DeadCodeAnalyzer
 from app.analyzers.nesting_depth import NestingDepthAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
 from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
@@ -36,6 +37,7 @@ def get_registered_analyzers() -> list[Analyzer]:
         NestingDepthAnalyzer(),
         SecretsAnalyzer(),
         TestingDebtAnalyzer(),
+        DeadCodeAnalyzer(),
     ]
 
 

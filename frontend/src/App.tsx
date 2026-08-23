@@ -1,378 +1,296 @@
 import { useEffect, useMemo, useState } from "react";
-
 import {
-  fetchAnalyzers,
-  fetchDrift,
-  fetchHealth,
-  runScan,
-} from "./api/analyzers";
-import type {
-  AnalyzerMetadata,
-  DriftResult,
-  Finding,
-  FilterState,
-  ScanResponse,
-  SortState,
-} from "./api/analyzers";
+  Activity,
+  History,
+  Settings as SettingsIcon,
+  LayoutDashboard,
+  Search,
+  ScanLine,
+  ListChecks,
+  Flame,
+  GitCompare,
+} from "lucide-react";
+import {
+  BrowserRouter,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { useScan } from "@/state/useScan";
+import { useDrift } from "@/state/useDrift";
+import { OverviewPage } from "@/pages/Overview";
+import { FindingsPage } from "@/pages/Findings";
+import { RiskHotspotsPage } from "@/pages/RiskHotspots";
+import { HistoryPage } from "@/pages/History";
+import { DriftPage } from "@/pages/Drift";
+import { SettingsPage } from "@/pages/Settings";
 
-import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
-import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
-import { DriftView } from "./components/DriftView";
-import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
-import { FilterChips } from "./components/FilterChips";
-import { RiskHotspots } from "./components/RiskHotspots";
-import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
-import { SortableFindingsTable } from "./components/SortableFindingsTable";
+const NAV = [
+  { to: "/", label: "Overview", icon: LayoutDashboard },
+  { to: "/findings", label: "Findings", icon: ListChecks },
+  { to: "/hotspots", label: "Risk Hotspots", icon: Flame },
+  { to: "/history", label: "History", icon: History },
+  { to: "/drift", label: "Drift", icon: GitCompare },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
+];
 
-const DEFAULT_REPO =
-  "C:\\Users\\bookm\\.openclaw\\workspace\\code-sonar";
-
-const EMPTY_FILTER: FilterState = {
-  severities: new Set(),
-  categories: new Set(),
-  analyzers: new Set(),
-  search: "",
-};
-
-const DEFAULT_SORT: SortState = { key: "severity", direction: "desc" };
-
-function matchesSearch(f: Finding, search: string): boolean {
-  if (!search.trim()) return true;
-  const needle = search.trim().toLowerCase();
+function Brand() {
   return (
-    f.file_path.toLowerCase().includes(needle) ||
-    (f.symbol ?? "").toLowerCase().includes(needle) ||
-    f.evidence.toLowerCase().includes(needle) ||
-    f.message.toLowerCase().includes(needle) ||
-    f.rule_id.toLowerCase().includes(needle)
-  );
-}
-
-function App() {
-  const [repoPath, setRepoPath] = useState<string>(DEFAULT_REPO);
-  const [health, setHealth] = useState<string>("checking…");
-  const [scanning, setScanning] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ScanResponse | null>(null);
-  const [selected, setSelected] = useState<Finding | null>(null);
-  const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER);
-  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
-  const [analyzers, setAnalyzers] = useState<AnalyzerMetadata[]>([]);
-  const [drift, setDrift] = useState<DriftResult | null>(null);
-  const [driftLoading, setDriftLoading] = useState<boolean>(false);
-  const [driftError, setDriftError] = useState<string | null>(null);
-  const [fileFilter, setFileFilter] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchHealth()
-      .then((d) => setHealth(d.status))
-      .catch(() => setHealth("unreachable"));
-  }, []);
-
-  useEffect(() => {
-    fetchAnalyzers()
-      .then(setAnalyzers)
-      .catch(() => setAnalyzers([]));
-  }, [result]);
-
-  async function onScan(): Promise<void> {
-    setScanning(true);
-    setError(null);
-    setResult(null);
-    setDrift(null);
-    setDriftError(null);
-    try {
-      const data = await runScan({ repo_path: repoPath });
-      setResult(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function onShowDrift(): Promise<void> {
-    setDriftLoading(true);
-    setDriftError(null);
-    try {
-      const data = await fetchDrift(repoPath);
-      setDrift(data);
-    } catch (e) {
-      // Backend returns 400/404 when fewer than 2 scans exist; treat
-      // as "no drift yet" rather than an error in the UI.
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("HTTP 400") || msg.includes("HTTP 404")) {
-        setDrift(null);
-        setDriftError(
-          "Need at least two scans of this repository to compute drift. Run another scan first.",
-        );
-      } else {
-        setDriftError(msg);
-      }
-    } finally {
-      setDriftLoading(false);
-    }
-  }
-
-  const filtered = useMemo(() => {
-    if (!result) return [] as Finding[];
-    return result.findings.filter((f) => {
-      if (fileFilter !== null && f.file_path !== fileFilter) {
-        return false;
-      }
-      if (filter.severities.size > 0 && !filter.severities.has(f.severity)) {
-        return false;
-      }
-      if (filter.categories.size > 0 && !filter.categories.has(f.category)) {
-        return false;
-      }
-      if (filter.analyzers.size > 0 && !filter.analyzers.has(f.analyzer)) {
-        return false;
-      }
-      if (!matchesSearch(f, filter.search)) {
-        return false;
-      }
-      return true;
-    });
-  }, [result, filter, fileFilter]);
-
-  return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Code Sonar</h1>
-          <p className="text-sm text-slate-400">
-            Credit report for your codebase
-          </p>
-        </div>
-        <div className="text-xs text-slate-500">
-          API: <span className="text-slate-300">{health}</span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-6 py-8 space-y-8">
-        <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-5">
-          <label className="block text-sm font-medium text-slate-300 mb-2">
-            Repository path
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-              placeholder="C:\\path\\to\\repo"
-              spellCheck={false}
-            />
-            <button
-              onClick={onScan}
-              disabled={scanning}
-              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-            >
-              {scanning ? "Scanning…" : "Run scan"}
-            </button>
-          </div>
-          {error && (
-            <div className="mt-3 rounded-md border border-rose-700 bg-rose-900/30 px-3 py-2 text-sm text-rose-200">
-              {error}
-            </div>
-          )}
-        </section>
-
-        {result && (
-          <>
-            <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <SummaryCard
-                title="Score"
-                big={`${result.score}`}
-                sub={
-                  <>
-                    Grade{" "}
-                    <span
-                      className={`font-bold ${
-                        result.grade === "A"
-                          ? "text-emerald-400"
-                          : result.grade === "B"
-                            ? "text-lime-400"
-                              : result.grade === "C"
-                                ? "text-yellow-400"
-                                : result.grade === "D"
-                                  ? "text-orange-400"
-                                  : "text-rose-500"
-                      }`}
-                    >
-                      {result.grade}
-                    </span>
-                  </>
-                }
-              />
-              <SummaryCard
-                title="Findings"
-                big={`${result.finding_count}`}
-                sub={`${result.total_debt_points} debt points`}
-              />
-              <SummaryCard
-                title="Source breakdown"
-                big={`${
-                  (result.findings_source_breakdown?.source ?? 0) +
-                  (result.findings_source_breakdown?.test ?? 0) +
-                  (result.findings_source_breakdown?.fixture ?? 0)
-                }`}
-                sub={
-                  <span className="text-xs text-slate-400">
-                    source {result.findings_source_breakdown?.source ?? 0} ·
-                    test {result.findings_source_breakdown?.test ?? 0} ·
-                    fixture {result.findings_source_breakdown?.fixture ?? 0}
-                  </span>
-                }
-              />
-            </section>
-
-            <ScoreChangeCallout
-              result={result}
-              analyzerCount={analyzers.length}
-            />
-
-            {result.top_hotspots && result.top_hotspots.length > 0 && (
-              <RiskHotspots
-                hotspots={result.top_hotspots}
-                hotspotSummary={{
-                  total_files: result.top_hotspots.length,
-                  files_with_findings: result.findings.length > 0
-                    ? new Set(result.findings.map((f) => f.file_path)).size
-                    : 0,
-                  total_findings: result.finding_count,
-                  total_debt: result.total_debt_points,
-                }}
-                findings={result.findings}
-                onFilterByFile={setFileFilter}
-                activeFileFilter={fileFilter}
-              />
-            )}
-
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">Drift since previous scan</h2>
-                  <p className="text-xs text-slate-400">
-                    Compare the current scan against the most recent prior scan.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onShowDrift}
-                  disabled={driftLoading}
-                  className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-                >
-                  {driftLoading ? "Loading drift…" : "Compare with previous scan"}
-                </button>
-              </div>
-              {driftError && (
-                <div className="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-2 text-sm text-amber-200">
-                  {driftError}
-                </div>
-              )}
-              {drift && <DriftView drift={drift} />}
-            </section>
-
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <h2 className="text-lg font-semibold mb-4">Category scores</h2>
-              <div className="space-y-3">
-                {(
-                  Object.keys(result.category_scores) as Array<
-                    keyof typeof result.category_scores
-                  >
-                ).map((c) => {
-                  const catScore = result.category_scores[c];
-                  const catFindings = result.findings_by_category[c];
-                  return (
-                    <div key={c}>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-300">{c}</span>
-                        <span className="text-slate-400">
-                          {catScore} · {catFindings} findings
-                        </span>
-                      </div>
-                      <div className="mt-1 h-2 rounded-full bg-slate-700">
-                        <div
-                          className="h-2 rounded-full bg-sky-500"
-                          style={{
-                            width: `${Math.max(
-                              0,
-                              Math.min(
-                                100,
-                                ((catScore - 300) / 550) * 100,
-                              ),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <CategoryBreakdownChart
-              findingsByCategory={result.findings_by_category}
-            />
-
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">
-                  Findings ({filtered.length} / {result.findings.length})
-                </h2>
-              </div>
-              <FilterChips
-                findings={result.findings}
-                analyzers={analyzers}
-                filter={filter}
-                onChange={setFilter}
-              />
-              <div className="mt-4">
-                <SortableFindingsTable
-                  findings={filtered}
-                  onSelect={setSelected}
-                  sort={sort}
-                  onSortChange={setSort}
-                />
-              </div>
-            </section>
-
-            <AnalyzerMetadataPanel
-              refreshKey={result ? Date.now() : undefined}
-            />
-
-            <footer className="text-xs text-slate-500">
-              Scanned at {result.scanned_at}
-            </footer>
-          </>
-        )}
-      </main>
-
-      <FindingDetailDrawer finding={selected} onClose={() => setSelected(null)} />
+    <div className="flex items-center gap-2 select-none">
+      <div className="h-8 w-8 rounded-md bg-sonar-steel text-white grid place-items-center font-semibold tracking-tight">
+        CS
+      </div>
+      <div className="flex flex-col leading-tight">
+        <span className="text-base font-semibold tracking-tight text-sonar-graphite">
+          Code Sonar
+        </span>
+        <span className="text-[11px] uppercase tracking-[0.14em] text-sonar-muted">
+          Software Risk Intelligence
+        </span>
+      </div>
     </div>
   );
 }
 
-function SummaryCard({
-  title,
-  big,
-  sub,
+function RepoBar({
+  repoPath,
+  setRepoPath,
+  onScan,
+  onCompare,
+  scanning,
+  hasScan,
+  hasHistory,
 }: {
-  title: string;
-  big: string;
-  sub: React.ReactNode;
+  repoPath: string;
+  setRepoPath: (v: string) => void;
+  onScan: () => void;
+  onCompare: () => void;
+  scanning: boolean;
+  hasScan: boolean;
+  hasHistory: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-      <div className="text-xs uppercase tracking-wide text-slate-400">
-        {title}
+    <Card className="border-sonar-border shadow-none">
+      <CardContent className="p-4 flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="flex-1">
+          <Label htmlFor="repo-path" className="text-xs uppercase tracking-wider text-sonar-muted">
+            Repository path
+          </Label>
+          <div className="relative mt-1.5">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-sonar-muted" />
+            <Input
+              id="repo-path"
+              value={repoPath}
+              onChange={(e) => setRepoPath(e.target.value)}
+              placeholder="C:\path\to\repository"
+              className="pl-9 font-mono text-sm"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  onClick={onScan}
+                  disabled={scanning || !repoPath.trim()}
+                >
+                  <ScanLine className="h-4 w-4" />
+                  {scanning ? "Scanning…" : "Run scan"}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Scan a repository and compute its risk score.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Button
+            variant="outline"
+            onClick={onCompare}
+            disabled={!hasScan || !hasHistory}
+          >
+            <GitCompare className="h-4 w-4" />
+            Compare with previous
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Sidebar() {
+  return (
+    <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:border-sonar-border md:bg-card">
+      <div className="px-5 py-5 border-b border-sonar-border">
+        <Brand />
       </div>
-      <div className="mt-2 text-6xl font-bold text-slate-100">{big}</div>
-      <div className="mt-1 text-sm text-slate-400">{sub}</div>
+      <ScrollArea className="flex-1 px-3 py-4">
+        <nav className="flex flex-col gap-1">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-sonar-steel/10 text-sonar-steel"
+                    : "text-sonar-graphite hover:bg-muted"
+                )
+              }
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </ScrollArea>
+      <div className="border-t border-sonar-border px-5 py-4 text-[11px] uppercase tracking-[0.14em] text-sonar-muted">
+        v0.1.0-beta.1 · private
+      </div>
+    </aside>
+  );
+}
+
+function PageHeader({ title, subtitle, badge }: { title: string; subtitle?: string; badge?: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 pb-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-sonar-graphite">{title}</h1>
+        {subtitle && <p className="text-sm text-sonar-muted mt-1">{subtitle}</p>}
+      </div>
+      {badge && <Badge variant="secondary">{badge}</Badge>}
     </div>
   );
 }
 
-export default App;
+export function AppShell() {
+  const location = useLocation();
+  const {
+    repoPath,
+    setRepoPath,
+    scanResult,
+    scanning,
+    error,
+    history,
+    refreshHistory,
+    runScan,
+    comparePrevious,
+    driftResult,
+    hasScan,
+    hasHistory,
+  } = useScan();
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  const pageMeta = useMemo(() => {
+    const map: Record<string, { title: string; subtitle?: string; badge?: string }> = {
+      "/": { title: "Overview", subtitle: "Risk score, summary, and live deltas.", badge: scanResult?.scan_id ? `Scan ${scanResult.scan_id.slice(0, 8)}` : undefined },
+      "/findings": { title: "Findings", subtitle: "Every finding from the latest scan, with filters.", badge: scanResult ? `${scanResult.finding_count} findings` : undefined },
+      "/hotspots": { title: "Risk Hotspots", subtitle: "Files ranked by deterministic risk score.", badge: scanResult ? `Top ${Math.min(scanResult.top_hotspots?.length ?? 0, 10)}` : undefined },
+      "/history": { title: "History", subtitle: "Past scans for this repository.", badge: history.length > 0 ? `${history.length} scans` : undefined },
+      "/drift": { title: "Drift", subtitle: "What changed since the previous scan.", badge: driftResult ? `Δ ${driftResult.summary.score_delta >= 0 ? "+" : ""}${driftResult.summary.score_delta}` : undefined },
+      "/settings": { title: "Settings", subtitle: "Analyzers, scoring, and storage." },
+    };
+    return map[location.pathname] ?? { title: "Code Sonar" };
+  }, [location.pathname, scanResult, history.length, driftResult]);
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="flex">
+        <Sidebar />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <header className="sticky top-0 z-30 border-b border-sonar-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="px-6 py-4 flex items-center gap-4">
+              <div className="md:hidden">
+                <Brand />
+              </div>
+              <div className="hidden md:flex items-center gap-2 text-xs text-sonar-muted">
+                <Activity className="h-3.5 w-3.5" />
+                <span>Software Risk Intelligence</span>
+                <Separator orientation="vertical" className="mx-2 h-4" />
+                <span>Credit report for your codebase</span>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <Badge variant="outline" className="font-mono text-[11px]">
+                  v0.1.0-beta.1
+                </Badge>
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 px-6 py-6 space-y-6 max-w-[1400px] w-full mx-auto">
+            <PageHeader
+              title={pageMeta.title}
+              subtitle={pageMeta.subtitle}
+              badge={pageMeta.badge}
+            />
+            {location.pathname === "/" && (
+              <RepoBar
+                repoPath={repoPath}
+                setRepoPath={setRepoPath}
+                onScan={runScan}
+                onCompare={comparePrevious}
+                scanning={scanning}
+                hasScan={hasScan}
+                hasHistory={hasHistory}
+              />
+            )}
+            {error && (
+              <Card className="border-destructive/30 bg-destructive/5">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-destructive text-sm">Scan error</CardTitle>
+                  <CardDescription className="font-mono text-xs">{error}</CardDescription>
+                </CardHeader>
+              </Card>
+            )}
+            <Routes>
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/findings" element={<FindingsPage />} />
+              <Route path="/hotspots" element={<RiskHotspotsPage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              <Route path="/drift" element={<DriftPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </main>
+          <footer className="border-t border-sonar-border px-6 py-4 text-[11px] uppercase tracking-[0.14em] text-sonar-muted">
+            Code Sonar · deterministic · local-only · v0.1.0-beta.1
+          </footer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
+  );
+}
+
+// Keep TabsContent exported via the import above (consumed by page modules).
+export { Tabs, TabsList, TabsTrigger, TabsContent };

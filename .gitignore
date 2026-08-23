@@ -64,3 +64,15 @@ logs/
 coverage.xml
 .smoke-out/
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Emitted Vite config artifacts
+vite.config.d.ts
+vite.config.js
+
+# Local Vite preview server bookkeeping
+vite-preview.log
+vite-preview.log.err
+vite-preview.pid
+

@@ -33,7 +33,7 @@ from app.models.finding import Finding
 from app.scoring.engine import ScoringResult
 from app.security import redact_secrets
 
-SCHEMA_VERSION: str = "1.0"
+SCHEMA_VERSION: str = "1.1"
 
 
 def _utcnow_iso() -> str:
@@ -166,6 +166,7 @@ class ScanRecord:
         "findings_by_category",
         "findings_source_breakdown",
         "findings",
+        "analyzer_timings_ms",
     )
 
     def __init__(
@@ -184,6 +185,7 @@ class ScanRecord:
         findings_by_category: dict[str, int],
         findings_source_breakdown: dict[str, int],
         findings: list[FindingSnapshot],
+        analyzer_timings_ms: dict[str, float] | None = None,
     ) -> None:
         self.scan_id = scan_id
         self.repository_id = repository_id
@@ -199,6 +201,9 @@ class ScanRecord:
         self.findings_by_category = dict(findings_by_category)
         self.findings_source_breakdown = dict(findings_source_breakdown)
         self.findings = list(findings)
+        self.analyzer_timings_ms: dict[str, float] = dict(
+            analyzer_timings_ms or {}
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -216,6 +221,7 @@ class ScanRecord:
             "findings_by_category": dict(self.findings_by_category),
             "findings_source_breakdown": dict(self.findings_source_breakdown),
             "findings": [f.to_dict() for f in self.findings],
+            "analyzer_timings_ms": dict(self.analyzer_timings_ms),
         }
 
     @classmethod
@@ -239,6 +245,7 @@ class ScanRecord:
         record.findings = [
             FindingSnapshot.from_dict(f) for f in data.get("findings") or []
         ]
+        record.analyzer_timings_ms = dict(data.get("analyzer_timings_ms") or {})
         return record
 
 
@@ -250,12 +257,14 @@ def build_scan_record(
     *,
     scan_id: str | None = None,
     scanned_at: str | None = None,
+    analyzer_timings_ms: dict[str, float] | None = None,
 ) -> ScanRecord:
     """Build a ``ScanRecord`` from a finished scan.
 
     The ``scan_id`` defaults to a UUID4 hex string when not provided.
     Callers that want a deterministic id (e.g. test fixtures) must
-    pass it explicitly.
+    pass it explicitly. ``analyzer_timings_ms`` is optional per-analyzer
+    wall-clock duration in milliseconds.
     """
     return ScanRecord(
         scan_id=scan_id or uuid.uuid4().hex,
@@ -272,4 +281,5 @@ def build_scan_record(
         findings_by_category=dict(scoring.findings_by_category),
         findings_source_breakdown=dict(scoring.findings_source_breakdown),
         findings=[FindingSnapshot(f) for f in findings],
+        analyzer_timings_ms=analyzer_timings_ms or {},
     )

@@ -49,6 +49,9 @@ export interface Finding {
 }
 
 export interface ScanSummary {
+  scan_id?: string;
+  repository_id?: string;
+  scanned_at: string;
   total_findings: number;
   total_debt_points: number;
   score: number;
@@ -58,6 +61,7 @@ export interface ScanSummary {
 }
 
 export interface ScanResponse {
+  scan_id?: string;
   repository: string;
   scanned_at: string;
   score: number;
@@ -199,18 +203,41 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
 }
 
 export async function fetchDrift(
-  repoPath: string,
+  repoPath: string | { repo_path: string; from_scan_id?: string; to_scan_id?: string },
   opts: { from_scan_id?: string; to_scan_id?: string } = {},
 ): Promise<DriftResult> {
-  const params = new URLSearchParams({ repo_path: repoPath });
-  if (opts.from_scan_id) params.set("from_scan_id", opts.from_scan_id);
-  if (opts.to_scan_id) params.set("to_scan_id", opts.to_scan_id);
+  let path: string;
+  let overrides: { from_scan_id?: string; to_scan_id?: string };
+  if (typeof repoPath === "string") {
+    path = repoPath;
+    overrides = opts;
+  } else {
+    path = repoPath.repo_path;
+    overrides = { from_scan_id: repoPath.from_scan_id, to_scan_id: repoPath.to_scan_id };
+  }
+  const params = new URLSearchParams({ repo_path: path });
+  if (overrides.from_scan_id) params.set("from_scan_id", overrides.from_scan_id);
+  if (overrides.to_scan_id) params.set("to_scan_id", overrides.to_scan_id);
   const res = await fetch(`${API_BASE}/drift?${params.toString()}`);
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.detail ?? `Drift fetch failed (HTTP ${res.status})`);
   }
   return data as DriftResult;
+}
+
+export async function postScan(req: ScanRequest | string): Promise<ScanResponse> {
+  const body = typeof req === "string" ? { repo_path: req } : req;
+  return runScan(body);
+}
+
+export async function fetchHistory(limit: number = 50): Promise<{ count: number; scans: ScanSummary[] }> {
+  const res = await fetch(`${API_BASE}/history/list?limit=${limit}`);
+  if (!res.ok) {
+    throw new Error(`History fetch failed (HTTP ${res.status})`);
+  }
+  const data = await res.json();
+  return { count: data.count ?? 0, scans: (data.scans ?? []) as ScanSummary[] };
 }
 
 export function severityRank(severity: Severity): number {

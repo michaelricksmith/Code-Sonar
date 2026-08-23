@@ -10,6 +10,7 @@ from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
 from app.analyzers.nesting_depth import NestingDepthAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
 from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
+from app.analyzers.secrets import SecretsAnalyzer
 from app.analyzers.testing_debt import TestingDebtAnalyzer
 from app.models.finding import Finding
 from app.security import (
@@ -33,6 +34,7 @@ def get_registered_analyzers() -> list[Analyzer]:
         OversizedFunctionsAnalyzer(),
         CyclomaticComplexityAnalyzer(),
         NestingDepthAnalyzer(),
+        SecretsAnalyzer(),
         TestingDebtAnalyzer(),
     ]
 

@@ -16,6 +16,7 @@ from app.analyzers.comment_markers import CommentMarkersAnalyzer
 from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
 from app.analyzers.nesting_depth import NestingDepthAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
+from app.analyzers.secrets import SecretsAnalyzer
 from app.security import (
     LOCKFILE_NAMES,
     is_binary_extension,
@@ -81,6 +82,7 @@ class TestAnalyzersSkipLockfiles:
         OversizedFilesAnalyzer,
         CyclomaticComplexityAnalyzer,
         NestingDepthAnalyzer,
+        SecretsAnalyzer,
     ])
     def test_python_bodied_lockfile_skipped(self, tmp_path, analyzer_cls):
         # Build a Pipfile.lock whose body looks like Python and would
@@ -123,6 +125,20 @@ class TestAnalyzersSkipLockfiles:
         paths = {f.file_path for f in findings}
         assert "yarn.lock" not in paths
         assert "notes.md" in paths
+
+    def test_secrets_skips_lockfiles(self, tmp_path):
+        # package-lock.json body could plausibly look like a Python
+        # config block with embedded credentials; filename gate must
+        # prevent any secrets findings from leaking through.
+        (tmp_path / "package-lock.json").write_text(
+            'AKIAIOSFODNN7EXAMPLE\n'
+            'api_key = "abcdefghijklmnopqrstuvwxyz0123456789-_"\n',
+            encoding="utf-8",
+        )
+        analyzer = SecretsAnalyzer()
+        findings = analyzer.analyze(tmp_path)
+        paths = {f.file_path for f in findings}
+        assert "package-lock.json" not in paths
 
     def test_full_pipeline_excludes_lockfiles(self, tmp_path):
         (tmp_path / "Pipfile.lock").write_text(

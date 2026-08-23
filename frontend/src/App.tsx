@@ -14,6 +14,7 @@ import type {
 } from "./api/analyzers";
 
 import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
+import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
@@ -249,6 +250,10 @@ function App() {
                 })}
               </div>
             </section>
+
+            <CategoryBreakdownChart
+              findingsByCategory={result.findings_by_category}
+            />
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
               <div className="mb-4 flex items-center justify-between">

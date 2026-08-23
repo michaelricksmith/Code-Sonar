@@ -20,6 +20,7 @@ import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
 import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
+import { RiskHotspots } from "./components/RiskHotspots";
 import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
 
@@ -60,6 +61,7 @@ function App() {
   const [drift, setDrift] = useState<DriftResult | null>(null);
   const [driftLoading, setDriftLoading] = useState<boolean>(false);
   const [driftError, setDriftError] = useState<string | null>(null);
+  const [fileFilter, setFileFilter] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHealth()
@@ -115,6 +117,9 @@ function App() {
   const filtered = useMemo(() => {
     if (!result) return [] as Finding[];
     return result.findings.filter((f) => {
+      if (fileFilter !== null && f.file_path !== fileFilter) {
+        return false;
+      }
       if (filter.severities.size > 0 && !filter.severities.has(f.severity)) {
         return false;
       }
@@ -129,7 +134,7 @@ function App() {
       }
       return true;
     });
-  }, [result, filter]);
+  }, [result, filter, fileFilter]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -227,6 +232,23 @@ function App() {
               result={result}
               analyzerCount={analyzers.length}
             />
+
+            {result.top_hotspots && result.top_hotspots.length > 0 && (
+              <RiskHotspots
+                hotspots={result.top_hotspots}
+                hotspotSummary={{
+                  total_files: result.top_hotspots.length,
+                  files_with_findings: result.findings.length > 0
+                    ? new Set(result.findings.map((f) => f.file_path)).size
+                    : 0,
+                  total_findings: result.finding_count,
+                  total_debt: result.total_debt_points,
+                }}
+                findings={result.findings}
+                onFilterByFile={setFileFilter}
+                activeFileFilter={fileFilter}
+              />
+            )}
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
               <div className="mb-3 flex items-center justify-between">

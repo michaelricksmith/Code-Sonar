@@ -74,6 +74,7 @@ export interface ScanResponse {
   };
   findings: Finding[];
   summary: ScanSummary;
+  top_hotspots?: Hotspot[];
 }
 
 export interface ScanRequest {
@@ -266,3 +267,46 @@ export const DRIFT_CLASSIFICATIONS: DriftClassification[] = [
   "worsened",
   "improved",
 ];
+
+// --- Hotspot types (Phase 1, Fastest-Route-to-Private-Beta) -----------------
+
+export interface Hotspot {
+  file_path: string;
+  score: number;
+  debt_total: number;
+  finding_count: number;
+  severity_max: Severity;
+  severity_max_weight: number;
+  analyzer_diversity: number;
+  analyzer_breakdown: Record<string, number>;
+  severity_breakdown: Record<string, number>;
+  category_breakdown: Record<string, number>;
+  complexity_max: number;
+  size_max: number;
+  nesting_max: number;
+  contributing_finding_ids: string[];
+}
+
+export interface HotspotResult {
+  hotspots: Hotspot[];
+  total_files: number;
+  files_with_findings: number;
+  total_findings: number;
+  total_debt: number;
+}
+
+export async function fetchHotspots(
+  repoPath: string,
+  limit: number = 50,
+): Promise<HotspotResult> {
+  const params = new URLSearchParams({
+    repo_path: repoPath,
+    limit: String(limit),
+  });
+  const res = await fetch(`${API_BASE}/hotspots?${params.toString()}`);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail ?? `Hotspots fetch failed (HTTP ${res.status})`);
+  }
+  return data as HotspotResult;
+}

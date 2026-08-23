@@ -1,93 +1,442 @@
 # Code Sonar
 
-**Credit report for your codebase.**
+> **Credit report for your codebase.**
 
-Code Sonar analyzes your repository and provides a simple 0-100 score measuring technical debt across:
-- Complexity
-- Staleness
-- Security
-- Duplication
-- Testing
+Code Sonar scans a software repository, produces a single credit-score-style
+metric (300–850), and tells you *why* it is what it is — which files
+carry the most risk, what the dominant failure modes are, and what
+changed since your last scan.
 
-## Project Status
+It is **deterministic, explainable, and self-hosted**. No data leaves
+your machine.
 
-**Current:** MVP development in progress
-**Phase:** Phase 2 — Architecture & Implementation
-**Progress:** ~10%
+> **Status:** v0.1.0-beta.1 (private-beta prerelease, internal only).
+> See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
+> acceptance gate.
 
-See [`DEVELOPMENT_STATUS.md`](./DEVELOPMENT_STATUS.md) for detailed sprint status.
+---
 
-## Repository Structure
+## Table of contents
 
-```
-code-sonar/
-├── backend/          # Python + FastAPI backend
-│   ├── app/
-│   │   ├── analyzers/    # Code analysis engines
-│   │   ├── api/          # API endpoints
-│   │   ├── models/       # Data models
-│   │   ├── scoring/      # Scoring engine
-│   │   └── main.py       # FastAPI app
-│   ├── tests/        # pytest test suite
-│   └── pyproject.toml
-├── frontend/         # React + TypeScript dashboard
-│   ├── src/
-│   └── package.json
-├── fixtures/         # Test fixtures and sample repos
-├── specs/            # Product specifications
-└── strategy/         # Market analysis and positioning
-```
+1. [What is Code Sonar?](#1-what-is-code-sonar)
+2. [What problem does it solve?](#2-what-problem-does-it-solve)
+3. [Current capabilities](#3-current-capabilities)
+4. [Screenshots](#4-screenshots)
+5. [Requirements](#5-requirements)
+6. [Installation](#6-installation)
+7. [One-command startup](#7-one-command-startup)
+8. [How to scan a repository](#8-how-to-scan-a-repository)
+9. [How scoring works](#9-how-scoring-works)
+10. [Finding categories](#10-finding-categories)
+11. [Scan history + drift](#11-scan-history--drift)
+12. [Risk hotspots](#12-risk-hotspots)
+13. [Security / redaction behavior](#13-security--redaction-behavior)
+14. [Known limitations](#14-known-limitations)
+15. [Private-beta status](#15-private-beta-status)
+16. [Development status](#16-development-status)
+17. [License / status](#17-license--status)
 
-## Quick Start (Development)
+---
 
-### Backend
+## 1. What is Code Sonar?
+
+Code Sonar is a credit-score-for-your-codebase tool. You point it at
+a repository and it returns:
+
+- A **score** (300–850, like a FICO score) and a **grade** (A / B / C / D / F)
+- A **debt-point total** — how much maintenance pain the codebase carries
+- A list of **findings** — what specific things are wrong, where they are, and how to fix them
+- A list of **risk hotspots** — which files carry the most risk, with an explainable per-file breakdown
+- A **drift view** — what changed in your technical debt since the previous scan
+
+It is a **FastAPI + React** application. The backend runs deterministic
+Python analyzers (no LLM, no randomness); the frontend is a single-page
+dashboard.
+
+---
+
+## 2. What problem does it solve?
+
+Software accumulates technical debt. The debt is usually invisible:
+TODO comments, oversized functions, secrets in code, low test coverage.
+By the time anyone notices, the codebase has rotted past the point of
+easy recovery.
+
+Code Sonar makes the debt **visible, quantified, and prioritized**.
+You get a single number that summarizes the codebase's health, plus
+the file-by-file breakdown that tells you where to start fixing.
+
+It is **not** a replacement for human code review. It is a navigation
+aid — the equivalent of a credit report for a borrower who has never
+seen their FICO score.
+
+---
+
+## 3. Current capabilities
+
+- **8 analyzers** running by default (see [§ 10](#10-finding-categories)):
+  - `comment_markers` — TODO / FIXME / HACK / XXX
+  - `oversized_files` — files above a configurable line-count threshold
+  - `oversized_functions` — Python AST, function/method/nested-def detection
+  - `cyclomatic_complexity` — uses `radon` for Python
+  - `nesting_depth` — pure AST walker
+  - `secrets` — AWS / GitHub PAT / Slack / JWT / high-entropy
+  - `testing_debt` — modules without test coverage
+  - `dead_code` — unreachable statements, unused-private, stale-fixture
+- **Deterministic scoring** — the same input always produces the same
+  output (score, grade, finding IDs). No randomness, no LLM, no
+  external services.
+- **Scan history** — every scan is auto-recorded to a local JSONL file
+  at `~/.code-sonar/history.jsonl`. Repository-isolated.
+- **Drift detection** — compare any two historical scans. NEW /
+  RESOLVED / PERSISTENT / WORSENED / IMPROVED classifications.
+- **Risk hotspots** — deterministic per-file risk score with explainable
+  breakdown (debt total + severity max + finding count + analyzer
+  diversity).
+- **Click-through** — clicking a hotspot filters the findings table to
+  that file's contributing findings.
+- **Security redaction** — secret evidence is redacted on disk and in
+  the UI; the dashboard never displays raw secrets.
+- **One-command startup** — `scripts/start.bat` (Windows) or
+  `./scripts/start.sh` (Unix) launches backend + frontend with health
+  verification.
+- **Demo repository** — `demo/sample_repo/` ships with state-A and
+  state-B so you can see the full drift story without setting up your
+  own repo.
+
+---
+
+## 4. Screenshots
+
+Screenshot placeholders. Captures will be added during the private
+beta once we have a polished dashboard with real-data runs against
+real repositories.
+
+| Screen | Placeholder |
+|---|---|
+| Dashboard (score + summary cards) | _to be captured during private beta_ |
+| Risk hotspots section | _to be captured during private beta_ |
+| Drift view | _to be captured during private beta_ |
+| Finding detail drawer | _to be captured during private beta_ |
+
+---
+
+## 5. Requirements
+
+| Tool | Version | Notes |
+|---|---|---|
+| Python | 3.11+ | 3.11, 3.12, 3.13 supported; venv at `backend/.venv` created automatically |
+| Node.js | 20+ | npm 10+ for the frontend |
+| OS | Windows 10+ / macOS 12+ / Linux (Ubuntu 22.04+) | Windows is the primary development platform |
+| Disk | ~500 MB | mostly `node_modules/` (~400 MB) and the Python venv (~150 MB) |
+
+**No Docker.** **No cloud account.** **No API key.** All computation is
+local.
+
+---
+
+## 6. Installation
 
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
+# 1. Clone the repo
+git clone https://github.com/michaelricksmith/code-sonar.git
+cd code-sonar
+
+# 2. Start it (handles venv + pip install + npm install automatically)
+#    Windows:
+scripts\start.bat
+#    Unix / macOS / WSL:
+./scripts/start.sh
 ```
 
-Backend runs at: http://localhost:8000
+The startup script will:
+1. Verify Python and Node are on your PATH
+2. Create `backend/.venv/` if missing
+3. Install backend dependencies (`pip install -e ".[dev]"`) if missing
+4. Install frontend dependencies (`npm install`) if missing
+5. Launch the backend (port 8000, or 8765 if 8000 is busy)
+6. Wait for the backend `/health` endpoint to return 200 (up to 20 seconds)
+7. Launch the frontend (port 5173)
 
-### Frontend
+You should see:
+
+```
+=== Code Sonar is starting ===========================================
+  Backend:  http://127.0.0.1:8000
+  Frontend: http://localhost:5173
+```
+
+Open **http://localhost:5173** in your browser.
+
+---
+
+## 7. One-command startup
+
+Already covered in [§ 6](#6-installation). One command, two windows
+(or two background processes on Unix). No Docker.
+
+To shut down:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Windows
+scripts\stop.bat
+
+# Unix
+./scripts/stop.sh
 ```
 
-Frontend runs at: http://localhost:3000
+The stop scripts kill the backend and frontend windows (Windows) or
+send SIGTERM to the PIDs (Unix). Belt-and-braces: any leftover process
+bound to ports 8000 / 8765 / 5173 is also killed.
 
-## Architecture
+---
 
-- **Backend:** Python 3.11+, FastAPI, SQLite (MVP)
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
-- **Analysis:** Deterministic static analysis (radon, AST parsing, git mining)
-- **Scoring:** Pure deterministic calculation (NO LLM)
+## 8. How to scan a repository
 
-## Testing
+1. Open http://localhost:5173 in your browser.
+2. In the **Repository path** input, type the absolute path to a
+   repository you want to scan.
+3. Click **Run scan**.
+4. The dashboard populates with:
+   - Score and grade
+   - Findings count and total debt points
+   - Source / test / fixture breakdown
+   - Category scores
+   - Top 10 risk hotspots
+   - Findings table (filterable by severity / category / analyzer / search)
+5. To see what changed, click **Compare with previous scan**. If you
+   haven't scanned this repo before, the dashboard tells you to run
+   another scan first.
 
-```bash
-# Backend
-cd backend
-pytest
+**Try the demo:**
 
-# Frontend
-cd frontend
-npm test
+Scan `demo/sample_repo/state-A` first. You'll see ~3-5 findings. Then
+scan `demo/sample_repo/state-B` (which removes the TODOs and adds an
+AWS access key in `app/legacy.py`). Click **Compare with previous scan**
+to see the drift: NEW (the AWS key), RESOLVED (the TODOs), WORSENED
+(the oversized function grew from 60 to 75 lines).
+
+---
+
+## 9. How scoring works
+
+Code Sonar uses a **FICO-style 300–850 score** where higher is better.
+The grade bands are:
+
+| Score | Grade | Interpretation |
+|---|---|---|
+| 850–950 | A | Healthy — minor debt, well-tested |
+| 750–849 | B | Some debt, manageable |
+| 650–749 | C | Notable debt, address soon |
+| 550–649 | D | Significant debt, plan remediation |
+| 300–549 | F | Severe debt, prioritize fixes |
+
+**The score is computed in three layers:**
+
+1. **Severity math** — every finding carries `debt_points` based on its severity:
+   - INFO = 1 debt point
+   - WARNING = 2 debt points + 1 flat bonus
+   - ERROR = 4 debt points + 3 flat bonus
+   - CRITICAL = 8 debt points + 8 flat bonus
+   The flat bonus keeps low-severity findings distinguishable in the score.
+2. **Category weighting** — debt is bucketed into 6 categories (complexity, staleness, security, duplication, testing, maintainability) and weighted: COMPLEXITY 0.30, STALENESS 0.25, SECURITY 0.25, DUPLICATION 0.10, TESTING 0.10, MAINTAINABILITY 0.10. Per-category penalty is capped at 550 BEFORE category weighting. The category weights sum to 1.20 (extra headroom for overlapping categories).
+3. **Source-context modifier** — findings in tests/ and fixture/ directories are multiplied by 0.25× AT THE CATEGORY LEVEL (not per-finding). This mutes bulk fixture findings from dominating the score. Test code carries its own debt, but not at production-code weight.
+
+The full rationale is documented in `backend/app/scoring/engine.py`
+(50-line module docstring).
+
+**Confidence modifier:** findings with `confidence < 0.7` are halved.
+
+**Code Sonar reports uncomfortable results when the evidence supports
+them.** The score is not adjusted to make you feel better about your
+codebase. If the analyzers find debt, the score reflects that debt.
+
+---
+
+## 10. Finding categories
+
+| Category | Default weight | Examples |
+|---|---|---|
+| **Complexity** | 0.30 | oversized_functions, cyclomatic_complexity, nesting_depth |
+| **Security** | 0.25 | secrets (AWS, GitHub PAT, JWT, etc.) |
+| **Staleness** | 0.25 | TODO / FIXME / HACK / XXX comments |
+| **Testing** | 0.10 | untested-module (testing_debt analyzer) |
+| **Maintainability** | 0.10 | oversized_files, dead_code (unreachable / unused-private / stale-fixture) |
+| **Duplication** | 0.10 | (reserved — no analyzer shipped yet) |
+
+Each finding has a category, severity (info / warning / error /
+critical), a debt-point contribution, a file path + line number, an
+evidence string, and a `confidence` (0–1).
+
+The 8 active analyzers:
+
+| Analyzer | Category | What it detects |
+|---|---|---|
+| `comment_markers` | staleness | TODO / FIXME / HACK / XXX in source code |
+| `oversized_files` | maintainability | files above 500 lines (configurable) |
+| `oversized_functions` | complexity | Python functions/methods/nested defs above 50 lines (configurable) |
+| `cyclomatic_complexity` | complexity | CC ≥ 10 (radon-based) |
+| `nesting_depth` | complexity | AST-walking max depth ≥ 4 |
+| `secrets` | security | AWS / GitHub PAT / Slack / JWT / high-entropy |
+| `testing_debt` | testing | modules without test coverage |
+| `dead_code` | maintainability | unreachable statements, unused private functions, stale test fixtures |
+
+---
+
+## 11. Scan history + drift
+
+Every `POST /api/scan` automatically records the scan to
+`~/.code-sonar/history.jsonl` (atomic writes, schema-versioned,
+repository-isolated).
+
+**API endpoints:**
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/history/list?repository_id=&limit=` | Paginated scan summaries |
+| `GET` | `/api/history/latest?repo_path=` | Most-recent full record for a repo |
+| `GET` | `/api/history/{scan_id}` | Full record by scan_id |
+| `GET` | `/api/drift?repo_path=&from_scan_id=&to_scan_id=` | Drift between two historical scans (default: latest vs second-latest) |
+
+**Drift classifications:**
+
+- **NEW** — finding exists in current scan but not baseline
+- **RESOLVED** — finding existed in baseline but not current
+- **PERSISTENT** — same finding_id in both with equivalent risk
+- **WORSENED** — same finding_id, risk increased (debt × severity_weight)
+- **IMPROVED** — same finding_id, risk decreased
+
+Drift is **deterministic and ordering-independent**: two scans with
+the same findings in different orders produce byte-identical drift
+results.
+
+The dashboard's **Drift since previous scan** section renders score
+movement ("785 → 742, −43 points"), debt movement, finding movement
+("+8 new / −3 resolved / 2 worsened / 1 improved"), filter chips
+(All / New / Resolved / Persistent / Worsened / Improved), and per-category
++ per-analyzer drill-downs.
+
+---
+
+## 12. Risk hotspots
+
+The Risk Hotspots section ranks your files by risk. Top 10 included in
+every scan response; full ranking via `GET /api/hotspots`.
+
+**Hotspot score** (no arbitrary tuning — uses weights that already
+exist in the drift engine and scoring engine):
+
+```
+hotspot_score = debt_total + severity_max_weight + finding_count + analyzer_diversity × 2
 ```
 
-## Documentation
+Where `severity_max_weight` is the same severity-weight table as the
+drift engine (info=1, warning=2, error=3, critical=4).
 
-- [Technical Specification](./specs/technical-spec-v1.md)
-- [UI/UX Specification](./specs/credit-report-ui-ux.md)
-- [Market Analysis](./strategy/market-analysis.md)
-- [Development Status](./DEVELOPMENT_STATUS.md)
+The per-file breakdown shows:
+- `score` (top-line number, large)
+- `severity_max` (highest severity on the file)
+- `finding_count` + `debt_total`
+- `analyzer_diversity` (number of distinct analyzers flagging the file)
+- `analyzer_breakdown` chips (e.g. `cyclomatic_complexity ×2`, `comment_markers ×1`)
+- Optional metadata-derived signals: `complexity_max`, `size_max`,
+  `nesting_max` (extracted from analyzer `metadata` when present)
+- An **anomalies panel** highlights: files with single high-severity
+  findings; files flagged by many analyzers (multi-analyzer agreement)
 
-## License
+**Clicking a hotspot filters the findings table below to that file's
+contributing findings.** This is the "click-through" requirement from
+the Fastest-Route-to-Private-Beta brief.
 
-TBD
+---
+
+## 13. Security / redaction behavior
+
+Code Sonar treats secrets as **first-class security concerns**:
+
+1. **Detection** — the `secrets` analyzer matches AWS access keys, AWS
+   secret keys, GitHub PATs, Slack tokens, JWTs, and high-entropy
+   strings (≥ 32 chars of `[A-Za-z0-9+/=]` with no whitespace).
+2. **UI suppression** — when you open a SECRET finding in
+   `FindingDetailDrawer`, the raw `evidence` field is **never
+   displayed**. Instead, the drawer shows a "Why this evidence was
+   redacted" panel with the redaction reason and any safe surrounding
+   context (from `metadata.safe_context` when present).
+3. **Persistence redaction** — when a scan is recorded to the history
+   file, every finding's `evidence` field is run through
+   `app.security.redact_secrets` on the way out. **Defense in depth:**
+   even if a snapshot was constructed from raw evidence, the persisted
+   form has secrets replaced with `[REDACTED]`.
+4. **API responses** — the `/api/scan`, `/api/history/*`, and
+   `/api/drift` endpoints all return redacted evidence. Raw secrets
+   never leave the analyzer.
+
+**Verification:** `backend/tests/history/test_history.py::TestRedactionInPersistedRecord::test_persisted_evidence_is_redacted`
+constructs a finding with a 30-char alphanumeric secret in `evidence`
+and asserts the loaded record has it replaced with `[REDACTED]`.
+
+---
+
+## 14. Known limitations
+
+| # | Limitation | Notes |
+|---|---|---|
+| 1 | Only Python source is deeply analyzed | Non-Python files still surface `debt_total/severity/analyzer_diversity` from comment_markers, secrets, oversized_files |
+| 2 | No Git churn / ownership / dependency intelligence | Deferred per "do not overbuild" instruction. Future checkpoint. |
+| 3 | Single-process FastAPI; not multi-worker | SQLite swap is a future seam via the `HistoryStore` ABC |
+| 4 | No background queue; long scans block the request thread | Most scans complete in <2s |
+| 5 | No multi-user / auth / orgs | Deferred per "do not overbuild" |
+| 6 | Self-scan puts the workspace at 529/F | This is by design — Code Sonar reports uncomfortable results when the evidence supports them |
+| 7 | v0.1.0-beta.1 is not publicly released | Internal / private-beta only |
+| 8 | `git push` from the dev environment fails (OAuth-app credential blocker) | Commits accumulate on local main; the next public push is done manually with a credential |
+
+---
+
+## 15. Private-beta status
+
+**Version:** v0.1.0-beta.1 (first private-beta prerelease, 2026-08-22).
+**Distribution:** internal only — not published publicly.
+**Audience:** 5–10 technically capable users who did not build Code
+Sonar and can give honest feedback on real repositories.
+
+See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
+22-item acceptance gate. All items are ✅ as of the release.
+
+---
+
+## 16. Development status
+
+| Stage | Status |
+|---|---|
+| MVP vertical slice | ✅ Shipped (`b9bd8eb`) |
+| Sprint 2 analyzers | ✅ Shipped (commits `332b4e7`, `bbbe607`) |
+| Sprint 2 build-mode | ✅ Shipped (commit `b396110`) |
+| Checkpoint 4 (secrets analyzer + category breakdown) | ✅ Shipped (`de6808c`) |
+| Checkpoint 5 (dead_code analyzer + scoring audit + security UX + shared determinism) | ✅ Shipped (`fc3084d`) |
+| Checkpoint 6 (drift detection + scan history) | ✅ Shipped (`0d7b220`) |
+| Checkpoint 7 (risk hotspots + private-beta productization) | ✅ Shipped (this release) |
+| CI #1 fix | ✅ Shipped (`0235901`) |
+| GitHub repo | ✅ Private (`michaelricksmith/code-sonar`) |
+| `.github/workflows/ci.yml` | ✅ 3-job pipeline (backend ruff + mypy + pytest on Python 3.11, frontend tsc + vite on Node 20, smoke self-scan) |
+
+**Total tests:** **324 passed, 1 skipped** (no regression from C6's 307/1 baseline; +17 from the hotspots tests in this checkpoint).
+
+See [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md) and [`CHANGELOG.md`](CHANGELOG.md) for the full history.
+
+---
+
+## 17. License / status
+
+**License:** TBD (private beta; license decision deferred until public
+release).
+
+**Maintainer:** RICK (assistant) under Michael Smith's direction.
+
+**Contact:** open a GitHub issue on `michaelricksmith/code-sonar`.
+
+**Success condition for v0.1.0-beta.1:** A technically capable person
+who did not build Code Sonar can follow this README, start the app,
+scan a repository, understand the score, identify priority risks, run
+another scan, and understand what changed.
+
+**Status:** READY for private beta.

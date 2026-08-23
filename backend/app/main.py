@@ -16,6 +16,7 @@ from app.history import (
     compute_repository_id,
     display_name,
 )
+from app.hotspots import compute_hotspots
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.services.repository import (
@@ -27,7 +28,7 @@ from app.services.repository import (
 app = FastAPI(
     title="Code Sonar API",
     description="Credit report for your codebase",
-    version="0.1.0",
+    version="0.1.0-beta.1",
 )
 
 
@@ -74,6 +75,10 @@ class ScanResponse(BaseModel):
     findings_by_category: dict[str, int]
     findings: list[dict[str, Any]]
     summary: dict[str, Any]
+    top_hotspots: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Top-N ranked risk hotspots (Phase 1, Fastest-Route-to-Private-Beta).",
+    )
 
 
 @app.get("/health")
@@ -156,6 +161,11 @@ async def scan(request: ScanRequest) -> ScanResponse:
 
     scanned_at = datetime.now(timezone.utc).isoformat()
 
+    # Compute risk hotspots (Phase 1, Fastest-Route-to-Private-Beta).
+    # Top 10 for the scan response; full ranking available via
+    # /api/hotspots?limit=...
+    hotspot_result = compute_hotspots(findings, top_n=10)
+
     # Persist the scan into the history store. Failures are logged
     # but do not break the live scan response (a history-store write
     # failure is a side effect, not a scan failure).
@@ -195,7 +205,38 @@ async def scan(request: ScanRequest) -> ScanResponse:
             "by_severity": scoring_result.severity_distribution,
             "by_category": scoring_result.findings_by_category,
         },
+        top_hotspots=[h.to_dict() for h in hotspot_result.hotspots],
     )
+
+
+@app.get("/api/hotspots")
+async def hotspots(
+    repo_path: str = Query(description="Repository path to compute hotspots for"),
+    limit: int = Query(
+        default=50, ge=1, le=500,
+        description="Maximum number of hotspots to return",
+    ),
+) -> dict[str, Any]:
+    """Return ranked risk hotspots for ``repo_path``.
+
+    Deterministic: descending by score, then ascending by file_path.
+    Re-scans the repository on each call (cheap; same data the scan
+    response already computed). For full rankings use ``limit``;
+    the scan response returns the top 10.
+    """
+    try:
+        repo_path_obj = validate_repo_path(repo_path)
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        findings = scan_repository(repo_path_obj)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Scan failed: " + str(exc))
+
+    result = compute_hotspots(findings, top_n=limit)
+    return result.to_dict()
 
 
 # ---------------------------------------------------------------------------

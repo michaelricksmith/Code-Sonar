@@ -1,4 +1,4 @@
-﻿"""Security validators for Code Sonar MVP.
+"""Security validators for Code Sonar MVP.
 
 Implements the controls documented in backend/SECURITY.md. Single-file
 module on purpose: avoids cross-file import ordering issues and keeps the
@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-
 
 MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024
 MAX_REPO_SIZE_BYTES: int = 500 * 1024 * 1024
@@ -29,7 +28,7 @@ SCAN_ROOT_DIR: Path = Path(
 _ENFORCE_SCAN_ROOT: bool = os.environ.get("CODESONAR_ENFORCE_SCAN_ROOT", "0") == "1"
 
 
-EXCLUDED_DIRS: frozenset = frozenset({
+EXCLUDED_DIRS: frozenset[str] = frozenset({
     ".git", ".svn", ".hg",
     "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
     "venv", "env", ".venv", "virtualenv",
@@ -37,7 +36,7 @@ EXCLUDED_DIRS: frozenset = frozenset({
     ".next", ".nuxt", ".output",
 })
 
-BINARY_EXTENSIONS: frozenset = frozenset({
+BINARY_EXTENSIONS: frozenset[str] = frozenset({
     ".exe", ".dll", ".so", ".dylib", ".bin", ".wasm",
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
     ".mp4", ".mov", ".avi", ".mkv",
@@ -51,7 +50,7 @@ BINARY_EXTENSIONS: frozenset = frozenset({
 
 # Generated dependency-metadata files. Filename-specific (not extension-only)
 # so legitimate .json/.yaml source and config files remain analyzable.
-LOCKFILE_NAMES: frozenset = frozenset({
+LOCKFILE_NAMES: frozenset[str] = frozenset({
     "package-lock.json",
     "npm-shrinkwrap.json",
     "yarn.lock",
@@ -71,7 +70,11 @@ class RepositoryValidationError(ValueError):
     """Raised when a repository path fails security validation."""
 
 
-def validate_repo_path(raw_path, scan_root=None, enforce_root=None):
+def validate_repo_path(
+    raw_path: object,
+    scan_root: Path | None = None,
+    enforce_root: bool | None = None,
+) -> Path:
     """Validate and resolve a repository path.
 
     Returns the resolved absolute Path on success. Raises
@@ -112,18 +115,18 @@ def validate_repo_path(raw_path, scan_root=None, enforce_root=None):
     return resolved
 
 
-def is_symlink(path):
+def is_symlink(path: Path) -> bool:
     try:
         return path.is_symlink()
     except OSError:
         return False
 
 
-def is_binary_extension(path):
+def is_binary_extension(path: Path) -> bool:
     return path.suffix.lower() in BINARY_EXTENSIONS
 
 
-def is_binary_content(path, sniff_bytes=8192):
+def is_binary_content(path: Path, sniff_bytes: int = 8192) -> bool:
     try:
         with open(path, "rb") as f:
             chunk = f.read(sniff_bytes)
@@ -132,16 +135,16 @@ def is_binary_content(path, sniff_bytes=8192):
     return b"\x00" in chunk
 
 
-def is_lockfile(path):
+def is_lockfile(path: Path) -> bool:
     """Return True for generated dependency-metadata filenames."""
     return path.name in LOCKFILE_NAMES
 
 
-def is_excluded_directory(path):
+def is_excluded_directory(path: Path) -> bool:
     return any(part in EXCLUDED_DIRS for part in path.parts)
 
 
-def is_safe_to_read(path, repo_root):
+def is_safe_to_read(path: Path, repo_root: Path) -> bool:
     if is_symlink(path):
         return False
     try:
@@ -163,7 +166,7 @@ def is_safe_to_read(path, repo_root):
     return True
 
 
-def assert_within_scan_limits(file_count, total_size):
+def assert_within_scan_limits(file_count: int, total_size: int) -> None:
     if file_count > MAX_FILES_PER_SCAN:
         raise RepositoryValidationError(
             "repository exceeds file limit (" + str(MAX_FILES_PER_SCAN) + ")"
@@ -175,16 +178,18 @@ def assert_within_scan_limits(file_count, total_size):
         )
 
 
-_SECRET_RE = re.compile(r"\b[A-Za-z0-9_\-]{24,}\b")
+_SECRET_RE: re.Pattern[str] = re.compile(r"\b[A-Za-z0-9_\-]{24,}\b")
 
 
-def redact_secrets(text):
+def redact_secrets(text: str | None) -> str | None:
     if not text:
         return text
     return _SECRET_RE.sub("[REDACTED]", text)
 
 
-def truncate_evidence(text, max_length=MAX_EVIDENCE_LENGTH):
+def truncate_evidence(
+    text: str | None, max_length: int = MAX_EVIDENCE_LENGTH
+) -> str:
     if text is None:
         return ""
     if len(text) <= max_length:

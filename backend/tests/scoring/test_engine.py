@@ -9,9 +9,7 @@ Once VP Engineering implements the scoring engine, these tests will verify:
 - Score normalization (0-1000 range)
 """
 
-import pytest
 
-from app.models.finding import Finding
 
 
 class TestScoringEngine:
@@ -43,8 +41,8 @@ class TestScoringEngine:
         assert with_findings.score < perfect.score
 
     def test_severity_affects_score(self, sample_findings_fixture):
-        from app.scoring.engine import calculate_score
         from app.models.finding import FindingSeverity
+        from app.scoring.engine import calculate_score
         info = sample_findings_fixture[0].model_copy(deep=True)
         info.severity = FindingSeverity.INFO
         critical = sample_findings_fixture[0].model_copy(deep=True)
@@ -55,8 +53,8 @@ class TestScoringEngine:
         assert r_critical.score < r_info.score
 
     def test_category_weighting_runs(self, sample_findings_fixture):
-        from app.scoring.engine import calculate_score
         from app.models.finding import FindingCategory
+        from app.scoring.engine import calculate_score
         sec = sample_findings_fixture[0].model_copy(deep=True)
         sec.category = FindingCategory.SECURITY
         sec.id = "security_001"

@@ -59,7 +59,9 @@ class Finding(BaseModel):
     # Metadata
     analyzer: str = Field(description="Analyzer that generated this finding")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Analyzer-specific data")
-    detected_at: datetime = Field(default_factory=datetime.utcnow, description="Detection timestamp")
+    detected_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Detection timestamp"
+    )
 
     class Config:
         json_schema_extra = {

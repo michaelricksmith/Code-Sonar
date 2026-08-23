@@ -15,8 +15,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from app.scoring.engine import calculate_score
 from app.services.repository import scan_repository
 

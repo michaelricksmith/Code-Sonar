@@ -1,7 +1,6 @@
 ﻿"""FastAPI application entry point."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -15,7 +14,6 @@ from app.services.repository import (
     get_registered_analyzers,
     scan_repository,
 )
-
 
 app = FastAPI(
     title="Code Sonar API",

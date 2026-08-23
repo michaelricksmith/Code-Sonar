@@ -7,9 +7,9 @@ Tests verify:
 - API response schema validation
 """
 
+
 import pytest
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from app.main import app
 
@@ -26,7 +26,7 @@ class TestHealthEndpoint:
     def test_health_returns_ok(self, client):
         """Test that /health endpoint returns ok status."""
         response = client.get("/health")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
@@ -34,7 +34,7 @@ class TestHealthEndpoint:
     def test_root_returns_version(self, client):
         """Test that root endpoint returns API info."""
         response = client.get("/")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "message" in data
@@ -52,15 +52,15 @@ class TestScanEndpoint:
             "/api/scan",
             json={"repo_path": str(test_repo_fixture)}
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         # Should return scan results with findings
         assert "findings" in data
         assert isinstance(data["findings"], list)
         assert "summary" in data
-        
+
         # If comment_markers analyzer is implemented, should find markers
         # in test_repo_fixture
         if len(data["findings"]) > 0:
@@ -78,7 +78,7 @@ class TestScanEndpoint:
             "/api/scan",
             json={"repo_path": "/nonexistent/path/to/repo"}
         )
-        
+
         assert response.status_code == 400
         data = response.json()
         assert "detail" in data
@@ -91,7 +91,7 @@ class TestScanEndpoint:
             "/api/scan",
             json={}
         )
-        
+
         assert response.status_code == 422
         data = response.json()
         assert "detail" in data
@@ -102,12 +102,12 @@ class TestScanEndpoint:
         # Create a file
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
-        
+
         response = client.post(
             "/api/scan",
             json={"repo_path": str(test_file)}
         )
-        
+
         assert response.status_code == 400
         data = response.json()
         assert "detail" in data
@@ -122,7 +122,7 @@ class TestScanEndpoint:
         )
         assert response_1.status_code == 200
         data_1 = response_1.json()
-        
+
         # Second scan
         response_2 = client.post(
             "/api/scan",
@@ -130,14 +130,14 @@ class TestScanEndpoint:
         )
         assert response_2.status_code == 200
         data_2 = response_2.json()
-        
+
         # Should return same number of findings
         assert len(data_1["findings"]) == len(data_2["findings"])
-        
+
         # Findings should be identical (order may vary)
         findings_1_sorted = sorted(data_1["findings"], key=lambda f: f["id"])
         findings_2_sorted = sorted(data_2["findings"], key=lambda f: f["id"])
-        
+
         assert findings_1_sorted == findings_2_sorted
 
     @pytest.mark.asyncio
@@ -147,13 +147,13 @@ class TestScanEndpoint:
             "/api/scan",
             json={"repo_path": str(test_repo_fixture)}
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         assert "summary" in data
         summary = data["summary"]
-        
+
         # Should include counts
         assert "total_findings" in summary
         assert "by_severity" in summary or "by_category" in summary
@@ -167,10 +167,10 @@ class TestScanEndpoint:
             "/api/scan",
             json={"repo_path": str(tmp_path)}
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         assert "findings" in data
         assert len(data["findings"]) == 0
         assert data["summary"]["total_findings"] == 0
@@ -182,15 +182,15 @@ class TestScanEndpoint:
             "/api/scan",
             json={"repo_path": str(test_repo_fixture)}
         )
-        
+
         assert response.status_code == 200
         data = response.json()
-        
+
         # Required top-level fields
         required_fields = ["findings", "summary"]
         for field in required_fields:
             assert field in data, f"Response missing required field: {field}"
-        
+
         # Each finding should have required fields
         for finding in data["findings"]:
             required_finding_fields = [

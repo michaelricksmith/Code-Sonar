@@ -142,7 +142,7 @@ def _iter_python_functions(
     seen: set[int] = set()
 
     def walk(
-        body: list,
+        body: list[ast.stmt],
         parent_class: Optional[str],
         parent_qualname: Optional[str],
     ) -> Iterator[Tuple[ast.AST, Optional[str], Optional[str]]]:
@@ -166,7 +166,7 @@ def _iter_python_functions(
                 yield from walk(stmt.body, parent_class=None, parent_qualname=qualname)
 
     def _walk_class_body(
-        body: list,
+        body: list[ast.stmt],
         class_name: str,
         class_qualname: Optional[str],
     ) -> Iterator[Tuple[ast.AST, Optional[str], Optional[str]]]:

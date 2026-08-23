@@ -5,8 +5,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from app.analyzers.testing_debt import TestingDebtAnalyzer
 
 

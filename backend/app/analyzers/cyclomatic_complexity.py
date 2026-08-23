@@ -19,9 +19,9 @@ byte-identical IDs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import Any, Iterator, Optional, Tuple
 
-from radon.complexity import cc_visit
+from radon.complexity import cc_visit  # type: ignore[import-untyped]
 
 from app.analyzers.base import Analyzer
 from app.models.finding import Finding, FindingCategory, FindingSeverity
@@ -177,7 +177,7 @@ class CyclomaticComplexityAnalyzer(Analyzer):
         return findings
 
     @staticmethod
-    def _is_class_block(block) -> bool:
+    def _is_class_block(block: Any) -> bool:
         """Return True when ``block`` is a class-body aggregate, not a function.
 
         radon emits both kinds with ``cc_visit``. We report only the
@@ -190,7 +190,7 @@ class CyclomaticComplexityAnalyzer(Analyzer):
 
     def _build_finding(
         self,
-        block,
+        block: Any,
         cc_value: int,
         rel_path: str,
         severity: FindingSeverity,

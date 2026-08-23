@@ -1,4 +1,4 @@
-"""Pytest configuration and shared fixtures."""
+﻿"""Pytest configuration and shared fixtures."""
 
 import tempfile
 from pathlib import Path
@@ -12,13 +12,13 @@ from app.models.finding import Finding, FindingCategory, FindingSeverity
 @pytest.fixture
 def test_repo_fixture() -> Generator[Path, None, None]:
     """Create a temporary test repository with known files.
-    
+
     Yields:
         Path to temporary test repository root
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_path = Path(tmpdir)
-        
+
         # Create Python file with TODO comments
         python_file = repo_path / "main.py"
         python_file.write_text(
@@ -36,7 +36,7 @@ def test_repo_fixture() -> Generator[Path, None, None]:
             '    return [1, 2, 3]\n',
             encoding='utf-8'
         )
-        
+
         # Create JavaScript file with markers
         js_file = repo_path / "app.js"
         js_file.write_text(
@@ -47,7 +47,7 @@ def test_repo_fixture() -> Generator[Path, None, None]:
             '}\n',
             encoding='utf-8'
         )
-        
+
         # Create file without markers
         clean_file = repo_path / "utils.py"
         clean_file.write_text(
@@ -58,11 +58,11 @@ def test_repo_fixture() -> Generator[Path, None, None]:
             '    return a + b\n',
             encoding='utf-8'
         )
-        
+
         # Create binary file (should be ignored)
         binary_file = repo_path / "image.png"
         binary_file.write_bytes(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR')
-        
+
         # Create subdirectory with file
         subdir = repo_path / "src"
         subdir.mkdir()
@@ -72,14 +72,14 @@ def test_repo_fixture() -> Generator[Path, None, None]:
             'pass\n',
             encoding='utf-8'
         )
-        
+
         yield repo_path
 
 
 @pytest.fixture
 def sample_findings_fixture() -> list[Finding]:
     """Return sample Finding objects for testing.
-    
+
     Returns:
         List of sample Finding instances
     """

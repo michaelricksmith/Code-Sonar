@@ -30,7 +30,7 @@ scans of the same repository produce byte-identical IDs.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, Optional, Set
+from typing import Iterator, Set
 
 from app.analyzers.base import Analyzer
 from app.models.finding import Finding, FindingCategory, FindingSeverity
@@ -45,9 +45,9 @@ from app.security import (
 
 DEFAULT_LARGE_FILE_LINES: int = 300
 DEFAULT_MEDIUM_FILE_LINES: int = 100
-TEST_DIR_NAMES: frozenset = frozenset({"tests", "test"})
-TEST_FILE_PREFIXES: tuple = ("test_",)
-TEST_FILE_SUFFIXES: tuple = ("_test.py", "_test.pyi", "test.py")
+TEST_DIR_NAMES: frozenset[str] = frozenset({"tests", "test"})
+TEST_FILE_PREFIXES: tuple[str, ...] = ("test_",)
+TEST_FILE_SUFFIXES: tuple[str, ...] = ("_test.py", "_test.pyi", "test.py")
 
 
 def _severity_for_lines(lines: int) -> tuple[FindingSeverity, int]:
@@ -104,7 +104,7 @@ def _is_eligible(file_path: Path, repo_root: Path) -> bool:
     return True
 
 
-def _is_test_file(rel_parts: tuple) -> bool:
+def _is_test_file(rel_parts: tuple[str, ...]) -> bool:
     """Return True for a file path whose first directory segment is a tests/ dir."""
     return any(part in TEST_DIR_NAMES for part in rel_parts[:-1])
 
@@ -260,7 +260,10 @@ class TestingDebtAnalyzer(Analyzer):
             symbol=None,
             evidence="repository has no tests/ directory",
             message="Repository has no tests/ directory",
-            suggestion="Create a tests/ directory at the repository root and add a smoke test before adding analyzers.",
+            suggestion=(
+                "Create a tests/ directory at the repository root and "
+                "add a smoke test before adding analyzers."
+            ),
             debt_points=8,
             remediation_effort="4 hours",
             analyzer=self.name,

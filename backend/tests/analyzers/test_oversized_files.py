@@ -49,7 +49,7 @@ class TestOversizedFilesAnalyzer:
         assert big.rule_id == "oversized_files:over-threshold"
         assert big.metadata["line_count"] == 501
         assert big.metadata["threshold"] == threshold
-        assert f"line_count=501" in big.evidence
+        assert "line_count=501" in big.evidence
         assert f"threshold={threshold}" in big.evidence
         assert big.debt_points > 0
         assert big.suggestion

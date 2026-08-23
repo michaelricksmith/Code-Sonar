@@ -15,12 +15,11 @@ from app.security import (
     is_symlink,
 )
 
-
 # Default line-count thresholds per Source file extension (lines).
 DEFAULT_THRESHOLD: int = 500
 
 # Source file extensions considered for line-count measurement.
-SOURCE_EXTENSIONS: frozenset = frozenset({
+SOURCE_EXTENSIONS: frozenset[str] = frozenset({
     ".py", ".pyi",
     ".js", ".jsx", ".mjs", ".cjs",
     ".ts", ".tsx",

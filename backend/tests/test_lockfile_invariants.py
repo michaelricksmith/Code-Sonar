@@ -8,7 +8,6 @@ or other generated dependency-metadata files.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -17,8 +16,6 @@ from app.analyzers.comment_markers import CommentMarkersAnalyzer
 from app.analyzers.cyclomatic_complexity import CyclomaticComplexityAnalyzer
 from app.analyzers.nesting_depth import NestingDepthAnalyzer
 from app.analyzers.oversized_files import OversizedFilesAnalyzer
-from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
-from app.analyzers.testing_debt import TestingDebtAnalyzer
 from app.security import (
     LOCKFILE_NAMES,
     is_binary_extension,

@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
+from app.analyzers.oversized_files import OversizedFilesAnalyzer
 from app.security import (
     LOCKFILE_NAMES,
     is_lockfile,
 )
-from app.analyzers.oversized_files import OversizedFilesAnalyzer
 
 
 class TestLockfileDetection:

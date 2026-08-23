@@ -119,10 +119,12 @@ def _safe_read(path: Path) -> Optional[str]:
 
 
 def _function_length(node: ast.AST, source_lines: list[str]) -> int:
-    start = getattr(node, "lineno", None)
-    end = getattr(node, "end_lineno", None)
-    if start is None or end is None:
+    start_raw = getattr(node, "lineno", None)
+    end_raw = getattr(node, "end_lineno", None)
+    if start_raw is None or end_raw is None:
         return 0
+    start = int(start_raw)
+    end = int(end_raw)
     start_idx = max(1, start) - 1
     end_idx = min(end, len(source_lines)) - 1
     if end_idx < start_idx:
@@ -144,7 +146,7 @@ def _iter_python_functions(
     seen: set[int] = set()
 
     def walk(
-        body: list,
+        body: list[ast.stmt],
         parent_class: Optional[str],
         parent_qualname: Optional[str],
     ) -> Iterator[_FuncYield]:
@@ -173,7 +175,7 @@ def _iter_python_functions(
                 yield from walk(stmt.body, parent_class=None, parent_qualname=qualname)
 
     def _walk_class_body(
-        body: list,
+        body: list[ast.stmt],
         class_name: str,
         class_qualname: Optional[str],
     ) -> Iterator[_FuncYield]:

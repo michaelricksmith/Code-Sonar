@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 
 from app.security import (
-    BINARY_EXTENSIONS,
-    EXCLUDED_DIRS,
     MAX_EVIDENCE_LENGTH,
     MAX_FILE_SIZE_BYTES,
     MAX_FILES_PER_SCAN,
@@ -19,7 +17,6 @@ from app.security import (
     is_binary_extension,
     is_excluded_directory,
     is_safe_to_read,
-    is_symlink,
     redact_secrets,
     truncate_evidence,
     validate_repo_path,

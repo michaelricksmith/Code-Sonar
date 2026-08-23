@@ -13,7 +13,6 @@ from app.analyzers.oversized_functions import OversizedFunctionsAnalyzer
 from app.analyzers.testing_debt import TestingDebtAnalyzer
 from app.models.finding import Finding
 from app.security import (
-    RepositoryValidationError,
     assert_within_scan_limits,
     is_safe_to_read,
     redact_secrets,
@@ -38,7 +37,7 @@ def get_registered_analyzers() -> list[Analyzer]:
     ]
 
 
-def get_analyzer_metadata() -> list[dict]:
+def get_analyzer_metadata() -> list[dict[str, object]]:
     """Return public metadata for every registered analyzer.
 
     Consumers (UI, CI, integrations) can introspect the analyzer
@@ -88,7 +87,7 @@ def _scan_path(repo_path: Path) -> list[Finding]:
     return findings
 
 
-def scan_repository(repo_path) -> list[Finding]:
+def scan_repository(repo_path: object) -> list[Finding]:
     """Validate, scan, and return aggregated findings from all analyzers."""
     resolved = validate_repo_path(repo_path)
     return _scan_path(resolved)

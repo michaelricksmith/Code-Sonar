@@ -12,7 +12,7 @@ from app.analyzers.nesting_depth import (
     NestingDepthAnalyzer,
     _max_depth,
 )
-from app.models.finding import FindingCategory, FindingSeverity
+from app.models.finding import FindingSeverity
 
 
 def _write(path: Path, body: str) -> None:

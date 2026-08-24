@@ -30,11 +30,11 @@ from .telemetry_engine import (
     compute_velocity,
 )
 from .telemetry_models import (
-    AnalyzerTelemetry,
-    HORIZON_30D,
     HORIZON_7D,
+    HORIZON_30D,
     HORIZON_NEXT_SCAN,
     HORIZONS,
+    AnalyzerTelemetry,
     Horizon,
     ProjectionConfidence,
     ProjectionDirection,

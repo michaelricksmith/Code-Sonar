@@ -48,7 +48,7 @@ Horizon reliability (Michael's spec section 7):
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Iterable, Sequence
 
 from app.drift import (
@@ -59,7 +59,6 @@ from app.history import ScanRecord
 from app.hotspots import HotspotResult
 
 from .telemetry_models import (
-    CONFIDENCE_BANDS,
     CONFIDENCE_EARLY,
     CONFIDENCE_INSUFFICIENT,
     CONFIDENCE_MODERATE,
@@ -68,11 +67,10 @@ from .telemetry_models import (
     DIRECTION_FLAT,
     DIRECTION_IMPROVING,
     DIRECTION_INSUFFICIENT,
-    HORIZONS,
-    HORIZON_30D,
     HORIZON_7D,
+    HORIZON_30D,
     HORIZON_NEXT_SCAN,
-    RADAR_AXES,
+    HORIZONS,
     AnalyzerTelemetry,
     Horizon,
     ProjectionConfidence,
@@ -316,7 +314,8 @@ def compute_velocity(history: Sequence[ScanRecord]) -> dict[str, float | None]:
         new_rates.append(float(len(cur_ids - prev_ids)))
         resolved_rates.append(float(len(prev_ids - cur_ids)))
     new_velocity = _moving_average(new_rates[1:], window=3) if len(new_rates) > 1 else None
-    res_velocity = _moving_average(resolved_rates[1:], window=3) if len(resolved_rates) > 1 else None
+    res_velocity = (_moving_average(resolved_rates[1:], window=3)
+        if len(resolved_rates) > 1 else None)
 
     # Hotspot persistence: between the last two scans.
     persistence: float | None = None
@@ -557,11 +556,23 @@ def _build_signals(
     score_delta_total = history_list[-1].score - history_list[0].score
     debt_delta_total = history_list[-1].total_debt_points - history_list[0].total_debt_points
     new_total = sum(
-        max(0, len({f.id for f in history_list[i].findings} - {f.id for f in history_list[i - 1].findings}))
+        max(0,
+            len({
+                f.id for f in history_list[i].findings
+            } - {
+                f.id for f in history_list[i - 1].findings
+            })
+        )
         for i in range(1, n)
     )
     resolved_total = sum(
-        max(0, len({f.id for f in history_list[i - 1].findings} - {f.id for f in history_list[i].findings}))
+        max(0,
+            len({
+                f.id for f in history_list[i - 1].findings
+            } - {
+                f.id for f in history_list[i].findings
+            })
+        )
         for i in range(1, n)
     )
 
@@ -580,7 +591,9 @@ def _build_signals(
             name="debt_trend",
             value=(
                 f"total debt moved {debt_delta_total:+d} across {n} scans "
-                f"(avg {_linear_slope([float(r.total_debt_points) for r in history_list]):+.2f}/scan)"
+                f"(avg "
+                f"{_linear_slope([float(r.total_debt_points) for r in history_list]):+.2f}"
+                f"/scan)"
             ),
             numeric=_linear_slope([float(r.total_debt_points) for r in history_list]),
         )

@@ -14,9 +14,8 @@ The schema mirrors Michael's spec sections 13 (API/Model design):
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -76,7 +75,7 @@ RADAR_AXES: tuple[str, ...] = (
 )
 
 
-def HorizonType(name: str) -> str:
+def horizon_type(name: str) -> str:
     """Validated horizon string. Returns ``name`` when valid."""
     if name not in HORIZONS:
         raise ValueError(

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.auth.routes import router as auth_router
 from app.drift import compute_drift
 from app.history import (
     InMemoryHistoryStore,
@@ -18,6 +19,7 @@ from app.history import (
     display_name,
 )
 from app.hotspots import compute_hotspots
+from app.providers.routes import router as providers_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.services.repository import (
@@ -34,6 +36,7 @@ from app.telemetry import (
     compute_scan_stages,
     compute_telemetry,
 )
+from app.workspace.routes import router as workspace_router
 
 app = FastAPI(
     title="Code Sonar API",
@@ -44,11 +47,16 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include auth, workspace, and provider routers
+app.include_router(auth_router)
+app.include_router(workspace_router)
+app.include_router(providers_router)
 
 
 # Process-wide history store. The MVP uses a single JSONL file in

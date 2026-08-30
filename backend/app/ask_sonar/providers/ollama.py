@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from urllib import error, request
 
 from app.ask_sonar.answering import GroundedAnswer
@@ -21,7 +21,7 @@ def _default_transport(url: str, payload: bytes, timeout: float) -> bytes:
     )
     try:
         with request.urlopen(req, timeout=timeout) as response:
-            return response.read()
+            return cast(bytes, response.read())
     except (error.URLError, TimeoutError) as exc:
         raise RuntimeError("Ollama request failed") from exc
 

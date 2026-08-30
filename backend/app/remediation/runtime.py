@@ -1,4 +1,4 @@
-"""Runtime registration for remediation execution, workspaces, and validation."""
+"""Runtime registration for remediation execution, workspaces, validation, and orchestration."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 
 from app.remediation.contracts import DryRunRemediationExecutor, RemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
+from app.remediation.orchestration import RemediationOrchestrator
 from app.remediation.validation import RemediationValidationService, ValidationCommand
 from app.remediation.workspace import GitWorktreeManager
 
@@ -46,6 +47,15 @@ def set_validation_service(service: RemediationValidationService) -> None:
 def get_validation_service() -> RemediationValidationService:
     """Return the configured remediation validation/rescan service."""
     return _validation_service
+
+
+def get_remediation_orchestrator() -> RemediationOrchestrator:
+    """Build an orchestrator from the current explicitly configured components."""
+    return RemediationOrchestrator(
+        workspace_manager=_workspace_manager,
+        executor=_executor,
+        validation_service=_validation_service,
+    )
 
 
 def configure_remediation_executor_from_env() -> None:

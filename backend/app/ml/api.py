@@ -1,4 +1,4 @@
-"""HTTP surface for Code Sonar ML metadata and controlled predictions."""
+"""HTTP surface for Code Sonar ML metadata, predictions, and similarity."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from app.ml.runtime import (
     get_features_for_scan,
     get_model_registry,
     get_prediction_model,
+    get_similarity_index,
 )
 
 router = APIRouter(prefix="/api/ml", tags=["ml"])
@@ -100,4 +101,55 @@ async def predict(request: PredictionRequest) -> dict[str, Any]:
         "advisory_only": True,
         "deterministic_score_unchanged": True,
         "prediction": prediction.to_dict(),
+    }
+
+
+@router.get("/similar-scans/{scan_id}")
+async def similar_scans(
+    scan_id: str,
+    task: str = Query(default="debt_risk", min_length=1),
+    limit: int = Query(default=5, ge=1, le=25),
+) -> dict[str, Any]:
+    """Return historical scans nearest to a stored scan feature vector."""
+    index = get_similarity_index(task)
+    if index is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "similarity_index_unavailable",
+                "task": task,
+                "message": "No fitted similarity index is loaded for this task",
+            },
+        )
+
+    features = get_features_for_scan(scan_id)
+    if features is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "scan_features_not_found",
+                "scan_id": scan_id,
+                "message": "No persisted scan features were found for this scan_id",
+            },
+        )
+
+    try:
+        cases = index.query(features, limit=limit, exclude_scan_id=scan_id)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "similarity_index_not_ready",
+                "task": task,
+                "message": str(exc),
+            },
+        ) from exc
+
+    return {
+        "scan_id": scan_id,
+        "task": task,
+        "count": len(cases),
+        "advisory_only": True,
+        "deterministic_score_unchanged": True,
+        "similar_scans": [case.to_dict() for case in cases],
     }

@@ -29,13 +29,20 @@ def test_successful_outcome_requires_resolution_and_no_regression() -> None:
     assert _outcome().successful is True
 
     failed = RemediationOutcome(
-        **{
-            **_outcome().to_dict(),
-            "outcome_schema_version": "1.0",
-            "outcome_id": "outcome-2",
-            "finding_resolved": True,
-            "regression_detected": True,
-        }
+        outcome_id="outcome-2",
+        repository_id="repo-1",
+        finding_id="finding-1",
+        before_scan_id="scan-before",
+        after_scan_id="scan-after",
+        attempted_at="2026-08-30T20:31:00+00:00",
+        executor="cursor",
+        remediation_kind="automated_patch",
+        build_passed=True,
+        tests_passed=True,
+        finding_resolved=True,
+        regression_detected=True,
+        score_delta=18,
+        debt_points_delta=-12,
     )
     assert failed.successful is False
 

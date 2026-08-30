@@ -44,6 +44,9 @@ class LogisticPrediction:
 class LogisticDebtRiskModel:
     """Versioned, reproducible Logistic Regression baseline."""
 
+    model_name = MODEL_NAME
+    model_version = MODEL_VERSION
+
     def __init__(self) -> None:
         self._pipeline = Pipeline(
             [

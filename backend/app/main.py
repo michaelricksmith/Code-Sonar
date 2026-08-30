@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.ask_sonar.api import router as ask_sonar_router
 from app.drift import compute_drift
 from app.history import (
     InMemoryHistoryStore,
@@ -41,6 +42,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(ml_router)
+app.include_router(ask_sonar_router)
 
 
 # Process-wide history store. The MVP uses a single JSONL file in

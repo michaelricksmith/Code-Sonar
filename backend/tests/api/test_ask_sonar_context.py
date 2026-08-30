@@ -89,6 +89,7 @@ def test_status_reports_unconfigured_provider_without_network_check(client: Test
         "provider": None,
         "model": None,
         "network_checked": False,
+        "remediation_planning_available": True,
     }
 
 
@@ -103,6 +104,7 @@ def test_status_reports_configured_provider_without_network_check(client: TestCl
         "provider": "test-provider",
         "model": "test-model",
         "network_checked": False,
+        "remediation_planning_available": True,
     }
 
 

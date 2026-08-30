@@ -80,6 +80,32 @@ class HallucinatedSourceProvider:
         )
 
 
+def test_status_reports_unconfigured_provider_without_network_check(client: TestClient) -> None:
+    response = client.get("/api/ask-sonar/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": False,
+        "provider": None,
+        "model": None,
+        "network_checked": False,
+    }
+
+
+def test_status_reports_configured_provider_without_network_check(client: TestClient) -> None:
+    set_answer_provider(GoodProvider())
+
+    response = client.get("/api/ask-sonar/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": True,
+        "provider": "test-provider",
+        "model": "test-model",
+        "network_checked": False,
+    }
+
+
 def test_context_returns_404_for_unknown_scan(client: TestClient) -> None:
     set_scan_provider(lambda scan_id: None)
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.ask_sonar.answering import validate_grounded_answer
 from app.ask_sonar.context import build_grounding_context
 from app.ask_sonar.runtime import get_answer_provider, get_scan
+from app.history import ScanRecord
 
 router = APIRouter(prefix="/api/ask-sonar", tags=["ask-sonar"])
 
@@ -24,7 +25,7 @@ class AskSonarRequest(BaseModel):
     similar_limit: int = Field(default=3, ge=1, le=20)
 
 
-def _require_scan(scan_id: str):
+def _require_scan(scan_id: str) -> ScanRecord:
     record = get_scan(scan_id)
     if record is None:
         raise HTTPException(

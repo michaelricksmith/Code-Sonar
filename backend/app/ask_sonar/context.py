@@ -116,10 +116,17 @@ def build_grounding_context(
                 "cases": [],
             }
 
+    allowed_sources = ["deterministic"]
+    if prediction["status"] == "available":
+        allowed_sources.append("ml_prediction")
+    if similarity["status"] == "available":
+        allowed_sources.append("historical_similarity")
+
     return {
         "context_schema_version": "1.0",
         "scan_id": record.scan_id,
         "deterministic_score_unchanged": True,
+        "allowed_sources": allowed_sources,
         "source_policy": {
             "deterministic_is_authoritative": True,
             "ml_is_advisory": True,

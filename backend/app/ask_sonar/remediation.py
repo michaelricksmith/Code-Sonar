@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from app.history import FindingSnapshot, ScanRecord
 
@@ -65,12 +65,13 @@ class RemediationPlan:
 
 
 def _risk_for_severity(severity: str) -> RiskLevel:
-    return {
+    value = {
         "info": "low",
         "warning": "medium",
         "error": "high",
         "critical": "critical",
-    }.get(severity, "high")  # type: ignore[return-value]
+    }.get(severity, "high")
+    return cast(RiskLevel, value)
 
 
 def _instruction_for_finding(finding: FindingSnapshot) -> str:

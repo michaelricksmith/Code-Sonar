@@ -65,12 +65,18 @@ class LogisticDebtRiskModel:
         labeled = [row for row in rows if row.label is not None]
         if len(labeled) < 2:
             raise ValueError("At least two labeled rows are required")
-        labels = [int(row.label) for row in labeled]
-        if len(set(labels)) < 2:
-            raise ValueError("Logistic Regression requires at least two label classes")
         for row in labeled:
             if row.feature_schema_version != FEATURE_SCHEMA_VERSION:
                 raise ValueError("Incompatible feature schema version")
+
+        labels: list[int] = []
+        for row in labeled:
+            assert row.label is not None
+            if row.label.value not in {"0", "1"}:
+                raise ValueError("Binary Logistic Regression labels must be '0' or '1'")
+            labels.append(int(row.label.value))
+        if len(set(labels)) < 2:
+            raise ValueError("Logistic Regression requires at least two label classes")
 
         x_train = [list(row.features.ordered_values()) for row in labeled]
         self._pipeline.fit(x_train, labels)

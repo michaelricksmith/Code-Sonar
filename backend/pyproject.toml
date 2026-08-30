@@ -13,6 +13,7 @@ dependencies = [
     "gitpython>=3.1.43",
     "radon>=6.0.1",
     "python-multipart>=0.0.9",
+    "scikit-learn>=1.5.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -58,3 +59,7 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "sklearn.*"
+ignore_missing_imports = true

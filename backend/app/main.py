@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.ask_sonar.api import router as ask_sonar_router
 from app.drift import compute_drift
 from app.history import (
     InMemoryHistoryStore,
@@ -17,6 +18,8 @@ from app.history import (
     display_name,
 )
 from app.hotspots import compute_hotspots
+from app.ml.api import router as ml_router
+from app.remediation.api import router as remediation_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.services.repository import (
@@ -39,6 +42,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(ml_router)
+app.include_router(ask_sonar_router)
+app.include_router(remediation_router)
 
 
 # Process-wide history store. The MVP uses a single JSONL file in
@@ -213,7 +219,9 @@ async def scan(request: ScanRequest) -> ScanResponse:
 async def hotspots(
     repo_path: str = Query(description="Repository path to compute hotspots for"),
     limit: int = Query(
-        default=50, ge=1, le=500,
+        default=50,
+        ge=1,
+        le=500,
         description="Maximum number of hotspots to return",
     ),
 ) -> dict[str, Any]:

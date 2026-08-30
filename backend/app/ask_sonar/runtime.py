@@ -7,6 +7,7 @@ model and never grants a text-generation provider direct repository access.
 
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 from app.ask_sonar.answering import AnswerProviderProtocol
@@ -42,3 +43,41 @@ def set_answer_provider(provider: AnswerProviderProtocol | None) -> None:
 def get_answer_provider() -> AnswerProviderProtocol | None:
     """Return the explicitly configured Ask Sonar answer provider, if any."""
     return _answer_provider
+
+
+def configure_answer_provider_from_env() -> None:
+    """Configure the explicitly selected Ask Sonar provider from environment.
+
+    No provider is selected by default. Setting ``CODE_SONAR_ASK_PROVIDER`` to
+    ``ollama`` creates the local adapter but does not make a network request.
+    """
+    provider_name = os.getenv("CODE_SONAR_ASK_PROVIDER", "").strip().lower()
+    if not provider_name:
+        set_answer_provider(None)
+        return
+    if provider_name != "ollama":
+        raise ValueError(f"Unsupported Ask Sonar provider: {provider_name}")
+
+    from app.ask_sonar.providers import OllamaAnswerProvider
+
+    model_name = os.getenv("CODE_SONAR_OLLAMA_MODEL", "llama3.1:8b").strip()
+    base_url = os.getenv("CODE_SONAR_OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip()
+    timeout_raw = os.getenv("CODE_SONAR_OLLAMA_TIMEOUT_SECONDS", "45").strip()
+    try:
+        timeout_seconds = float(timeout_raw)
+    except ValueError as exc:
+        raise ValueError("CODE_SONAR_OLLAMA_TIMEOUT_SECONDS must be numeric") from exc
+    if timeout_seconds <= 0:
+        raise ValueError("CODE_SONAR_OLLAMA_TIMEOUT_SECONDS must be positive")
+    if not model_name:
+        raise ValueError("CODE_SONAR_OLLAMA_MODEL must be non-empty")
+    if not base_url:
+        raise ValueError("CODE_SONAR_OLLAMA_BASE_URL must be non-empty")
+
+    set_answer_provider(
+        OllamaAnswerProvider(
+            model_name=model_name,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+        )
+    )

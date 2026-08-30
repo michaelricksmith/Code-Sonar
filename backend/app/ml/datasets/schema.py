@@ -63,10 +63,15 @@ class DatasetRow:
     features: ScanFeatureVector
     label: LabelProvenance | None = None
 
+    @property
+    def feature_schema_version(self) -> str:
+        """Return the feature schema version represented by this row."""
+        return FEATURE_SCHEMA_VERSION
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_schema_version": DATASET_SCHEMA_VERSION,
-            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "feature_schema_version": self.feature_schema_version,
             "row_id": self.row_id,
             "repository_group": self.repository_group,
             "lineage_id": self.lineage_id,

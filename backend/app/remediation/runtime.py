@@ -1,4 +1,4 @@
-"""Runtime registration for remediation executors and workspace preparation."""
+"""Runtime registration for remediation execution, workspaces, and validation."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import os
 
 from app.remediation.contracts import DryRunRemediationExecutor, RemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
+from app.remediation.validation import RemediationValidationService, ValidationCommand
 from app.remediation.workspace import GitWorktreeManager
 
 _executor: RemediationExecutor = DryRunRemediationExecutor()
 _workspace_manager = GitWorktreeManager()
+_validation_service = RemediationValidationService(workspace_root=_workspace_manager.root)
 
 
 def set_remediation_executor(executor: RemediationExecutor) -> None:
@@ -35,14 +37,19 @@ def get_workspace_manager() -> GitWorktreeManager:
     return _workspace_manager
 
 
-def configure_remediation_executor_from_env() -> None:
-    """Configure an executor explicitly from environment without running commands.
+def set_validation_service(service: RemediationValidationService) -> None:
+    """Override remediation validation/rescan behavior; primarily used by tests."""
+    global _validation_service
+    _validation_service = service
 
-    Cursor activation requires both ``CODE_SONAR_REMEDIATION_EXECUTOR=cursor`` and
-    ``CODE_SONAR_CURSOR_COMMAND_JSON`` containing a JSON array of argv tokens. The
-    template must include ``{workspace}`` and ``{instruction}`` placeholders. Any
-    invalid or incomplete configuration fails closed to the dry-run executor.
-    """
+
+def get_validation_service() -> RemediationValidationService:
+    """Return the configured remediation validation/rescan service."""
+    return _validation_service
+
+
+def configure_remediation_executor_from_env() -> None:
+    """Configure an executor explicitly from environment without running commands."""
     global _executor
     executor_name = os.getenv("CODE_SONAR_REMEDIATION_EXECUTOR", "").strip().lower()
     if executor_name != "cursor":
@@ -71,4 +78,57 @@ def configure_remediation_executor_from_env() -> None:
         _executor = DryRunRemediationExecutor()
 
 
+def configure_validation_service_from_env() -> None:
+    """Configure explicit build/test validation commands from a JSON array.
+
+    ``CODE_SONAR_REMEDIATION_VALIDATORS_JSON`` accepts objects shaped as
+    ``{"name":"pytest","kind":"tests","argv":["python","-m","pytest"]}``.
+    Invalid configuration fails closed to a rescan-only validation service.
+    Commands are argv arrays and are never executed through a shell.
+    """
+    global _validation_service
+    raw = os.getenv("CODE_SONAR_REMEDIATION_VALIDATORS_JSON", "").strip()
+    if not raw:
+        _validation_service = RemediationValidationService(
+            workspace_root=_workspace_manager.root
+        )
+        return
+
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, list):
+            raise ValueError("Validation configuration must be a JSON array")
+        commands: list[ValidationCommand] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ValueError("Validation command entries must be objects")
+            name = str(item["name"]).strip()
+            kind = str(item["kind"]).strip().lower()
+            argv_raw = item["argv"]
+            timeout_seconds = float(item.get("timeout_seconds", 300.0))
+            if not name or kind not in {"build", "tests", "other"}:
+                raise ValueError("Invalid validation command name or kind")
+            if not isinstance(argv_raw, list) or not argv_raw:
+                raise ValueError("Validation argv must be a non-empty JSON array")
+            if timeout_seconds <= 0:
+                raise ValueError("Validation timeout must be positive")
+            commands.append(
+                ValidationCommand(
+                    name=name,
+                    kind=kind,  # type: ignore[arg-type]
+                    argv=tuple(str(token) for token in argv_raw),
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        _validation_service = RemediationValidationService(
+            commands=tuple(commands),
+            workspace_root=_workspace_manager.root,
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        _validation_service = RemediationValidationService(
+            workspace_root=_workspace_manager.root
+        )
+
+
 configure_remediation_executor_from_env()
+configure_validation_service_from_env()

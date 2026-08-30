@@ -48,13 +48,21 @@ class ModelRegistry:
         self._records.append(record)
 
     def records_for_task(self, task: str) -> tuple[ModelRecord, ...]:
-        return tuple(sorted((r for r in self._records if r.task == task), key=lambda r: r.model_name))
+        matches = (record for record in self._records if record.task == task)
+        return tuple(sorted(matches, key=lambda record: record.model_name))
 
     def choose_champion(self, task: str) -> ModelRecord:
         candidates = list(self.records_for_task(task))
         if not candidates:
             raise ValueError(f"No models registered for task {task!r}")
-        winner = max(candidates, key=lambda r: (r.metrics.f1, r.metrics.roc_auc or -1.0, r.model_name))
+        winner = max(
+            candidates,
+            key=lambda record: (
+                record.metrics.f1,
+                record.metrics.roc_auc or -1.0,
+                record.model_name,
+            ),
+        )
         updated: list[ModelRecord] = []
         champion: ModelRecord | None = None
         for record in self._records:

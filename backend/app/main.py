@@ -17,6 +17,7 @@ from app.history import (
     display_name,
 )
 from app.hotspots import compute_hotspots
+from app.ml.api import router as ml_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.services.repository import (
@@ -39,6 +40,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(ml_router)
 
 
 # Process-wide history store. The MVP uses a single JSONL file in
@@ -213,7 +215,9 @@ async def scan(request: ScanRequest) -> ScanResponse:
 async def hotspots(
     repo_path: str = Query(description="Repository path to compute hotspots for"),
     limit: int = Query(
-        default=50, ge=1, le=500,
+        default=50,
+        ge=1,
+        le=500,
         description="Maximum number of hotspots to return",
     ),
 ) -> dict[str, Any]:

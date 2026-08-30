@@ -11,7 +11,7 @@ from app.ml.outcomes.labels import remediation_success_label
 from app.ml.outcomes.runtime import get_outcome_store
 from app.ml.outcomes.schema import RemediationOutcome
 
-router = APIRouter(prefix="/api/ml/remediation-outcomes", tags=["ml-remediation-outcomes"])
+router = APIRouter(prefix="/remediation-outcomes", tags=["ml-remediation-outcomes"])
 
 
 class RemediationOutcomeRequest(BaseModel):

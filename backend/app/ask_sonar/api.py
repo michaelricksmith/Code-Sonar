@@ -39,6 +39,25 @@ def _require_scan(scan_id: str) -> ScanRecord:
     return record
 
 
+@router.get("/status")
+async def ask_sonar_status() -> dict[str, Any]:
+    """Return configured provider metadata without contacting the provider."""
+    provider = get_answer_provider()
+    if provider is None:
+        return {
+            "configured": False,
+            "provider": None,
+            "model": None,
+            "network_checked": False,
+        }
+    return {
+        "configured": True,
+        "provider": provider.provider_name,
+        "model": provider.model_name,
+        "network_checked": False,
+    }
+
+
 @router.get("/context/{scan_id}")
 async def grounding_context(
     scan_id: str,

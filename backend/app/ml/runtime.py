@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
+from app.history import JsonlHistoryStore
 from app.ml.evaluation import ModelRegistry
-from app.ml.features import ScanFeatureVector
+from app.ml.features import ScanFeatureVector, extract_scan_features
 
 
 class PredictionResultProtocol(Protocol):
@@ -67,13 +68,20 @@ def get_prediction_model(task: str) -> PredictionModelProtocol | None:
 
 
 def set_feature_provider(provider: FeatureProvider | None) -> None:
-    """Set the stored-scan feature lookup provider."""
+    """Override stored-scan feature lookup; primarily used by tests."""
     global _feature_provider
     _feature_provider = provider
 
 
+def _persisted_scan_features(scan_id: str) -> ScanFeatureVector | None:
+    """Build the current feature vector from a persisted redacted scan record."""
+    record = JsonlHistoryStore().get(scan_id)
+    if record is None:
+        return None
+    return extract_scan_features(record)
+
+
 def get_features_for_scan(scan_id: str) -> ScanFeatureVector | None:
     """Resolve features for a stored scan without triggering a new scan."""
-    if _feature_provider is None:
-        return None
-    return _feature_provider(scan_id)
+    provider = _feature_provider or _persisted_scan_features
+    return provider(scan_id)

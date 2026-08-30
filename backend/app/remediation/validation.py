@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-from app.history import HistoryStore, JsonlHistoryStore, ScanRecord, build_scan_record
+from app.history import HistoryStore, JsonlHistoryStore, build_scan_record
 from app.ml.outcomes import JsonlOutcomeStore, RemediationOutcome
 from app.ml.outcomes.labels import remediation_success_label
+from app.models.finding import Finding
 from app.scoring.engine import calculate_score
 from app.services.repository import scan_repository
 
@@ -50,7 +51,7 @@ class ValidationProcessResult:
 
 
 ValidationRunner = Callable[[list[str], Path, float], ValidationProcessResult]
-Scanner = Callable[[Path], list]
+Scanner = Callable[[Path], list[Finding]]
 
 
 def _default_runner(args: list[str], cwd: Path, timeout: float) -> ValidationProcessResult:
@@ -115,7 +116,7 @@ class RemediationValidationService:
         outcome_store: JsonlOutcomeStore | None = None,
         workspace_root: Path | None = None,
         runner: ValidationRunner = _default_runner,
-        scanner: Callable[[Path], list] = scan_repository,
+        scanner: Scanner = scan_repository,
     ) -> None:
         self.commands = commands
         self.history_store = history_store or JsonlHistoryStore()

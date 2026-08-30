@@ -1,8 +1,8 @@
-"""Process-wide ML metadata and prediction runtime state.
+"""Process-wide ML metadata, prediction, and similarity runtime state.
 
 Read-only metadata access remains separate from prediction execution. Loaded
-estimators must be registered explicitly; requests never train models or load
-artifacts implicitly.
+estimators and similarity indexes must be registered explicitly; requests never
+train models or load artifacts implicitly.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Callable, Protocol
 from app.history import JsonlHistoryStore
 from app.ml.evaluation import ModelRegistry
 from app.ml.features import ScanFeatureVector, extract_scan_features
+from app.ml.similarity import SimilarityIndex
 
 
 class PredictionResultProtocol(Protocol):
@@ -36,6 +37,7 @@ FeatureProvider = Callable[[str], ScanFeatureVector | None]
 
 _model_registry = ModelRegistry()
 _prediction_models: dict[str, PredictionModelProtocol] = {}
+_similarity_indexes: dict[str, SimilarityIndex] = {}
 _feature_provider: FeatureProvider | None = None
 
 
@@ -65,6 +67,23 @@ def clear_prediction_models() -> None:
 def get_prediction_model(task: str) -> PredictionModelProtocol | None:
     """Return the explicitly loaded model for ``task``, if any."""
     return _prediction_models.get(task)
+
+
+def register_similarity_index(task: str, index: SimilarityIndex) -> None:
+    """Register one already-fitted historical similarity index for a task."""
+    if not task.strip():
+        raise ValueError("Similarity task must be non-empty")
+    _similarity_indexes[task] = index
+
+
+def clear_similarity_indexes() -> None:
+    """Clear loaded similarity indexes; primarily used by tests."""
+    _similarity_indexes.clear()
+
+
+def get_similarity_index(task: str) -> SimilarityIndex | None:
+    """Return the explicitly loaded similarity index for ``task``, if any."""
+    return _similarity_indexes.get(task)
 
 
 def set_feature_provider(provider: FeatureProvider | None) -> None:

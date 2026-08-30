@@ -1,6 +1,6 @@
 """ML-1 invariants for deterministic scan-level feature extraction."""
 
-from app.history import build_scan_record
+from app.history import ScanRecord, build_scan_record
 from app.ml.features import FEATURE_SCHEMA_VERSION, ScanFeatureVector, extract_scan_features
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.scoring.engine import calculate_score
@@ -36,7 +36,7 @@ def _finding(
     )
 
 
-def _record():
+def _record() -> ScanRecord:
     findings = [
         _finding(
             finding_id="f1",

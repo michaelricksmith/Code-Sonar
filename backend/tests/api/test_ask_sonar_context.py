@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -53,7 +55,7 @@ class GoodProvider:
     provider_name = "test-provider"
     model_name = "test-model"
 
-    def answer(self, question: str, context: dict[str, object]) -> GroundedAnswer:
+    def answer(self, question: str, context: dict[str, Any]) -> GroundedAnswer:
         assert question == "Why is my score a B?"
         assert context["scan_id"] == "scan-1"
         assert context["allowed_sources"] == ["deterministic"]
@@ -69,7 +71,7 @@ class HallucinatedSourceProvider:
     provider_name = "bad-provider"
     model_name = "bad-model"
 
-    def answer(self, question: str, context: dict[str, object]) -> GroundedAnswer:
+    def answer(self, question: str, context: dict[str, Any]) -> GroundedAnswer:
         return GroundedAnswer(
             answer="An unavailable ML model says the risk is high.",
             used_sources=("ml_prediction",),

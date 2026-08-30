@@ -1,4 +1,4 @@
-"""HTTP surface for Code Sonar ML metadata, predictions, and similarity."""
+"""HTTP surface for Code Sonar ML metadata, predictions, similarity, and outcomes."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.ml.outcomes.api import router as outcomes_router
 from app.ml.runtime import (
     get_features_for_scan,
     get_model_registry,
@@ -15,6 +16,7 @@ from app.ml.runtime import (
 )
 
 router = APIRouter(prefix="/api/ml", tags=["ml"])
+router.include_router(outcomes_router)
 
 
 class PredictionRequest(BaseModel):

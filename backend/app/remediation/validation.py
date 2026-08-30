@@ -137,6 +137,26 @@ class RemediationValidationService:
             raise PermissionError(
                 "Remediation validation may run only inside Code Sonar remediation worktrees"
             ) from exc
+
+        top_level = self.runner(
+            ["git", "rev-parse", "--show-toplevel"], workspace, 30.0
+        )
+        if top_level.returncode != 0 or not top_level.stdout.strip():
+            raise PermissionError("Remediation validation target is not a Git worktree")
+        if Path(top_level.stdout.strip()).resolve() != workspace:
+            raise PermissionError(
+                "Remediation validation target is not the prepared worktree root"
+            )
+
+        branch = self.runner(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], workspace, 30.0
+        )
+        if branch.returncode != 0 or not branch.stdout.strip().startswith(
+            "code-sonar/remediation/"
+        ):
+            raise PermissionError(
+                "Remediation validation target is not on a Code Sonar remediation branch"
+            )
         return workspace
 
     @staticmethod
@@ -145,6 +165,13 @@ class RemediationValidationService:
     ) -> bool | None:
         relevant = [result.passed for result in results if result.kind == kind]
         return None if not relevant else all(relevant)
+
+    @staticmethod
+    def _outcome_id(request_id: str, before_scan_id: str, finding_id: str) -> str:
+        digest = hashlib.sha256(
+            f"{request_id}|{before_scan_id}|{finding_id}".encode("utf-8")
+        ).hexdigest()[:20]
+        return f"remediation-{digest}"
 
     def validate(
         self,
@@ -163,6 +190,10 @@ class RemediationValidationService:
             raise LookupError("Original persisted scan was not found")
         if not any(finding.id == finding_id for finding in before.findings):
             raise LookupError("Target finding was not present in the original scan")
+
+        outcome_id = self._outcome_id(request_id, before.scan_id, finding_id)
+        if self.outcome_store.get(outcome_id) is not None:
+            raise FileExistsError("Remediation outcome already exists")
 
         command_results: list[ValidationCommandResult] = []
         for command in self.commands:
@@ -201,12 +232,6 @@ class RemediationValidationService:
         debt_points_delta = after.total_debt_points - before.total_debt_points
         regression_detected = score_delta < 0 or debt_points_delta > 0
         attempted = attempted_at or datetime.now(timezone.utc).isoformat()
-        digest = hashlib.sha256(
-            f"{request_id}|{before.scan_id}|{after.scan_id}|{finding_id}".encode("utf-8")
-        ).hexdigest()[:20]
-        outcome_id = f"remediation-{digest}"
-        if self.outcome_store.get(outcome_id) is not None:
-            raise FileExistsError("Remediation outcome already exists")
 
         outcome = RemediationOutcome(
             outcome_id=outcome_id,

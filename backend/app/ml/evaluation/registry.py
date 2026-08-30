@@ -1,4 +1,4 @@
-"""In-memory model registry and champion selection metadata."""
+"""Model registry metadata and deterministic champion selection."""
 
 from __future__ import annotations
 
@@ -16,6 +16,9 @@ class ModelRecord:
     model_version: str
     metrics: BinaryClassificationMetrics
     feature_schema_version: str = FEATURE_SCHEMA_VERSION
+    dataset_version: str | None = None
+    trained_at: str | None = None
+    artifact_ref: str | None = None
     is_champion: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -24,16 +27,60 @@ class ModelRecord:
             "model_name": self.model_name,
             "model_version": self.model_version,
             "feature_schema_version": self.feature_schema_version,
+            "dataset_version": self.dataset_version,
+            "trained_at": self.trained_at,
+            "artifact_ref": self.artifact_ref,
             "is_champion": self.is_champion,
             "metrics": self.metrics.to_dict(),
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ModelRecord:
+        metrics_payload = payload["metrics"]
+        confusion = metrics_payload["confusion_matrix"]
+        metrics = BinaryClassificationMetrics(
+            accuracy=float(metrics_payload["accuracy"]),
+            precision=float(metrics_payload["precision"]),
+            recall=float(metrics_payload["recall"]),
+            f1=float(metrics_payload["f1"]),
+            roc_auc=(
+                None
+                if metrics_payload.get("roc_auc") is None
+                else float(metrics_payload["roc_auc"])
+            ),
+            true_negative=int(confusion["tn"]),
+            false_positive=int(confusion["fp"]),
+            false_negative=int(confusion["fn"]),
+            true_positive=int(confusion["tp"]),
+        )
+        return cls(
+            task=str(payload["task"]),
+            model_name=str(payload["model_name"]),
+            model_version=str(payload["model_version"]),
+            feature_schema_version=str(
+                payload.get("feature_schema_version", FEATURE_SCHEMA_VERSION)
+            ),
+            dataset_version=(
+                None
+                if payload.get("dataset_version") is None
+                else str(payload["dataset_version"])
+            ),
+            trained_at=(
+                None if payload.get("trained_at") is None else str(payload["trained_at"])
+            ),
+            artifact_ref=(
+                None if payload.get("artifact_ref") is None else str(payload["artifact_ref"])
+            ),
+            is_champion=bool(payload.get("is_champion", False)),
+            metrics=metrics,
+        )
+
 
 class ModelRegistry:
-    """Small deterministic registry used before persistent artifact storage exists."""
+    """Deterministic registry of evaluated model metadata."""
 
-    def __init__(self) -> None:
-        self._records: list[ModelRecord] = []
+    def __init__(self, records: list[ModelRecord] | None = None) -> None:
+        self._records: list[ModelRecord] = list(records or [])
 
     def register(self, record: ModelRecord) -> None:
         self._records = [
@@ -46,6 +93,14 @@ class ModelRegistry:
             )
         ]
         self._records.append(record)
+
+    def all_records(self) -> tuple[ModelRecord, ...]:
+        return tuple(
+            sorted(
+                self._records,
+                key=lambda record: (record.task, record.model_name, record.model_version),
+            )
+        )
 
     def records_for_task(self, task: str) -> tuple[ModelRecord, ...]:
         matches = (record for record in self._records if record.task == task)
@@ -73,6 +128,9 @@ class ModelRegistry:
                 model_version=record.model_version,
                 metrics=record.metrics,
                 feature_schema_version=record.feature_schema_version,
+                dataset_version=record.dataset_version,
+                trained_at=record.trained_at,
+                artifact_ref=record.artifact_ref,
                 is_champion=is_champion,
             )
             updated.append(replacement)

@@ -81,3 +81,6 @@ def configure_answer_provider_from_env() -> None:
             timeout_seconds=timeout_seconds,
         )
     )
+
+
+configure_answer_provider_from_env()

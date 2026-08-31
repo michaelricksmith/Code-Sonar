@@ -88,6 +88,9 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
         assert status.json() == {
             "configured": True,
             "auth_mode": "app",
+            "app_installable": False,
+            "installation_count": 0,
+            "webhook_configured": False,
             "token_persisted": False,
             "token_exposed": False,
             "managed_checkout": True,
@@ -109,6 +112,7 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
         assert connected.status_code == 200
         payload = connected.json()
         assert payload["project"]["full_name"] == "octo/example"
+        assert payload["project"]["provider_installation_id"] is None
         assert payload["managed_checkout"] is True
         assert payload["token_persisted"] is False
         assert payload["token_exposed"] is False

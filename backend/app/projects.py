@@ -11,8 +11,11 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+from app.github_integration import get_github_integration
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +100,10 @@ class GitHubProjectConnectRequest(BaseModel):
     local_checkout_path: str = Field(min_length=1)
 
 
+class ManagedGitHubConnectRequest(BaseModel):
+    repository_full_name: str = Field(min_length=3, max_length=220)
+
+
 def _git(repo: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -120,6 +127,10 @@ def _normalize_remote(remote: str) -> str:
     raise ValueError("Repository origin is not a GitHub remote")
 
 
+def _project_id(full_name: str) -> str:
+    return "proj_" + hashlib.sha256(f"github:{full_name.lower()}".encode()).hexdigest()[:20]
+
+
 def connect_github_project(request: GitHubProjectConnectRequest) -> ProjectRecord:
     repo = Path(request.local_checkout_path).expanduser().resolve()
     if not repo.exists() or not repo.is_dir():
@@ -137,9 +148,8 @@ def connect_github_project(request: GitHubProjectConnectRequest) -> ProjectRecor
     except ValueError:
         default_branch = _git(top_level, "branch", "--show-current") or "main"
 
-    project_id = "proj_" + hashlib.sha256(f"github:{expected}".encode()).hexdigest()[:20]
     return ProjectRecord(
-        project_id=project_id,
+        project_id=_project_id(expected),
         provider="github",
         owner=request.owner,
         name=request.name,
@@ -176,8 +186,74 @@ async def get_project(project_id: str) -> dict[str, Any]:
     return {"project": project.to_public_dict()}
 
 
+@router.get("/connect/github/status")
+async def github_connection_status() -> dict[str, Any]:
+    integration = get_github_integration()
+    return {
+        "configured": integration.configured,
+        "auth_mode": integration.auth_mode if integration.configured else None,
+        "token_persisted": False,
+        "token_exposed": False,
+        "managed_checkout": True,
+    }
+
+
+@router.get("/connect/github/repositories")
+async def github_repositories() -> dict[str, Any]:
+    integration = get_github_integration()
+    if not integration.configured:
+        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+    try:
+        repositories = integration.list_repositories()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="GitHub repository discovery failed") from exc
+    return {
+        "count": len(repositories),
+        "repositories": [item.to_public_dict() for item in repositories],
+        "token_exposed": False,
+    }
+
+
+@router.post("/connect/github/managed")
+async def connect_managed_github(request: ManagedGitHubConnectRequest) -> dict[str, Any]:
+    integration = get_github_integration()
+    if not integration.configured:
+        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+    try:
+        repository = integration.get_repository(request.repository_full_name)
+        checkout = integration.prepare_checkout(repository)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (httpx.HTTPError, RuntimeError) as exc:
+        raise HTTPException(status_code=502, detail="GitHub repository checkout failed") from exc
+
+    record = ProjectRecord(
+        project_id=_project_id(repository.full_name),
+        provider="github",
+        owner=repository.owner,
+        name=repository.name,
+        default_branch=repository.default_branch,
+        connected_at=datetime.now(timezone.utc).isoformat(),
+        local_checkout_path=str(checkout),
+    )
+    get_project_store().upsert(record)
+    return {
+        "project": record.to_public_dict(),
+        "connection_verified": True,
+        "managed_checkout": True,
+        "local_checkout_path_exposed": False,
+        "token_persisted": False,
+        "token_exposed": False,
+    }
+
+
 @router.post("/connect/github")
 async def connect_github(request: GitHubProjectConnectRequest) -> dict[str, Any]:
+    """Legacy local-checkout connector retained during GitHub App migration."""
     try:
         record = connect_github_project(request)
     except ValueError as exc:

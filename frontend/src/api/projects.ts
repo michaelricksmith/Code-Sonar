@@ -36,6 +36,23 @@ export interface ProjectDashboard {
   deterministic_score_authority: "code_sonar";
 }
 
+export interface GitHubConnectionStatus {
+  configured: boolean;
+  auth_mode: "oauth" | "app" | null;
+  token_persisted: false;
+  token_exposed: false;
+  managed_checkout: true;
+}
+
+export interface GitHubRepository {
+  repository_id: number;
+  full_name: string;
+  owner: string;
+  name: string;
+  default_branch: string;
+  private: boolean;
+}
+
 const API_BASE = "/api/projects";
 
 async function decode(res: Response, fallback: string): Promise<any> {
@@ -63,4 +80,25 @@ export async function scanProject(projectId: string): Promise<ScanResponse> {
 export async function fetchProjectDrift(projectId: string): Promise<DriftResult> {
   const res = await fetch(`${API_BASE}/${encodeURIComponent(projectId)}/drift`);
   return (await decode(res, "Project drift failed")) as DriftResult;
+}
+
+export async function fetchGitHubConnectionStatus(): Promise<GitHubConnectionStatus> {
+  const res = await fetch(`${API_BASE}/connect/github/status`);
+  return (await decode(res, "Failed to load GitHub connection status")) as GitHubConnectionStatus;
+}
+
+export async function fetchGitHubRepositories(): Promise<GitHubRepository[]> {
+  const res = await fetch(`${API_BASE}/connect/github/repositories`);
+  const data = await decode(res, "Failed to load GitHub repositories");
+  return (data.repositories ?? []) as GitHubRepository[];
+}
+
+export async function connectManagedGitHubProject(fullName: string): Promise<ProjectRecord> {
+  const res = await fetch(`${API_BASE}/connect/github/managed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repository_full_name: fullName }),
+  });
+  const data = await decode(res, "Failed to connect GitHub repository");
+  return data.project as ProjectRecord;
 }

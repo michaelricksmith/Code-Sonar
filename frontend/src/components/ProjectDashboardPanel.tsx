@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { DriftResult, Finding, ScanResponse } from "../api/analyzers";
 import {
+  activateGitHubInstallation,
   connectManagedGitHubProject,
+  fetchGitHubAppStatus,
   fetchGitHubConnectionStatus,
+  fetchGitHubInstallations,
   fetchGitHubRepositories,
   fetchProjectDashboard,
   fetchProjectDrift,
@@ -11,7 +14,9 @@ import {
   scanProject,
 } from "../api/projects";
 import type {
+  GitHubAppStatus,
   GitHubConnectionStatus,
+  GitHubInstallation,
   GitHubRepository,
   ProjectDashboard,
   ProjectRecord,
@@ -31,6 +36,9 @@ export function ProjectDashboardPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [githubStatus, setGitHubStatus] = useState<GitHubConnectionStatus | null>(null);
+  const [githubAppStatus, setGitHubAppStatus] = useState<GitHubAppStatus | null>(null);
+  const [githubInstallations, setGitHubInstallations] = useState<GitHubInstallation[]>([]);
+  const [selectedInstallation, setSelectedInstallation] = useState<number | null>(null);
   const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
   const [selectedGitHubRepo, setSelectedGitHubRepo] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -45,11 +53,21 @@ export function ProjectDashboardPanel() {
     }
   }
 
+  async function refreshGitHubState(): Promise<void> {
+    const [connection, appStatus] = await Promise.all([
+      fetchGitHubConnectionStatus(),
+      fetchGitHubAppStatus(),
+    ]);
+    setGitHubStatus(connection);
+    setGitHubAppStatus(appStatus);
+  }
+
   useEffect(() => {
     refreshProjects().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-    fetchGitHubConnectionStatus()
-      .then(setGitHubStatus)
-      .catch(() => setGitHubStatus(null));
+    refreshGitHubState().catch(() => {
+      setGitHubStatus(null);
+      setGitHubAppStatus(null);
+    });
   }, []);
 
   useEffect(() => {
@@ -68,6 +86,33 @@ export function ProjectDashboardPanel() {
     if (!latest?.findings) return [] as Finding[];
     return [...latest.findings].sort((a, b) => riskRank(b) - riskRank(a)).slice(0, 5);
   }, [latest]);
+
+  async function refreshInstallations(): Promise<void> {
+    setError(null);
+    try {
+      const installations = await fetchGitHubInstallations();
+      setGitHubInstallations(installations);
+      setSelectedInstallation((current) => current ?? installations[0]?.installation_id ?? null);
+      await refreshGitHubState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function activateInstallation(): Promise<void> {
+    if (selectedInstallation === null) return;
+    setConnecting(true);
+    setError(null);
+    try {
+      await activateGitHubInstallation(selectedInstallation);
+      await refreshGitHubState();
+      await loadGitHubRepositories();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnecting(false);
+    }
+  }
 
   async function loadGitHubRepositories(): Promise<void> {
     setError(null);
@@ -132,54 +177,103 @@ export function ProjectDashboardPanel() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">
-              GitHub connection
+              GitHub App connection
             </div>
             <p className="mt-1 text-sm text-slate-400">
-              Choose an authorized GitHub repository. Code Sonar manages the checkout on the server and runs the first deterministic scan automatically.
+              Install Code Sonar on GitHub, activate the detected installation, then choose a repository. Pushes to the default branch and merged pull requests trigger fresh deterministic scans automatically.
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Tokens are runtime-only and are never returned or written into project records.
+              Installation tokens are short-lived, runtime-only, and never returned or written into project records.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-slate-950 px-2 py-1 text-xs text-slate-400">
               {githubStatus?.configured
                 ? `authorized · ${githubStatus.auth_mode}`
-                : "not configured"}
+                : githubAppStatus?.configured
+                  ? "app ready"
+                  : "not configured"}
             </span>
+            {githubAppStatus?.install_url && (
+              <a
+                href={githubAppStatus.install_url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-200 hover:border-sky-500"
+              >
+                Install GitHub App
+              </a>
+            )}
             <button
               type="button"
-              onClick={loadGitHubRepositories}
-              disabled={!githubStatus?.configured || connecting}
-              className="rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-200 hover:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={refreshInstallations}
+              disabled={!githubAppStatus?.configured || connecting}
+              className="rounded-md border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Choose repository
+              Refresh installations
             </button>
           </div>
         </div>
 
-        {githubRepositories.length > 0 && (
+        {githubInstallations.length > 0 && !githubStatus?.configured && (
           <div className="mt-4 flex flex-col gap-2 md:flex-row">
             <select
-              value={selectedGitHubRepo}
-              onChange={(e) => setSelectedGitHubRepo(e.target.value)}
+              value={selectedInstallation ?? ""}
+              onChange={(e) => setSelectedInstallation(Number(e.target.value))}
               className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
             >
-              {githubRepositories.map((repository) => (
-                <option key={repository.repository_id} value={repository.full_name}>
-                  {repository.full_name} · {repository.default_branch}
-                  {repository.private ? " · private" : ""}
+              {githubInstallations.map((installation) => (
+                <option key={installation.installation_id} value={installation.installation_id}>
+                  {installation.account_login} · {installation.account_type}
                 </option>
               ))}
             </select>
             <button
               type="button"
-              onClick={connectGitHubRepository}
-              disabled={!selectedGitHubRepo || connecting}
+              onClick={activateInstallation}
+              disabled={selectedInstallation === null || connecting}
               className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
             >
-              {connecting ? "Connecting & scanning…" : "Connect & scan"}
+              {connecting ? "Activating…" : "Activate installation"}
             </button>
+          </div>
+        )}
+
+        {githubStatus?.configured && (
+          <div className="mt-4 flex flex-col gap-2 md:flex-row">
+            {githubRepositories.length === 0 ? (
+              <button
+                type="button"
+                onClick={loadGitHubRepositories}
+                disabled={connecting}
+                className="rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-200 hover:border-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Choose repository
+              </button>
+            ) : (
+              <>
+                <select
+                  value={selectedGitHubRepo}
+                  onChange={(e) => setSelectedGitHubRepo(e.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                >
+                  {githubRepositories.map((repository) => (
+                    <option key={repository.repository_id} value={repository.full_name}>
+                      {repository.full_name} · {repository.default_branch}
+                      {repository.private ? " · private" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={connectGitHubRepository}
+                  disabled={!selectedGitHubRepo || connecting}
+                  className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+                >
+                  {connecting ? "Connecting & scanning…" : "Connect & scan"}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -191,7 +285,7 @@ export function ProjectDashboardPanel() {
           </div>
           <h2 className="mt-1 text-lg font-semibold">No connected projects yet</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Authorize GitHub and choose a repository above. The legacy local-path connector remains available below during migration.
+            Install the GitHub App and choose a repository above. The legacy local-path connector remains available below during migration.
           </p>
         </div>
       ) : (
@@ -248,6 +342,9 @@ export function ProjectDashboardPanel() {
                 <span className="rounded bg-slate-900 px-2 py-1">
                   {dashboard.history_count} scans
                 </span>
+                {dashboard.project.provider_installation_id !== null && (
+                  <span className="rounded bg-slate-900 px-2 py-1">webhook scanning active</span>
+                )}
                 <span className="rounded bg-slate-900 px-2 py-1">score authority: Code Sonar</span>
               </div>
 

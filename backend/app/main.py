@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from app.ask_sonar.api import router as ask_sonar_router
 from app.drift import compute_drift
+from app.github_app import router as github_app_router
+from app.github_app import set_webhook_scan_handler
 from app.history import (
     InMemoryHistoryStore,
     JsonlHistoryStore,
@@ -48,6 +50,7 @@ app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(remediation_router)
 app.include_router(projects_router)
+app.include_router(github_app_router)
 
 _history_store: JsonlHistoryStore | InMemoryHistoryStore = JsonlHistoryStore()
 
@@ -262,6 +265,9 @@ async def scan_project(project_id: str) -> ScanResponse:
         scanned_at=scanned_at,
         scan_id=record.scan_id,
     )
+
+
+set_webhook_scan_handler(scan_project)
 
 
 @app.get("/api/projects/{project_id}/dashboard")

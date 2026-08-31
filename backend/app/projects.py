@@ -29,6 +29,8 @@ class ProjectRecord:
     local_checkout_path: str
     latest_scan_id: str | None = None
     latest_score: int | None = None
+    provider_repository_id: int | None = None
+    provider_installation_id: int | None = None
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +43,8 @@ class ProjectRecord:
             "connected_at": self.connected_at,
             "latest_scan_id": self.latest_scan_id,
             "latest_score": self.latest_score,
+            "provider_repository_id": self.provider_repository_id,
+            "provider_installation_id": self.provider_installation_id,
         }
 
 
@@ -192,6 +196,7 @@ async def github_connection_status() -> dict[str, Any]:
     return {
         "configured": integration.configured,
         "auth_mode": integration.auth_mode if integration.configured else None,
+        "installation_id": integration.installation_id if integration.configured else None,
         "token_persisted": False,
         "token_exposed": False,
         "managed_checkout": True,
@@ -239,6 +244,8 @@ async def connect_managed_github(request: ManagedGitHubConnectRequest) -> dict[s
         default_branch=repository.default_branch,
         connected_at=datetime.now(timezone.utc).isoformat(),
         local_checkout_path=str(checkout),
+        provider_repository_id=repository.repository_id,
+        provider_installation_id=integration.installation_id,
     )
     get_project_store().upsert(record)
     return {

@@ -45,6 +45,7 @@ class GitHubIntegration:
         *,
         token: str | None = None,
         auth_mode: str | None = None,
+        installation_id: int | None = None,
         checkout_root: Path | None = None,
         client: httpx.Client | None = None,
     ) -> None:
@@ -55,6 +56,7 @@ class GitHubIntegration:
             else os.getenv("CODE_SONAR_GITHUB_AUTH_MODE", "oauth")
         )
         self.auth_mode = configured_mode.strip().lower()
+        self.installation_id = installation_id
         self.checkout_root = checkout_root or (Path.home() / ".code-sonar" / "repositories")
         self.client = client or httpx.Client(timeout=20.0)
 

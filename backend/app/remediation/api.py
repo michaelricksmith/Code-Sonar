@@ -29,7 +29,7 @@ class RemediationExecuteRequest(BaseModel):
 
 class RemediationValidateRequest(BaseModel):
     request_id: str = Field(min_length=1)
-    workspace_path: str = Field(min_length=1)
+    workspace_id: str = Field(min_length=1)
     before_scan_id: str = Field(min_length=1)
     finding_id: str = Field(min_length=1)
     executor: str = Field(min_length=1)
@@ -48,6 +48,7 @@ async def remediation_status() -> dict[str, Any]:
         "executor_name": executor.executor_name,
         "dry_run_default": executor.executor_name == "dry_run",
         "isolated_workspace_required": True,
+        "opaque_workspace_ids": True,
         "single_call_orchestration_available": True,
         "validation_command_count": len(validation.commands),
         "validation_commands": [
@@ -85,6 +86,7 @@ async def prepare_remediation_workspace(request: RemediationExecuteRequest) -> d
         "workspace": workspace.to_dict(),
         "execution_performed": False,
         "active_checkout_modified": False,
+        "host_paths_exposed": False,
         "deterministic_score_unchanged": True,
     }
 
@@ -103,9 +105,34 @@ async def execute_remediation(request: RemediationExecuteRequest) -> dict[str, A
 
 @router.post("/validate")
 async def validate_remediation(request: RemediationValidateRequest) -> dict[str, Any]:
-    """Run configured validators, rescan the worktree, and persist outcome evidence."""
+    """Resolve an opaque workspace, validate it, rescan, and persist outcome evidence."""
+    workspace = get_workspace_manager().get(request.workspace_id)
+    if workspace is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "remediation_workspace_not_found",
+                "message": "Prepared workspace identity was not found on this server",
+            },
+        )
+    if workspace.request_id != request.request_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "remediation_workspace_request_mismatch",
+                "message": "Prepared workspace does not belong to this remediation request",
+            },
+        )
+
     try:
-        result = get_validation_service().validate(**request.model_dump())
+        result = get_validation_service().validate(
+            request_id=request.request_id,
+            workspace_path=workspace.workspace_path,
+            before_scan_id=request.before_scan_id,
+            finding_id=request.finding_id,
+            executor=request.executor,
+            remediation_kind=request.remediation_kind,
+        )
     except PermissionError as exc:
         raise HTTPException(
             status_code=403,
@@ -137,8 +164,10 @@ async def validate_remediation(request: RemediationValidateRequest) -> dict[str,
 
     return {
         "validation": result.to_dict(),
+        "workspace_id": workspace.workspace_id,
         "active_checkout_modified": False,
         "outcome_recorded": True,
+        "host_paths_exposed": False,
         "deterministic_score_authority": "code_sonar",
     }
 

@@ -12,7 +12,9 @@ MAX_FILES_PER_SCAN: int = 10_000
 MAX_FILE_READ_TIMEOUT: int = 5
 MAX_EVIDENCE_LENGTH: int = 500
 
-SCAN_ROOT_DIR: Path = Path(os.environ.get("CODESONAR_SCAN_ROOT", "/tmp/code-sonar-scans"))
+SCAN_ROOT_DIR: Path = Path(
+    os.environ.get("CODESONAR_SCAN_ROOT", "/tmp/code-sonar-scans")
+)
 _ENFORCE_SCAN_ROOT: bool = os.environ.get("CODESONAR_ENFORCE_SCAN_ROOT", "0") == "1"
 
 EXCLUDED_DIRS: frozenset[str] = frozenset({
@@ -55,7 +57,11 @@ class RepositoryValidationError(ValueError):
     """Raised when a repository path fails security validation."""
 
 
-def validate_repo_path(raw_path: object, scan_root: Path | None = None, enforce_root: bool | None = None) -> Path:
+def validate_repo_path(
+    raw_path: object,
+    scan_root: Path | None = None,
+    enforce_root: bool | None = None,
+) -> Path:
     if raw_path is None:
         raise RepositoryValidationError("repository path is required")
     text = str(raw_path).strip()
@@ -66,10 +72,14 @@ def validate_repo_path(raw_path: object, scan_root: Path | None = None, enforce_
     try:
         resolved = p.resolve(strict=True)
     except (FileNotFoundError, RuntimeError) as exc:
-        raise RepositoryValidationError("invalid repository path (not found): " + text) from exc
+        raise RepositoryValidationError(
+            "invalid repository path (not found): " + text
+        ) from exc
 
     if not resolved.is_dir():
-        raise RepositoryValidationError("invalid repository path (not a directory): " + text)
+        raise RepositoryValidationError(
+            "invalid repository path (not a directory): " + text
+        )
 
     enforce = _ENFORCE_SCAN_ROOT if enforce_root is None else enforce_root
     if enforce:
@@ -78,7 +88,10 @@ def validate_repo_path(raw_path: object, scan_root: Path | None = None, enforce_
             resolved.relative_to(root)
         except ValueError as exc:
             raise RepositoryValidationError(
-                "repository path is outside the allowed scan root " + str(root) + ": " + str(resolved)
+                "repository path is outside the allowed scan root "
+                + str(root)
+                + ": "
+                + str(resolved)
             ) from exc
     return resolved
 
@@ -140,7 +153,9 @@ def is_safe_to_read(path: Path, repo_root: Path) -> bool:
 
 def assert_within_scan_limits(file_count: int, total_size: int) -> None:
     if file_count > MAX_FILES_PER_SCAN:
-        raise RepositoryValidationError("repository exceeds file limit (" + str(MAX_FILES_PER_SCAN) + ")")
+        raise RepositoryValidationError(
+            "repository exceeds file limit (" + str(MAX_FILES_PER_SCAN) + ")"
+        )
     if total_size > MAX_REPO_SIZE_BYTES:
         raise RepositoryValidationError(
             "repository exceeds size limit (" + str(MAX_REPO_SIZE_BYTES) + " bytes)"
@@ -156,7 +171,10 @@ def redact_secrets(text: str | None) -> str | None:
     return _SECRET_RE.sub("[REDACTED]", text)
 
 
-def truncate_evidence(text: str | None, max_length: int = MAX_EVIDENCE_LENGTH) -> str:
+def truncate_evidence(
+    text: str | None,
+    max_length: int = MAX_EVIDENCE_LENGTH,
+) -> str:
     if text is None:
         return ""
     if len(text) <= max_length:

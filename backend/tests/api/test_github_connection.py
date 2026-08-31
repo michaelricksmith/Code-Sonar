@@ -97,7 +97,9 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
         assert repositories.status_code == 200
         repository_payload = repositories.json()
         assert repository_payload["repositories"][0]["full_name"] == "octo/example"
-        assert "token" not in str(repository_payload).lower()
+        assert repository_payload["token_exposed"] is False
+        assert "authorization" not in str(repository_payload).lower()
+        assert "secret" not in str(repository_payload)
         assert str(tmp_path) not in str(repository_payload)
 
         connected = client.post(

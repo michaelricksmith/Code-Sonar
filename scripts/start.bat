@@ -19,8 +19,6 @@ set "BACKEND_PORT="
 set "FRONTEND_PORT="
 
 REM Pick the first truly free backend port in a bounded local-dev range.
-REM Use a native batch loop and PowerShell only as the listener predicate; this
-REM avoids fragile FOR /F command-output capture and quoting on Windows.
 for /L %%P in (8000,1,8099) do (
     if not defined BACKEND_PORT (
         powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort %%P -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }" >nul 2>&1
@@ -72,8 +70,6 @@ if not exist "%VENV%\Scripts\python.exe" (
 )
 
 REM A venv can survive across pulls while pyproject.toml gains dependencies.
-REM Verify required runtime imports and resync the editable installation when
-REM anything is missing instead of launching a broken server.
 "%VENV%\Scripts\python.exe" -c "import fastapi, uvicorn, sklearn, jwt" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Backend environment is stale or incomplete; syncing dependencies ...
@@ -98,15 +94,13 @@ if not exist "%REPO_ROOT%\frontend\node_modules" (
 )
 
 echo [INFO] Launching backend on port %BACKEND_PORT% ...
-start "Code Sonar - Backend" cmd /k ^
-    "cd /d %REPO_ROOT%\backend && ^"
-    "%VENV%\Scripts\uvicorn.exe" app.main:app --host 127.0.0.1 --port %BACKEND_PORT%
+start "Code Sonar - Backend" /D "%REPO_ROOT%\backend" cmd /k ""%VENV%\Scripts\uvicorn.exe" app.main:app --host 127.0.0.1 --port %BACKEND_PORT%"
 
 set /a HEALTH_TRIES=0
 :wait_for_backend
 set /a HEALTH_TRIES+=1
 timeout /t 1 /nobreak >nul
-curl -fsS http://127.0.0.1:%BACKEND_PORT%/health >nul 2>&1
+curl.exe -fsS http://127.0.0.1:%BACKEND_PORT%/health >nul 2>&1
 if errorlevel 1 (
     if %HEALTH_TRIES% LSS 30 goto wait_for_backend
     echo [ERROR] Backend did not respond on /health within 30s.
@@ -116,11 +110,22 @@ if errorlevel 1 (
 
 echo [OK] Backend healthy on http://127.0.0.1:%BACKEND_PORT%.
 
-REM Pass the selected backend URL into Vite so /api follows the actual backend.
 echo [INFO] Launching frontend on http://localhost:%FRONTEND_PORT% ...
-start "Code Sonar - Frontend" cmd /k ^
-    "cd /d %REPO_ROOT%\frontend && ^"
-    "set VITE_API_TARGET=http://127.0.0.1:%BACKEND_PORT%&& npm run dev -- --port %FRONTEND_PORT%"
+start "Code Sonar - Frontend" /D "%REPO_ROOT%\frontend" cmd /k "set VITE_API_TARGET=http://127.0.0.1:%BACKEND_PORT%&& npm run dev -- --port %FRONTEND_PORT%"
+
+set /a FRONTEND_TRIES=0
+:wait_for_frontend
+set /a FRONTEND_TRIES+=1
+timeout /t 1 /nobreak >nul
+powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort %FRONTEND_PORT% -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    if %FRONTEND_TRIES% LSS 30 goto wait_for_frontend
+    echo [ERROR] Frontend did not start listening on port %FRONTEND_PORT% within 30s.
+    echo         Check the 'Code Sonar - Frontend' window for the npm/Vite error.
+    exit /b 1
+)
+
+echo [OK] Frontend listening on http://localhost:%FRONTEND_PORT%.
 
 echo.
 echo === Code Sonar is running ============================================

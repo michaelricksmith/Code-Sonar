@@ -19,14 +19,26 @@ set "BACKEND_PORT="
 set "FRONTEND_PORT="
 
 REM Pick the first truly free backend port in a bounded local-dev range.
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$used = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Select-Object -ExpandProperty LocalPort); $port = 8000..8099 ^| Where-Object { $used -notcontains $_ } ^| Select-Object -First 1; if ($null -eq $port) { exit 1 }; Write-Output $port"`) do set "BACKEND_PORT=%%P"
+REM Use a native batch loop and PowerShell only as the listener predicate; this
+REM avoids fragile FOR /F command-output capture and quoting on Windows.
+for /L %%P in (8000,1,8099) do (
+    if not defined BACKEND_PORT (
+        powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort %%P -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }" >nul 2>&1
+        if !ERRORLEVEL! == 0 set "BACKEND_PORT=%%P"
+    )
+)
 if not defined BACKEND_PORT (
     echo [ERROR] No free backend port found in range 8000-8099.
     exit /b 1
 )
 
 REM Pick the first truly free frontend port in a bounded local-dev range.
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$used = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue ^| Select-Object -ExpandProperty LocalPort); $port = 3000..3099 ^| Where-Object { $used -notcontains $_ } ^| Select-Object -First 1; if ($null -eq $port) { exit 1 }; Write-Output $port"`) do set "FRONTEND_PORT=%%P"
+for /L %%P in (3000,1,3099) do (
+    if not defined FRONTEND_PORT (
+        powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort %%P -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }" >nul 2>&1
+        if !ERRORLEVEL! == 0 set "FRONTEND_PORT=%%P"
+    )
+)
 if not defined FRONTEND_PORT (
     echo [ERROR] No free frontend port found in range 3000-3099.
     exit /b 1

@@ -2,9 +2,9 @@
 
 The score is authoritative and reproducible. Each finding contributes based on
 its analyzer debt points, severity, confidence, category, and repository-path
-context. Source/test/fixture context is applied per finding so test fixtures
-cannot regain full production weight merely because the same category also
-contains production findings.
+context. Source/test/fixture context is applied per finding. Non-production
+contributions are additionally bounded within each category so intentionally
+large test suites and fixtures cannot overwhelm real production findings.
 """
 
 from __future__ import annotations
@@ -85,6 +85,7 @@ LOW_CONFIDENCE_MODIFIER: float = 0.5
 PERFECT_SCORE = 850
 MINIMUM_SCORE = 300
 MAX_PENALTY = PERFECT_SCORE - MINIMUM_SCORE
+NON_SOURCE_CATEGORY_CAP = MAX_PENALTY * SOURCE_CONTEXT_MODIFIER[TEST]
 
 
 def calculate_score(findings: list[Finding]) -> ScoringResult:
@@ -153,10 +154,6 @@ def calculate_score(findings: list[Finding]) -> ScoringResult:
     )
 
 
-def _context_modifier(finding: Finding) -> float:
-    return SOURCE_CONTEXT_MODIFIER.get(classify_path(finding.file_path), 1.0)
-
-
 def _confidence_modifier(finding: Finding) -> float:
     if finding.confidence < LOW_CONFIDENCE_THRESHOLD:
         return LOW_CONFIDENCE_MODIFIER
@@ -164,27 +161,35 @@ def _confidence_modifier(finding: Finding) -> float:
 
 
 def _calculate_category_penalty(findings: list[Finding]) -> float:
-    """Calculate bounded category penalty with per-finding context weighting.
+    """Calculate a bounded category penalty with per-finding context weighting.
 
-    Context scales both weighted debt and the severity bonus for the finding.
-    This keeps test/fixture findings visible while ensuring they contribute only
-    25% of the equivalent production-source risk.
+    Production and non-production contributions are accumulated separately.
+    Test/fixture findings still receive their 0.25 per-finding modifier, and
+    their aggregate contribution is capped at 25% of the category's available
+    penalty. This prevents intentionally repetitive fixtures from dominating a
+    repository's score while leaving their raw findings and debt visible.
     """
     if not findings:
         return 0.0
 
-    penalty = 0.0
+    source_penalty = 0.0
+    non_source_penalty = 0.0
     for finding in findings:
         severity_weight = SEVERITY_WEIGHTS.get(finding.severity, 1.0)
         confidence_modifier = _confidence_modifier(finding)
-        context_modifier = _context_modifier(finding)
+        path_class = classify_path(finding.file_path)
+        context_modifier = SOURCE_CONTEXT_MODIFIER.get(path_class, 1.0)
         contribution = (
             finding.debt_points * severity_weight * confidence_modifier
             + SEVERITY_BONUS.get(finding.severity, 0.0)
         ) * context_modifier
-        penalty += contribution
+        if path_class == SOURCE:
+            source_penalty += contribution
+        else:
+            non_source_penalty += contribution
 
-    return min(MAX_PENALTY, penalty)
+    bounded_non_source = min(NON_SOURCE_CATEGORY_CAP, non_source_penalty)
+    return min(MAX_PENALTY, source_penalty + bounded_non_source)
 
 
 def _score_to_grade(score: int) -> str:

@@ -162,6 +162,54 @@ export interface DriftResult {
 
 const API_BASE = "/api";
 
+const TEST_DIRS = new Set(["tests", "test", "tests_", "__tests__"]);
+const FIXTURE_DIRS = new Set([
+  "fixtures",
+  "testdata",
+  "test_data",
+  "examples",
+  "example",
+  "example_data",
+]);
+const FIXTURE_ROOTS = new Set(["demo", "demos", "sample", "samples", "sample_repo"]);
+const FIXTURE_FILES = new Set([
+  ".env.example",
+  "example.env",
+  "config.example.yaml",
+  "config.example.yml",
+  "config.example.json",
+  "settings.example.json",
+  "pytest.ini.example",
+  "conftest.example.py",
+]);
+
+type SourceClass = "source" | "test" | "fixture";
+
+function classifyFindingPath(rawPath: string): SourceClass {
+  const parts = rawPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length === 0) return "source";
+  const basename = parts[parts.length - 1];
+
+  if (FIXTURE_FILES.has(basename)) return "fixture";
+  if (FIXTURE_ROOTS.has(parts[0])) return "fixture";
+  if (basename === "conftest.py") return "test";
+  if (basename.startsWith("test_") && /\.pyi?$/.test(basename)) return "test";
+  if (/_test\.pyi?$/.test(basename)) return "test";
+
+  const dirs = parts.slice(0, -1);
+  if (dirs.some((part) => TEST_DIRS.has(part))) return "test";
+  if (dirs.some((part) => FIXTURE_DIRS.has(part))) return "fixture";
+  return "source";
+}
+
+function deriveSourceBreakdown(findings: Finding[]): NonNullable<ScanResponse["findings_source_breakdown"]> {
+  const breakdown = { source: 0, test: 0, fixture: 0 };
+  for (const finding of findings) {
+    breakdown[classifyFindingPath(finding.file_path)] += 1;
+  }
+  return breakdown;
+}
+
 export async function fetchAnalyzers(): Promise<AnalyzerMetadata[]> {
   const res = await fetch(`${API_BASE}/analyzers`);
   if (!res.ok) throw new Error(`Failed to fetch analyzers (HTTP ${res.status})`);
@@ -183,7 +231,9 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail ?? `Scan failed (HTTP ${res.status})`);
-  return data as ScanResponse;
+  const scan = data as ScanResponse;
+  scan.findings_source_breakdown ??= deriveSourceBreakdown(scan.findings ?? []);
+  return scan;
 }
 
 export async function fetchDrift(

@@ -20,6 +20,7 @@ class FakeWorkspaceManager:
     def prepare(self, request: RemediationRequest) -> PreparedWorkspace:
         self.prepare_calls += 1
         return PreparedWorkspace(
+            workspace_id="ws_test",
             request_id=request.request_id,
             repository_root=request.repository_path,
             workspace_path=self.workspace_path,
@@ -119,6 +120,9 @@ def test_execution_failure_prevents_validation() -> None:
     assert result.validation is None
     assert validator.calls == []
     assert executor.requests[0].repository_path == "/isolated/worktree"
+    assert result.workspace is not None
+    assert result.workspace.to_dict()["workspace_id"] == "ws_test"
+    assert "workspace_path" not in result.workspace.to_dict()
 
 
 def test_successful_execution_advances_to_validation_with_isolated_workspace() -> None:

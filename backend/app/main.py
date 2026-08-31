@@ -19,6 +19,7 @@ from app.history import (
 )
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
+from app.projects import router as projects_router
 from app.remediation.api import router as remediation_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
@@ -45,6 +46,7 @@ app.add_middleware(
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(remediation_router)
+app.include_router(projects_router)
 
 
 # Process-wide history store. The MVP uses a single JSONL file in

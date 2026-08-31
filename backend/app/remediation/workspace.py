@@ -26,6 +26,7 @@ GitCommandRunner = Callable[[list[str]], GitCommandResult]
 
 @dataclass(frozen=True, slots=True)
 class PreparedWorkspace:
+    workspace_id: str
     request_id: str
     repository_root: str
     workspace_path: str
@@ -33,10 +34,10 @@ class PreparedWorkspace:
     base_commit: str
 
     def to_dict(self) -> dict[str, str]:
+        """Return the public workspace identity without exposing host filesystem paths."""
         return {
+            "workspace_id": self.workspace_id,
             "request_id": self.request_id,
-            "repository_root": self.repository_root,
-            "workspace_path": self.workspace_path,
             "branch_name": self.branch_name,
             "base_commit": self.base_commit,
         }
@@ -72,6 +73,7 @@ class GitWorktreeManager:
     ) -> None:
         self.root = root or (Path.home() / ".code-sonar" / "remediation-worktrees")
         self.runner = runner
+        self._prepared: dict[str, PreparedWorkspace] = {}
 
     def _run(self, args: list[str], *, failure: str) -> GitCommandResult:
         result = self.runner(args)
@@ -80,6 +82,10 @@ class GitWorktreeManager:
             suffix = f": {detail}" if detail else ""
             raise RuntimeError(failure + suffix)
         return result
+
+    def get(self, workspace_id: str) -> PreparedWorkspace | None:
+        """Resolve a server-owned workspace identity to its internal paths."""
+        return self._prepared.get(workspace_id)
 
     def prepare(self, request: RemediationRequest) -> PreparedWorkspace:
         if not request.approved:
@@ -109,6 +115,9 @@ class GitWorktreeManager:
         digest = hashlib.sha256(
             f"{repository_root}|{request.request_id}|{request.finding_id}|{base_commit}".encode("utf-8")
         ).hexdigest()[:10]
+        workspace_id = "ws_" + hashlib.sha256(
+            f"{request.request_id}|{request.finding_id}|{base_commit}|{digest}".encode("utf-8")
+        ).hexdigest()[:20]
         branch_name = f"code-sonar/remediation/{finding_token}-{request_token}-{digest}"
         workspace_path = self.root / digest
 
@@ -138,10 +147,13 @@ class GitWorktreeManager:
             failure="Could not create isolated remediation worktree",
         )
 
-        return PreparedWorkspace(
+        workspace = PreparedWorkspace(
+            workspace_id=workspace_id,
             request_id=request.request_id,
             repository_root=str(repository_root),
             workspace_path=str(workspace_path),
             branch_name=branch_name,
             base_commit=base_commit,
         )
+        self._prepared[workspace_id] = workspace
+        return workspace

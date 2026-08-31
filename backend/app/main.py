@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Query
@@ -19,7 +20,7 @@ from app.history import (
 )
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
-from app.projects import router as projects_router
+from app.projects import get_project_store, router as projects_router
 from app.remediation.api import router as remediation_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
@@ -35,7 +36,6 @@ app = FastAPI(
     version="0.1.0-beta.1",
 )
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,11 +48,6 @@ app.include_router(ask_sonar_router)
 app.include_router(remediation_router)
 app.include_router(projects_router)
 
-
-# Process-wide history store. The MVP uses a single JSONL file in
-# the user's data dir; tests inject an InMemoryHistoryStore via
-# ``app.dependency_overrides`` (FastAPI) or by replacing this module
-# attribute before startup.
 _history_store: JsonlHistoryStore | InMemoryHistoryStore = JsonlHistoryStore()
 
 
@@ -84,10 +79,7 @@ class ScanResponse(BaseModel):
     findings_by_category: dict[str, int]
     findings: list[dict[str, Any]]
     summary: dict[str, Any]
-    top_hotspots: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Top-N ranked risk hotspots (Phase 1, Fastest-Route-to-Private-Beta).",
-    )
+    top_hotspots: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @app.get("/health")
@@ -102,7 +94,6 @@ async def root() -> dict[str, str]:
 
 @app.get("/api/analyzers")
 async def list_analyzers() -> dict[str, Any]:
-    """Public analyzer registry metadata."""
     return {
         "count": len(get_registered_analyzers()),
         "analyzers": get_analyzer_metadata(),
@@ -128,8 +119,13 @@ def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
     }
 
 
+def _record_public_dict(record: ScanRecord) -> dict[str, Any]:
+    data = _record_to_dict(record)
+    data.pop("repository_path", None)
+    return data
+
+
 def _record_summary(record: ScanRecord) -> dict[str, Any]:
-    """Return the summary fields only (no findings snapshot)."""
     return {
         "scan_id": record.scan_id,
         "repository_id": record.repository_id,
@@ -147,41 +143,24 @@ def _record_summary(record: ScanRecord) -> dict[str, Any]:
     }
 
 
-@app.post("/api/scan", response_model=ScanResponse)
-async def scan(request: ScanRequest) -> ScanResponse:
-    try:
-        repo_path = validate_repo_path(request.repo_path)
-    except RepositoryValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+def _record_public_summary(record: ScanRecord) -> dict[str, Any]:
+    data = _record_summary(record)
+    data.pop("repository_path", None)
+    return data
 
-    try:
-        findings = scan_repository(repo_path)
-        scoring_result = calculate_score(findings)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Scan failed: " + str(exc))
 
-    scanned_at = datetime.now(timezone.utc).isoformat()
+def _build_scan_response(
+    *,
+    repository_label: str,
+    findings: list[Any],
+    scoring_result: Any,
+    scanned_at: str,
+    scan_id: str | None,
+) -> ScanResponse:
     hotspot_result = compute_hotspots(findings, top_n=10)
-
-    persisted_scan_id: str | None = None
-    try:
-        record = build_scan_record(
-            repository_id=compute_repository_id(repo_path),
-            repository_path=display_name(repo_path),
-            findings=findings,
-            scoring=scoring_result,
-            scanned_at=scanned_at,
-        )
-        get_history_store().append(record)
-        persisted_scan_id = record.scan_id
-    except Exception:
-        pass
-
     return ScanResponse(
-        repository=str(repo_path),
-        scan_id=persisted_scan_id,
+        repository=repository_label,
+        scan_id=scan_id,
         scanned_at=scanned_at,
         score=scoring_result.score,
         grade=scoring_result.grade,
@@ -206,6 +185,115 @@ async def scan(request: ScanRequest) -> ScanResponse:
     )
 
 
+@app.post("/api/scan", response_model=ScanResponse)
+async def scan(request: ScanRequest) -> ScanResponse:
+    try:
+        repo_path = validate_repo_path(request.repo_path)
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        findings = scan_repository(repo_path)
+        scoring_result = calculate_score(findings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Scan failed: " + str(exc)) from exc
+
+    scanned_at = datetime.now(timezone.utc).isoformat()
+    persisted_scan_id: str | None = None
+    try:
+        record = build_scan_record(
+            repository_id=compute_repository_id(repo_path),
+            repository_path=display_name(repo_path),
+            findings=findings,
+            scoring=scoring_result,
+            scanned_at=scanned_at,
+        )
+        get_history_store().append(record)
+        persisted_scan_id = record.scan_id
+    except Exception:
+        pass
+
+    return _build_scan_response(
+        repository_label=str(repo_path),
+        findings=findings,
+        scoring_result=scoring_result,
+        scanned_at=scanned_at,
+        scan_id=persisted_scan_id,
+    )
+
+
+@app.post("/api/projects/{project_id}/scan", response_model=ScanResponse)
+async def scan_project(project_id: str) -> ScanResponse:
+    project = get_project_store().get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        repo_path = validate_repo_path(project.local_checkout_path)
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=409, detail="Project checkout is unavailable") from exc
+
+    try:
+        findings = scan_repository(repo_path)
+        scoring_result = calculate_score(findings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Project scan failed") from exc
+
+    scanned_at = datetime.now(timezone.utc).isoformat()
+    record = build_scan_record(
+        repository_id=compute_repository_id(repo_path),
+        repository_path=display_name(repo_path),
+        findings=findings,
+        scoring=scoring_result,
+        scanned_at=scanned_at,
+    )
+    get_history_store().append(record)
+    get_project_store().record_scan(project_id, scan_id=record.scan_id, score=record.score)
+
+    return _build_scan_response(
+        repository_label=f"{project.owner}/{project.name}",
+        findings=findings,
+        scoring_result=scoring_result,
+        scanned_at=scanned_at,
+        scan_id=record.scan_id,
+    )
+
+
+@app.get("/api/projects/{project_id}/dashboard")
+async def project_dashboard(project_id: str) -> dict[str, Any]:
+    project = get_project_store().get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    repository_id = compute_repository_id(Path(project.local_checkout_path))
+    records = get_history_store().load_all(repository_id)
+    latest = records[-1] if records else None
+    return {
+        "project": project.to_public_dict(),
+        "latest_scan": _record_public_dict(latest) if latest else None,
+        "history": [_record_public_summary(item) for item in records[-20:]],
+        "history_count": len(records),
+        "local_checkout_path_exposed": False,
+        "deterministic_score_authority": "code_sonar",
+    }
+
+
+@app.get("/api/projects/{project_id}/drift")
+async def project_drift(project_id: str) -> dict[str, Any]:
+    project = get_project_store().get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repository_id = compute_repository_id(Path(project.local_checkout_path))
+    records = get_history_store().load_all(repository_id)
+    if len(records) < 2:
+        raise HTTPException(status_code=400, detail="Need at least two project scans to compute drift")
+    return compute_drift(records[-2], records[-1]).to_dict()
+
+
 @app.get("/api/hotspots")
 async def hotspots(
     repo_path: str = Query(description="Repository path to compute hotspots for"),
@@ -214,16 +302,14 @@ async def hotspots(
     try:
         repo_path_obj = validate_repo_path(repo_path)
     except RepositoryValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         findings = scan_repository(repo_path_obj)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Scan failed: " + str(exc))
-
-    result = compute_hotspots(findings, top_n=limit)
-    return result.to_dict()
+        raise HTTPException(status_code=500, detail="Scan failed: " + str(exc)) from exc
+    return compute_hotspots(findings, top_n=limit).to_dict()
 
 
 @app.get("/api/history/list")
@@ -234,10 +320,7 @@ async def list_history(
     records = get_history_store().load_all(repository_id)
     if limit and len(records) > limit:
         records = records[-limit:]
-    return {
-        "count": len(records),
-        "scans": [_record_summary(r) for r in records],
-    }
+    return {"count": len(records), "scans": [_record_summary(r) for r in records]}
 
 
 @app.get("/api/history/latest")
@@ -247,7 +330,7 @@ async def history_latest(
     try:
         repo_path_obj = validate_repo_path(repo_path)
     except RepositoryValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     record = get_history_store().latest(compute_repository_id(repo_path_obj))
     if record is None:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
@@ -271,7 +354,7 @@ async def drift(
     try:
         repo_path_obj = validate_repo_path(repo_path)
     except RepositoryValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     store = get_history_store()
     records = store.load_all(compute_repository_id(repo_path_obj))
@@ -280,10 +363,7 @@ async def drift(
 
     if to_scan_id is None:
         if len(records) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Need at least two scans to compute drift; found only one",
-            )
+            raise HTTPException(status_code=400, detail="Need at least two scans to compute drift; found only one")
         current = records[-1]
         baseline = records[-2]
     else:
@@ -293,13 +373,7 @@ async def drift(
         if from_scan_id is None:
             earlier = [r for r in records if r.scan_id != current.scan_id]
             if not earlier:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Need at least two scans to compute drift; "
-                        "found only the specified scan"
-                    ),
-                )
+                raise HTTPException(status_code=400, detail="Need at least two scans to compute drift")
             baseline = earlier[-1]
         else:
             baseline = cast(
@@ -307,10 +381,6 @@ async def drift(
                 next((r for r in records if r.scan_id == from_scan_id), None),
             )
             if baseline is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No scan with scan_id={from_scan_id!r}",
-                )
+                raise HTTPException(status_code=404, detail=f"No scan with scan_id={from_scan_id!r}")
 
-    result = compute_drift(baseline, current)
-    return result.to_dict()
+    return compute_drift(baseline, current).to_dict()

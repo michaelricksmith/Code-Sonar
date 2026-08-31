@@ -72,6 +72,7 @@ class GitHubIntegration:
         }
 
     def list_repositories(self) -> list[GitHubRepository]:
+        params: dict[str, str | int]
         if self.auth_mode == "app":
             url = f"{_GITHUB_API}/installation/repositories"
             params = {"per_page": 100}

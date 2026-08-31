@@ -160,18 +160,6 @@ export interface DriftResult {
   by_severity: Record<string, DriftBucketCounts>;
 }
 
-export interface Hotspot {
-  file_path: string;
-  score: number;
-  finding_count: number;
-  debt_points: number;
-  severity_weight: number;
-  confidence_weight: number;
-  category_diversity: number;
-  categories: string[];
-  analyzers: string[];
-}
-
 const API_BASE = "/api";
 
 export async function fetchAnalyzers(): Promise<AnalyzerMetadata[]> {
@@ -248,3 +236,47 @@ export const CATEGORIES: Category[] = [
   "testing",
   "maintainability",
 ];
+
+export const DRIFT_CLASSIFICATIONS: DriftClassification[] = [
+  "new",
+  "resolved",
+  "persistent",
+  "worsened",
+  "improved",
+];
+
+export interface Hotspot {
+  file_path: string;
+  score: number;
+  debt_total: number;
+  finding_count: number;
+  severity_max: Severity;
+  severity_max_weight: number;
+  analyzer_diversity: number;
+  analyzer_breakdown: Record<string, number>;
+  severity_breakdown: Record<string, number>;
+  category_breakdown: Record<string, number>;
+  complexity_max: number;
+  size_max: number;
+  nesting_max: number;
+  contributing_finding_ids: string[];
+}
+
+export interface HotspotResult {
+  hotspots: Hotspot[];
+  total_files: number;
+  files_with_findings: number;
+  total_findings: number;
+  total_debt: number;
+}
+
+export async function fetchHotspots(
+  repoPath: string,
+  limit: number = 50,
+): Promise<HotspotResult> {
+  const params = new URLSearchParams({ repo_path: repoPath, limit: String(limit) });
+  const res = await fetch(`${API_BASE}/hotspots?${params.toString()}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? `Hotspots fetch failed (HTTP ${res.status})`);
+  return data as HotspotResult;
+}

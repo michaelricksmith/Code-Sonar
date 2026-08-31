@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DriftResult, Finding, ScanResponse } from "../api/analyzers";
 import {
   connectManagedGitHubProject,
+  fetchGitHubAppInstallUrl,
   fetchGitHubConnectionStatus,
   fetchGitHubRepositories,
   fetchProjectDashboard,
@@ -45,11 +46,23 @@ export function ProjectDashboardPanel() {
     }
   }
 
+  async function refreshGitHubStatus(): Promise<void> {
+    try {
+      setGitHubStatus(await fetchGitHubConnectionStatus());
+    } catch {
+      setGitHubStatus(null);
+    }
+  }
+
   useEffect(() => {
     refreshProjects().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-    fetchGitHubConnectionStatus()
-      .then(setGitHubStatus)
-      .catch(() => setGitHubStatus(null));
+    void refreshGitHubStatus();
+
+    const onFocus = () => {
+      void refreshGitHubStatus();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   useEffect(() => {
@@ -68,6 +81,16 @@ export function ProjectDashboardPanel() {
     if (!latest?.findings) return [] as Finding[];
     return [...latest.findings].sort((a, b) => riskRank(b) - riskRank(a)).slice(0, 5);
   }, [latest]);
+
+  async function installGitHubApp(): Promise<void> {
+    setError(null);
+    try {
+      const installUrl = await fetchGitHubAppInstallUrl();
+      window.open(installUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function loadGitHubRepositories(): Promise<void> {
     setError(null);
@@ -135,18 +158,43 @@ export function ProjectDashboardPanel() {
               GitHub connection
             </div>
             <p className="mt-1 text-sm text-slate-400">
-              Choose an authorized GitHub repository. Code Sonar manages the checkout on the server and runs the first deterministic scan automatically.
+              Install the Code Sonar GitHub App, choose an authorized repository, and Code Sonar will manage the checkout and deterministic scans.
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Tokens are runtime-only and are never returned or written into project records.
+              Installation tokens are short-lived, runtime-only, and are never returned or written into project records.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-slate-950 px-2 py-1 text-xs text-slate-400">
               {githubStatus?.configured
                 ? `authorized · ${githubStatus.auth_mode}`
-                : "not configured"}
+                : githubStatus?.app_installable
+                  ? "app ready · installation required"
+                  : "not configured"}
             </span>
+            {githubStatus?.webhook_configured && (
+              <span className="rounded bg-emerald-950 px-2 py-1 text-xs text-emerald-300">
+                webhooks ready
+              </span>
+            )}
+            {githubStatus?.app_installable && !githubStatus.configured && (
+              <button
+                type="button"
+                onClick={installGitHubApp}
+                className="rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+              >
+                Install GitHub App
+              </button>
+            )}
+            {githubStatus?.app_installable && (
+              <button
+                type="button"
+                onClick={refreshGitHubStatus}
+                className="rounded-md border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-300 hover:border-slate-500"
+              >
+                Refresh authorization
+              </button>
+            )}
             <button
               type="button"
               onClick={loadGitHubRepositories}
@@ -191,7 +239,7 @@ export function ProjectDashboardPanel() {
           </div>
           <h2 className="mt-1 text-lg font-semibold">No connected projects yet</h2>
           <p className="mt-2 text-sm text-slate-400">
-            Authorize GitHub and choose a repository above. The legacy local-path connector remains available below during migration.
+            Install/authorize the GitHub App and choose a repository above. The legacy local-path connector remains available below during migration.
           </p>
         </div>
       ) : (

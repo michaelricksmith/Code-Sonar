@@ -18,13 +18,13 @@ const EMPTY_FILTER: FilterState = { severities: new Set(), categories: new Set()
 const DEFAULT_SORT: SortState = { key: "severity", direction: "desc" };
 const SEVERITY_WEIGHT = { info: 1, warning: 2, error: 4, critical: 8 } as const;
 
-type PageId = "overview" | "repositories" | "findings" | "risk" | "history" | "remediations" | "settings";
+type PageId = "overview" | "repositories" | "findings" | "risk" | "history" | "remediations" | "integrations" | "settings";
 
 const NAV = [
-  ["Workspace", [["overview", "Overview", "OV"], ["repositories", "Repositories", "RE"]]],
-  ["Intelligence", [["findings", "Findings", "FI"], ["risk", "Risk Map", "RM"], ["history", "History", "HI"]]],
-  ["Sonar", [["remediations", "Remediations", "RX"]]],
-  ["System", [["settings", "Engine & Rules", "ER"]]],
+  ["Workspace", [["overview", "Overview", "⌂"], ["repositories", "Repositories", "◇"]]],
+  ["Intelligence", [["findings", "Findings", "≡"], ["risk", "Risk Map", "◎"], ["history", "History", "↗"]]],
+  ["Sonar", [["remediations", "Remediations", "✦"]]],
+  ["System", [["integrations", "Integrations", "⌁"], ["settings", "Engine & Rules", "⚙"]]],
 ] as const;
 
 function repoName(path: string): string {
@@ -152,7 +152,7 @@ function App() {
   }
 
   return (
-    <div className="cs-app">
+    <div className={`cs-app ${assistantOpen ? "sonar-open" : ""}`}>
       <aside className="cs-sidebar">
         <div>
           <div className="cs-brand"><div className="cs-logo"><span /></div><div><strong>Code Sonar</strong><small>Code health intelligence</small></div></div>
@@ -175,6 +175,7 @@ function App() {
       </aside>
 
       <section className="cs-workspace">
+        <div className="cs-telemetry"><span><i /> LIVE ANALYSIS</span><span>DETERMINISTIC ENGINE</span><span>{result ? `${result.finding_count} SIGNALS` : "AWAITING BASELINE"}</span><span>ML ADVISORY ONLY</span></div>
         <header className="cs-topbar">
           <div><div className="cs-breadcrumb">Workspace / {repoName(repoPath)}</div><div className="cs-topbar-title">{pageTitle(page)}</div></div>
           <div className="cs-topbar-actions">
@@ -199,10 +200,13 @@ function App() {
 
           {page === "remediations" ? <Page title="Remediations" subtitle="Move from finding to validated fix without giving up score authority.">{result ? <div className="cs-remediation-layout"><section className="cs-flow-card"><span className="cs-kicker">Agent execution loop</span><h3>Review → approve → execute → test → rescan</h3><div className="cs-flow-steps">{[["01","Choose finding","Select a production finding with clear evidence."],["02","Review plan","Sonar generates a bounded remediation plan."],["03","Approve execution","No code changes occur without explicit approval."],["04","Validate outcome","Tests and a deterministic rescan measure the result."]].map(([n,t,c]) => <div key={n}><b>{n}</b><span><strong>{t}</strong><small>{c}</small></span></div>)}</div></section><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">Ready to investigate</span><h3>Highest-impact findings</h3></div></div><PriorityList findings={priorities} select={setSelected} openSonar={() => setAssistantOpen(true)} /></section></div> : <NoBaseline scan={scan} scanning={scanning} />}</Page> : null}
 
+          {page === "integrations" ? <Page title="Integrations" subtitle="Connect source control and keep repository intelligence current."><div className="cs-integration-grid"><section className="cs-integration-card featured"><div className="cs-integration-mark">GH</div><div><span className="cs-kicker">Source control</span><h3>GitHub App</h3><p>Managed repository access, default-branch monitoring, and deterministic scans on pushes and merged pull requests.</p><div className="cs-integration-status"><i className={health === "ok" ? "online" : ""} /> Configuration is managed securely by the backend</div></div></section><section className="cs-integration-card"><div className="cs-integration-mark local">//</div><div><span className="cs-kicker">Developer workspace</span><h3>Local repositories</h3><p>Scan a checkout directly during development without changing the repository.</p><button className="cs-button ghost" onClick={() => setPage("repositories")}>Manage repositories</button></div></section></div><div className="cs-legacy-surface"><ProjectDashboardPanel /></div></Page> : null}
+
           {page === "settings" ? <Page title="Engine & Rules" subtitle="Advanced deterministic analysis configuration and runtime visibility."><div className="cs-settings-summary"><Metric label="API" value={health} detail="runtime" /><Metric label="Analyzers" value={String(analyzers.length)} detail="deterministic rules" /><Metric label="Score authority" value="Code Sonar" detail="ML remains advisory" /></div><div className="cs-legacy-surface"><AnalyzerMetadataPanel refreshKey={result ? result.finding_count : undefined} /></div></Page> : null}
         </main>
       </section>
 
+      {!assistantOpen ? <button className="cs-sonar-rail" onClick={() => setAssistantOpen(true)} aria-label="Open Ask Sonar"><span className="cs-sonar-pulse" /><b>ASK SONAR</b><small>⌘ K</small></button> : null}
       <Assistant open={assistantOpen} status={askStatus} result={result} question={question} answer={answer} asking={asking} error={askError} setQuestion={setQuestion} ask={ask} close={() => setAssistantOpen(false)} />
       <FindingDetailDrawer finding={selected} scanId={result?.scan_id ?? null} currentScore={result?.score ?? null} onClose={() => setSelected(null)} />
     </div>
@@ -234,7 +238,7 @@ function Page({ title, subtitle, children }: { title: string; subtitle: string; 
 function Metric({ label, value, detail, tone = "normal" }: { label: string; value: string; detail: string; tone?: "normal" | "danger" }) { return <div className={`cs-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
 function NoBaseline({ scan, scanning }: { scan: () => void; scanning: boolean }) { return <div className="cs-no-baseline"><div className="cs-logo large"><span /></div><h2>No baseline yet</h2><p>Run a deterministic scan to unlock this view.</p><button className="cs-button primary" onClick={scan} disabled={scanning}>{scanning ? "Scanning…" : "Run first scan"}</button></div>; }
 function Notice({ tone, title, children }: { tone: "danger" | "warning"; title: string; children: ReactNode }) { return <div className={`cs-notice ${tone}`}><strong>{title}</strong><span>{children}</span></div>; }
-function pageTitle(page: PageId): string { return ({ overview: "Code health overview", repositories: "Repositories", findings: "Findings", risk: "Risk map", history: "History", remediations: "Remediations", settings: "Engine & rules" })[page]; }
+function pageTitle(page: PageId): string { return ({ overview: "Code health overview", repositories: "Repositories", findings: "Findings", risk: "Risk map", history: "History", remediations: "Remediations", integrations: "Integrations", settings: "Engine & rules" })[page]; }
 function compactPath(path: string): string { const parts = path.replace(/\\/g, "/").split("/"); return parts.length > 4 ? `…/${parts.slice(-4).join("/")}` : path.replace(/\\/g, "/"); }
 function gradeLabel(grade: string): string { return ({ A: "Excellent", B: "Healthy", C: "Watch", D: "At risk", F: "High risk" } as Record<string, string>)[grade] ?? "Code health"; }
 function scoreSummary(score: number, critical: number): string { if (critical > 0) return `${critical} critical finding${critical === 1 ? "" : "s"} require attention. Focus on concentrated production risk before broad cleanup.`; if (score >= 760) return "The repository is in strong shape. Protect the baseline and address emerging debt before it compounds."; if (score >= 650) return "The codebase is generally healthy, with a few concentrated areas that should be addressed next."; if (score >= 550) return "Technical debt is materially affecting maintainability. Prioritize the highest-risk files first."; return "Debt is significantly affecting code health. Use the priority queue to attack the highest-impact production risks first."; }

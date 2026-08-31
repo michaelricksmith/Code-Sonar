@@ -382,7 +382,7 @@ function App() {
                 <MetricCard label="Analyzers" value={String(analyzers.length)} meta="deterministic rules" />
                 <MetricCard label="Authority" value="Code Sonar" meta="ML remains advisory" />
               </div>
-              <AnalyzerMetadataPanel refreshKey={result ? result.scanned_at : undefined} />
+              <AnalyzerMetadataPanel refreshKey={result ? new Date(result.scanned_at).getTime() : undefined} />
             </PageFrame>
           )}
         </main>

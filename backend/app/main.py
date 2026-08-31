@@ -20,7 +20,8 @@ from app.history import (
 )
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
-from app.projects import get_project_store, router as projects_router
+from app.projects import get_project_store
+from app.projects import router as projects_router
 from app.remediation.api import router as remediation_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
@@ -290,7 +291,10 @@ async def project_drift(project_id: str) -> dict[str, Any]:
     repository_id = compute_repository_id(Path(project.local_checkout_path))
     records = get_history_store().load_all(repository_id)
     if len(records) < 2:
-        raise HTTPException(status_code=400, detail="Need at least two project scans to compute drift")
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least two project scans to compute drift",
+        )
     return compute_drift(records[-2], records[-1]).to_dict()
 
 
@@ -363,7 +367,10 @@ async def drift(
 
     if to_scan_id is None:
         if len(records) < 2:
-            raise HTTPException(status_code=400, detail="Need at least two scans to compute drift; found only one")
+            raise HTTPException(
+                status_code=400,
+                detail="Need at least two scans to compute drift; found only one",
+            )
         current = records[-1]
         baseline = records[-2]
     else:
@@ -373,7 +380,10 @@ async def drift(
         if from_scan_id is None:
             earlier = [r for r in records if r.scan_id != current.scan_id]
             if not earlier:
-                raise HTTPException(status_code=400, detail="Need at least two scans to compute drift")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Need at least two scans to compute drift",
+                )
             baseline = earlier[-1]
         else:
             baseline = cast(
@@ -381,6 +391,9 @@ async def drift(
                 next((r for r in records if r.scan_id == from_scan_id), None),
             )
             if baseline is None:
-                raise HTTPException(status_code=404, detail=f"No scan with scan_id={from_scan_id!r}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No scan with scan_id={from_scan_id!r}",
+                )
 
     return compute_drift(baseline, current).to_dict()

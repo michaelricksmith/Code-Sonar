@@ -60,11 +60,25 @@ if not exist "%VENV%\Scripts\python.exe" (
     python -m venv .venv || (popd & echo [ERROR] venv creation failed & exit /b 1)
     popd
 )
-if not exist "%VENV%\Scripts\uvicorn.exe" (
-    echo [INFO] Installing backend dependencies ...
+
+REM A venv can survive across pulls while pyproject.toml gains dependencies.
+REM Verify the runtime imports required by the app and resync the editable
+REM installation when anything is missing instead of launching a broken server.
+"%VENV%\Scripts\python.exe" -c "import fastapi, uvicorn, sklearn, jwt" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Backend environment is stale or incomplete; syncing dependencies ...
     pushd "%REPO_ROOT%\backend"
-    "%VENV%\Scripts\python.exe" -m pip install -e ".[dev]" || (popd & echo [ERROR] backend install failed & exit /b 1)
+    "%VENV%\Scripts\python.exe" -m pip install -e ".[dev]" || (popd & echo [ERROR] backend dependency sync failed & exit /b 1)
     popd
+)
+
+REM Final import gate: never launch Uvicorn if required runtime dependencies are
+REM still unavailable after synchronization.
+"%VENV%\Scripts\python.exe" -c "import fastapi, uvicorn, sklearn, jwt" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Backend runtime dependencies are still incomplete.
+    echo         Rebuild backend\.venv with a supported Python installation.
+    exit /b 1
 )
 
 if not exist "%REPO_ROOT%\frontend\node_modules" (
@@ -86,8 +100,9 @@ timeout /t 1 /nobreak >nul
 curl -fsS http://127.0.0.1:%BACKEND_PORT%/health >nul 2>&1
 if errorlevel 1 (
     if %HEALTH_TRIES% LSS 20 goto wait_for_backend
-    echo [WARN] Backend did not respond on /health within 20s.
-    echo        Continuing to launch frontend anyway.
+    echo [ERROR] Backend did not respond on /health within 20s.
+    echo         Frontend was not launched because the API is unhealthy.
+    exit /b 1
 )
 
 REM Pass the selected backend URL into Vite so /api always follows the backend

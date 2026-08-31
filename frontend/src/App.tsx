@@ -20,6 +20,7 @@ import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
 import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
+import { FirstScanGuide } from "./components/FirstScanGuide";
 import { RiskHotspots } from "./components/RiskHotspots";
 import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
@@ -138,6 +139,15 @@ function App() {
 
       <main className="mx-auto max-w-6xl space-y-8 px-6 py-8">
         <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-5">
+          <div className="mb-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">
+              Start with Ask Sonar
+            </div>
+            <h2 className="mt-1 text-lg font-semibold">Attach a repository and establish its baseline</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Enter a local repository path. Code Sonar will run deterministic analyzers, save the scan to history, and then guide you through the score and highest-priority findings.
+            </p>
+          </div>
           <label className="mb-2 block text-sm font-medium text-slate-300">
             Repository path
           </label>
@@ -152,21 +162,27 @@ function App() {
             />
             <button
               onClick={onScan}
-              disabled={scanning}
+              disabled={scanning || !repoPath.trim()}
               className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
             >
-              {scanning ? "Scanning…" : "Run scan"}
+              {scanning ? "Scanning repository…" : result ? "Scan again" : "Attach & scan"}
             </button>
           </div>
           {error && (
             <div className="mt-3 rounded-md border border-rose-700 bg-rose-900/30 px-3 py-2 text-sm text-rose-200">
-              {error}
+              <div className="font-semibold">Sonar could not attach this repository.</div>
+              <div className="mt-1">{error}</div>
+              <div className="mt-2 text-xs text-rose-300/80">
+                Confirm the path exists, points to a directory, and is readable by the Code Sonar process.
+              </div>
             </div>
           )}
         </section>
 
         {result && (
           <>
+            <FirstScanGuide result={result} onSelectFinding={setSelected} />
+
             <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <SummaryCard
                 title="Score"

@@ -10,6 +10,8 @@ export interface ProjectRecord {
   connected_at: string;
   latest_scan_id: string | null;
   latest_score: number | null;
+  provider_repository_id: number | null;
+  provider_installation_id: number | null;
 }
 
 export interface ProjectHistorySummary {
@@ -39,9 +41,27 @@ export interface ProjectDashboard {
 export interface GitHubConnectionStatus {
   configured: boolean;
   auth_mode: "oauth" | "app" | null;
+  installation_id: number | null;
   token_persisted: false;
   token_exposed: false;
   managed_checkout: true;
+}
+
+export interface GitHubAppStatus {
+  configured: boolean;
+  webhook_configured: boolean;
+  install_url: string | null;
+  installation_count: number;
+  tokens_persisted: false;
+  tokens_exposed: false;
+}
+
+export interface GitHubInstallation {
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  installed_at: string;
+  updated_at: string;
 }
 
 export interface GitHubRepository {
@@ -54,6 +74,7 @@ export interface GitHubRepository {
 }
 
 const API_BASE = "/api/projects";
+const GITHUB_APP_BASE = "/api/github-app";
 
 async function decode(res: Response, fallback: string): Promise<any> {
   const data = await res.json();
@@ -85,6 +106,25 @@ export async function fetchProjectDrift(projectId: string): Promise<DriftResult>
 export async function fetchGitHubConnectionStatus(): Promise<GitHubConnectionStatus> {
   const res = await fetch(`${API_BASE}/connect/github/status`);
   return (await decode(res, "Failed to load GitHub connection status")) as GitHubConnectionStatus;
+}
+
+export async function fetchGitHubAppStatus(): Promise<GitHubAppStatus> {
+  const res = await fetch(`${GITHUB_APP_BASE}/status`);
+  return (await decode(res, "Failed to load GitHub App status")) as GitHubAppStatus;
+}
+
+export async function fetchGitHubInstallations(): Promise<GitHubInstallation[]> {
+  const res = await fetch(`${GITHUB_APP_BASE}/installations`);
+  const data = await decode(res, "Failed to load GitHub App installations");
+  return (data.installations ?? []) as GitHubInstallation[];
+}
+
+export async function activateGitHubInstallation(installationId: number): Promise<void> {
+  const res = await fetch(
+    `${GITHUB_APP_BASE}/installations/${encodeURIComponent(String(installationId))}/activate`,
+    { method: "POST" },
+  );
+  await decode(res, "Failed to activate GitHub App installation");
 }
 
 export async function fetchGitHubRepositories(): Promise<GitHubRepository[]> {

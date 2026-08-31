@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 import {
   fetchAnalyzers,
@@ -14,6 +15,14 @@ import type {
   ScanResponse,
   SortState,
 } from "./api/analyzers";
+import {
+  askSonar,
+  fetchAskSonarStatus,
+} from "./api/askSonar";
+import type {
+  AskSonarStatus,
+  GroundedAnswerResponse,
+} from "./api/askSonar";
 
 import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
 import { CategoryBreakdownChart } from "./components/CategoryBreakdownChart";
@@ -21,8 +30,8 @@ import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
 import { FirstScanGuide } from "./components/FirstScanGuide";
+import { ProjectDashboardPanel } from "./components/ProjectDashboardPanel";
 import { RiskHotspots } from "./components/RiskHotspots";
-import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
 
 const DEFAULT_REPO = "C:\\Users\\bookm\\.openclaw\\workspace\\code-sonar";
@@ -36,22 +45,42 @@ const EMPTY_FILTER: FilterState = {
 
 const DEFAULT_SORT: SortState = { key: "severity", direction: "desc" };
 
-function matchesSearch(f: Finding, search: string): boolean {
+type NavPage =
+  | "overview"
+  | "projects"
+  | "findings"
+  | "hotspots"
+  | "history"
+  | "ask-sonar"
+  | "settings";
+
+const NAV_ITEMS: Array<{ page: NavPage; label: string; short: string }> = [
+  { page: "overview", label: "Command Overview", short: "OV" },
+  { page: "projects", label: "Repositories", short: "GH" },
+  { page: "findings", label: "Findings", short: "FX" },
+  { page: "hotspots", label: "Risk Hotspots", short: "RH" },
+  { page: "history", label: "History & Drift", short: "HD" },
+  { page: "ask-sonar", label: "Ask Sonar", short: "AI" },
+  { page: "settings", label: "Engine & Rules", short: "ER" },
+];
+
+function matchesSearch(finding: Finding, search: string): boolean {
   if (!search.trim()) return true;
   const needle = search.trim().toLowerCase();
   return (
-    f.file_path.toLowerCase().includes(needle) ||
-    (f.symbol ?? "").toLowerCase().includes(needle) ||
-    f.evidence.toLowerCase().includes(needle) ||
-    f.message.toLowerCase().includes(needle) ||
-    f.rule_id.toLowerCase().includes(needle)
+    finding.file_path.toLowerCase().includes(needle) ||
+    (finding.symbol ?? "").toLowerCase().includes(needle) ||
+    finding.evidence.toLowerCase().includes(needle) ||
+    finding.message.toLowerCase().includes(needle) ||
+    finding.rule_id.toLowerCase().includes(needle)
   );
 }
 
 function App() {
-  const [repoPath, setRepoPath] = useState<string>(DEFAULT_REPO);
-  const [health, setHealth] = useState<string>("checking…");
-  const [scanning, setScanning] = useState<boolean>(false);
+  const [activePage, setActivePage] = useState<NavPage>("overview");
+  const [repoPath, setRepoPath] = useState(DEFAULT_REPO);
+  const [health, setHealth] = useState("checking…");
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [selected, setSelected] = useState<Finding | null>(null);
@@ -59,34 +88,53 @@ function App() {
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [analyzers, setAnalyzers] = useState<AnalyzerMetadata[]>([]);
   const [drift, setDrift] = useState<DriftResult | null>(null);
-  const [driftLoading, setDriftLoading] = useState<boolean>(false);
+  const [driftLoading, setDriftLoading] = useState(false);
   const [driftError, setDriftError] = useState<string | null>(null);
   const [fileFilter, setFileFilter] = useState<string | null>(null);
+  const [askStatus, setAskStatus] = useState<AskSonarStatus | null>(null);
+  const [question, setQuestion] = useState("Why is my score this value, and what should I fix first?");
+  const [answer, setAnswer] = useState<GroundedAnswerResponse | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHealth()
-      .then((d) => setHealth(d.status))
+      .then((data) => setHealth(data.status))
       .catch(() => setHealth("unreachable"));
+    fetchAskSonarStatus().then(setAskStatus).catch(() => setAskStatus(null));
   }, []);
 
   useEffect(() => {
-    fetchAnalyzers()
-      .then(setAnalyzers)
-      .catch(() => setAnalyzers([]));
+    fetchAnalyzers().then(setAnalyzers).catch(() => setAnalyzers([]));
   }, [result]);
+
+  const filtered = useMemo(() => {
+    if (!result) return [] as Finding[];
+    return result.findings.filter((finding) => {
+      if (fileFilter !== null && finding.file_path !== fileFilter) return false;
+      if (filter.severities.size > 0 && !filter.severities.has(finding.severity)) return false;
+      if (filter.categories.size > 0 && !filter.categories.has(finding.category)) return false;
+      if (filter.analyzers.size > 0 && !filter.analyzers.has(finding.analyzer)) return false;
+      return matchesSearch(finding, filter.search);
+    });
+  }, [result, filter, fileFilter]);
+
+  const criticalCount = result?.severity_distribution.critical ?? 0;
+  const hotspotCount = result?.top_hotspots?.length ?? 0;
 
   async function onScan(): Promise<void> {
     setScanning(true);
     setError(null);
-    setResult(null);
     setSelected(null);
     setDrift(null);
     setDriftError(null);
+    setAnswer(null);
     try {
       const data = await runScan({ repo_path: repoPath });
       setResult(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setActivePage("overview");
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : String(scanError));
     } finally {
       setScanning(false);
     }
@@ -96,259 +144,249 @@ function App() {
     setDriftLoading(true);
     setDriftError(null);
     try {
-      const data = await fetchDrift(repoPath);
-      setDrift(data);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("HTTP 400") || msg.includes("HTTP 404")) {
+      setDrift(await fetchDrift(repoPath));
+    } catch (driftLoadError) {
+      const message = driftLoadError instanceof Error ? driftLoadError.message : String(driftLoadError);
+      if (message.includes("HTTP 400") || message.includes("HTTP 404")) {
         setDrift(null);
-        setDriftError(
-          "Need at least two scans of this repository to compute drift. Run another scan first.",
-        );
+        setDriftError("Run at least two scans of this repository to compute drift.");
       } else {
-        setDriftError(msg);
+        setDriftError(message);
       }
     } finally {
       setDriftLoading(false);
     }
   }
 
-  const filtered = useMemo(() => {
-    if (!result) return [] as Finding[];
-    return result.findings.filter((f) => {
-      if (fileFilter !== null && f.file_path !== fileFilter) return false;
-      if (filter.severities.size > 0 && !filter.severities.has(f.severity)) return false;
-      if (filter.categories.size > 0 && !filter.categories.has(f.category)) return false;
-      if (filter.analyzers.size > 0 && !filter.analyzers.has(f.analyzer)) return false;
-      if (!matchesSearch(f, filter.search)) return false;
-      return true;
-    });
-  }, [result, filter, fileFilter]);
+  async function onAskSonar(): Promise<void> {
+    if (!result?.scan_id || !question.trim()) return;
+    setAsking(true);
+    setAskError(null);
+    setAnswer(null);
+    try {
+      setAnswer(await askSonar({ scanId: result.scan_id, question: question.trim() }));
+    } catch (askLoadError) {
+      setAskError(askLoadError instanceof Error ? askLoadError.message : String(askLoadError));
+    } finally {
+      setAsking(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+    <div className="sonar-app-shell">
+      <aside className="sonar-sidebar">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Code Sonar</h1>
-          <p className="text-sm text-slate-400">Credit report for your codebase</p>
-        </div>
-        <div className="text-xs text-slate-500">
-          API: <span className="text-slate-300">{health}</span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl space-y-8 px-6 py-8">
-        <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-5">
-          <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">
-              Start with Ask Sonar
+          <div className="sonar-brand">
+            <div className="sonar-mark"><span /></div>
+            <div>
+              <div className="sonar-brand-title">CODE SONAR</div>
+              <div className="sonar-brand-subtitle">Technical Debt Intelligence</div>
             </div>
-            <h2 className="mt-1 text-lg font-semibold">Attach a repository and establish its baseline</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Enter a local repository path. Code Sonar will run deterministic analyzers, save the scan to history, and then guide you through the score and highest-priority findings.
-            </p>
           </div>
-          <label className="mb-2 block text-sm font-medium text-slate-300">
-            Repository path
-          </label>
-          <div className="flex gap-2">
+
+          <div className="sonar-nav-label">Risk intelligence</div>
+          <nav className="sonar-nav">
+            {NAV_ITEMS.map((item) => {
+              let badge: string | number | null = null;
+              if (item.page === "findings" && result) badge = result.finding_count;
+              if (item.page === "hotspots" && hotspotCount > 0) badge = hotspotCount;
+              if (item.page === "ask-sonar") badge = "AI";
+              return (
+                <button
+                  key={item.page}
+                  type="button"
+                  onClick={() => setActivePage(item.page)}
+                  className={`sonar-nav-item ${activePage === item.page ? "active" : ""}`}
+                >
+                  <span className="sonar-nav-icon">{item.short}</span>
+                  <span className="sonar-nav-text">{item.label}</span>
+                  {badge !== null && <span className="sonar-nav-badge">{badge}</span>}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className="sonar-side-status">
+          <div className="sonar-status-row">
+            <span>API</span>
+            <span className={health === "ok" ? "status-good" : "status-warn"}>{health}</span>
+          </div>
+          <div className="sonar-status-row">
+            <span>Deterministic engine</span>
+            <span className="status-good">authoritative</span>
+          </div>
+          <div className="sonar-side-meta">
+            {analyzers.length || 0} analyzers · score range 300–850
+          </div>
+        </div>
+      </aside>
+
+      <div className="sonar-main-shell">
+        <div className="sonar-telemetry-bar">
+          <span><i className="telemetry-dot" /> ENGINE ONLINE</span>
+          <span>API {health}</span>
+          <span>{result ? `SCAN ${result.scan_id?.slice(0, 8) ?? "LOCAL"}` : "NO ACTIVE BASELINE"}</span>
+          <span>{askStatus?.configured ? `ASK SONAR · ${askStatus.provider}` : "ASK SONAR · deterministic only"}</span>
+        </div>
+
+        <header className="sonar-header">
+          <div className="sonar-repo-control">
+            <div className="sonar-eyebrow">Repository target</div>
             <input
-              type="text"
               value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-              placeholder="C:\\path\\to\\repo"
+              onChange={(event) => setRepoPath(event.target.value)}
+              className="sonar-repo-input"
               spellCheck={false}
             />
-            <button
-              onClick={onScan}
-              disabled={scanning || !repoPath.trim()}
-              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-            >
-              {scanning ? "Scanning repository…" : result ? "Scan again" : "Attach & scan"}
+          </div>
+          <div className="sonar-header-actions">
+            {criticalCount > 0 && <span className="sonar-critical-pill">{criticalCount} critical</span>}
+            <button type="button" className="sonar-secondary-button" onClick={() => setActivePage("ask-sonar")}>Ask Sonar</button>
+            <button type="button" className="sonar-primary-button" onClick={onScan} disabled={scanning || !repoPath.trim()}>
+              {scanning ? "Scanning…" : result ? "Scan again" : "Attach & scan"}
             </button>
           </div>
-          {error && (
-            <div className="mt-3 rounded-md border border-rose-700 bg-rose-900/30 px-3 py-2 text-sm text-rose-200">
-              <div className="font-semibold">Sonar could not attach this repository.</div>
-              <div className="mt-1">{error}</div>
-              <div className="mt-2 text-xs text-rose-300/80">
-                Confirm the path exists, points to a directory, and is readable by the Code Sonar process.
-              </div>
-            </div>
+        </header>
+
+        <main className="sonar-content">
+          {error && <Notice tone="danger" title="Repository scan failed">{error}</Notice>}
+
+          {activePage === "overview" && (
+            <OverviewPage
+              result={result}
+              scanning={scanning}
+              onScan={onScan}
+              onNavigate={setActivePage}
+              onSelectFinding={setSelected}
+            />
           )}
-        </section>
 
-        {result && (
-          <>
-            <FirstScanGuide result={result} onSelectFinding={setSelected} />
+          {activePage === "projects" && (
+            <PageFrame title="Repositories" subtitle="Connect GitHub, manage monitored projects, and trigger deterministic scans.">
+              <ProjectDashboardPanel />
+            </PageFrame>
+          )}
 
-            <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <SummaryCard
-                title="Score"
-                big={`${result.score}`}
-                sub={
-                  <>
-                    Grade{" "}
-                    <span
-                      className={`font-bold ${
-                        result.grade === "A"
-                          ? "text-emerald-400"
-                          : result.grade === "B"
-                            ? "text-lime-400"
-                            : result.grade === "C"
-                              ? "text-yellow-400"
-                              : result.grade === "D"
-                                ? "text-orange-400"
-                                : "text-rose-500"
-                      }`}
-                    >
-                      {result.grade}
-                    </span>
-                  </>
-                }
-              />
-              <SummaryCard
-                title="Findings"
-                big={`${result.finding_count}`}
-                sub={`${result.total_debt_points} debt points`}
-              />
-              <SummaryCard
-                title="Source breakdown"
-                big={`${
-                  (result.findings_source_breakdown?.source ?? 0) +
-                  (result.findings_source_breakdown?.test ?? 0) +
-                  (result.findings_source_breakdown?.fixture ?? 0)
-                }`}
-                sub={
-                  <span className="text-xs text-slate-400">
-                    source {result.findings_source_breakdown?.source ?? 0} · test{" "}
-                    {result.findings_source_breakdown?.test ?? 0} · fixture{" "}
-                    {result.findings_source_breakdown?.fixture ?? 0}
-                  </span>
-                }
-              />
-            </section>
-
-            {!result.scan_id && (
-              <div className="rounded-md border border-amber-700/60 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
-                This scan completed but was not persisted to history. Ask Sonar remediation is disabled for this scan.
-              </div>
-            )}
-
-            <ScoreChangeCallout result={result} analyzerCount={analyzers.length} />
-
-            {result.top_hotspots && result.top_hotspots.length > 0 && (
-              <RiskHotspots
-                hotspots={result.top_hotspots}
-                hotspotSummary={{
-                  total_files: result.top_hotspots.length,
-                  files_with_findings:
-                    result.findings.length > 0
-                      ? new Set(result.findings.map((f) => f.file_path)).size
-                      : 0,
-                  total_findings: result.finding_count,
-                  total_debt: result.total_debt_points,
-                }}
-                findings={result.findings}
-                onFilterByFile={setFileFilter}
-                activeFileFilter={fileFilter}
-              />
-            )}
-
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">Drift since previous scan</h2>
-                  <p className="text-xs text-slate-400">
-                    Compare the current scan against the most recent prior scan.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={onShowDrift}
-                  disabled={driftLoading}
-                  className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-                >
-                  {driftLoading ? "Loading drift…" : "Compare with previous scan"}
-                </button>
-              </div>
-              {driftError && (
-                <div className="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-2 text-sm text-amber-200">
-                  {driftError}
+          {activePage === "findings" && (
+            <PageFrame title="Findings" subtitle="Filter, inspect, and prioritize the evidence behind the deterministic score.">
+              {!result ? (
+                <EmptyState onScan={onScan} scanning={scanning} />
+              ) : (
+                <div className="sonar-panel">
+                  <div className="sonar-panel-heading">
+                    <div>
+                      <div className="sonar-panel-title">Finding inventory</div>
+                      <div className="sonar-panel-subtitle">{filtered.length} of {result.findings.length} findings shown</div>
+                    </div>
+                    {fileFilter && (
+                      <button type="button" className="sonar-text-button" onClick={() => setFileFilter(null)}>Clear file filter</button>
+                    )}
+                  </div>
+                  <FilterChips findings={result.findings} analyzers={analyzers} filter={filter} onChange={setFilter} />
+                  <div className="mt-4">
+                    <SortableFindingsTable findings={filtered} onSelect={setSelected} sort={sort} onSortChange={setSort} />
+                  </div>
                 </div>
               )}
-              {drift && <DriftView drift={drift} />}
-            </section>
+            </PageFrame>
+          )}
 
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <h2 className="mb-4 text-lg font-semibold">Category scores</h2>
-              <div className="space-y-3">
-                {(
-                  Object.keys(result.category_scores) as Array<
-                    keyof typeof result.category_scores
-                  >
-                ).map((c) => {
-                  const catScore = result.category_scores[c];
-                  const catFindings = result.findings_by_category[c];
-                  return (
-                    <div key={c}>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-slate-300">{c}</span>
-                        <span className="text-slate-400">
-                          {catScore} · {catFindings} findings
-                        </span>
-                      </div>
-                      <div className="mt-1 h-2 rounded-full bg-slate-700">
-                        <div
-                          className="h-2 rounded-full bg-sky-500"
-                          style={{
-                            width: `${Math.max(
-                              0,
-                              Math.min(100, ((catScore - 300) / 550) * 100),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <CategoryBreakdownChart findingsByCategory={result.findings_by_category} />
-
-            <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">
-                  Findings ({filtered.length} / {result.findings.length})
-                </h2>
-              </div>
-              <FilterChips
-                findings={result.findings}
-                analyzers={analyzers}
-                filter={filter}
-                onChange={setFilter}
-              />
-              <div className="mt-4">
-                <SortableFindingsTable
-                  findings={filtered}
-                  onSelect={setSelected}
-                  sort={sort}
-                  onSortChange={setSort}
+          {activePage === "hotspots" && (
+            <PageFrame title="Risk Hotspots" subtitle="Files where multiple analyzers agree risk is concentrated.">
+              {result?.top_hotspots?.length ? (
+                <RiskHotspots
+                  hotspots={result.top_hotspots}
+                  hotspotSummary={{
+                    total_files: result.top_hotspots.length,
+                    files_with_findings: new Set(result.findings.map((finding) => finding.file_path)).size,
+                    total_findings: result.finding_count,
+                    total_debt: result.total_debt_points,
+                  }}
+                  findings={result.findings}
+                  onFilterByFile={(path) => {
+                    setFileFilter(path);
+                    setActivePage("findings");
+                  }}
+                  activeFileFilter={fileFilter}
                 />
+              ) : <EmptyState onScan={onScan} scanning={scanning} />}
+            </PageFrame>
+          )}
+
+          {activePage === "history" && (
+            <PageFrame title="History & Drift" subtitle="Compare the current baseline with the previous scan without changing score authority.">
+              <div className="sonar-panel">
+                <div className="sonar-panel-heading">
+                  <div>
+                    <div className="sonar-panel-title">Drift comparison</div>
+                    <div className="sonar-panel-subtitle">New, resolved, persistent, worsened, and improved findings.</div>
+                  </div>
+                  <button type="button" className="sonar-primary-button" onClick={onShowDrift} disabled={!result || driftLoading}>
+                    {driftLoading ? "Comparing…" : "Compare previous scan"}
+                  </button>
+                </div>
+                {driftError && <Notice tone="warning" title="Drift unavailable">{driftError}</Notice>}
+                {drift ? <DriftView drift={drift} /> : <div className="sonar-empty-inline">Run a comparison to visualize repository drift.</div>}
               </div>
-            </section>
+            </PageFrame>
+          )}
 
-            <AnalyzerMetadataPanel refreshKey={result ? Date.now() : undefined} />
+          {activePage === "ask-sonar" && (
+            <PageFrame title="Ask Sonar" subtitle="Grounded explanations and remediation guidance. Deterministic scoring remains authoritative.">
+              <div className="sonar-ai-grid">
+                <section className="sonar-panel sonar-ai-core">
+                  <div className="sonar-ai-orb"><span>SONAR</span></div>
+                  <div className="sonar-ai-status">
+                    <div className="sonar-eyebrow">Intelligence status</div>
+                    <div className="sonar-panel-title">{askStatus?.configured ? "Conversational provider ready" : "Deterministic guidance ready"}</div>
+                    <p>{askStatus?.configured ? `${askStatus.provider} · ${askStatus.model}` : "Configure an approved provider to enable generated conversational explanations."}</p>
+                  </div>
+                </section>
 
-            <footer className="text-xs text-slate-500">
-              Scanned at {result.scanned_at}
-              {result.scan_id && <> · scan {result.scan_id}</>}
-            </footer>
-          </>
-        )}
-      </main>
+                <section className="sonar-panel sonar-chat-panel">
+                  <label className="sonar-field-label" htmlFor="ask-sonar-question">Question about this scan</label>
+                  <textarea
+                    id="ask-sonar-question"
+                    className="sonar-question-input"
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    rows={4}
+                    placeholder="Why did testing debt lower my score?"
+                  />
+                  <div className="sonar-chat-actions">
+                    <span className="sonar-panel-subtitle">{result?.scan_id ? `Grounded to scan ${result.scan_id.slice(0, 8)}` : "Run a scan first"}</span>
+                    <button type="button" className="sonar-primary-button" onClick={onAskSonar} disabled={!result?.scan_id || !askStatus?.configured || asking || !question.trim()}>
+                      {asking ? "Analyzing…" : "Ask Sonar"}
+                    </button>
+                  </div>
+                  {askError && <Notice tone="danger" title="Ask Sonar could not answer">{askError}</Notice>}
+                  {answer && (
+                    <div className="sonar-answer">
+                      <div className="sonar-eyebrow">Grounded answer</div>
+                      <p>{answer.answer.answer}</p>
+                      <div className="sonar-answer-meta">Score remains {answer.deterministic_score} ({answer.deterministic_grade}) · {answer.answer.used_sources.length} cited sources</div>
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              {result && <FirstScanGuide result={result} onSelectFinding={setSelected} />}
+            </PageFrame>
+          )}
+
+          {activePage === "settings" && (
+            <PageFrame title="Engine & Rules" subtitle="Inspect analyzer thresholds and runtime state. Score configuration is intentionally not editable here.">
+              <div className="sonar-settings-grid">
+                <MetricCard label="API" value={health} meta="runtime health" />
+                <MetricCard label="Analyzers" value={String(analyzers.length)} meta="deterministic rules" />
+                <MetricCard label="Authority" value="Code Sonar" meta="ML remains advisory" />
+              </div>
+              <AnalyzerMetadataPanel refreshKey={result ? new Date(result.scanned_at).getTime() : undefined} />
+            </PageFrame>
+          )}
+        </main>
+      </div>
 
       <FindingDetailDrawer
         finding={selected}
@@ -360,20 +398,155 @@ function App() {
   );
 }
 
-function SummaryCard({
-  title,
-  big,
-  sub,
+function OverviewPage({
+  result,
+  scanning,
+  onScan,
+  onNavigate,
+  onSelectFinding,
 }: {
-  title: string;
-  big: string;
-  sub: React.ReactNode;
+  result: ScanResponse | null;
+  scanning: boolean;
+  onScan: () => void;
+  onNavigate: (page: NavPage) => void;
+  onSelectFinding: (finding: Finding) => void;
 }) {
+  if (!result) {
+    return (
+      <div className="sonar-start-state">
+        <div className="sonar-eyebrow">Start with a baseline</div>
+        <h1>Credit report for your codebase.</h1>
+        <p>Attach a repository to generate deterministic findings, debt points, hotspots, and a score you can track over time.</p>
+        <button type="button" className="sonar-primary-button sonar-large-button" onClick={onScan} disabled={scanning}>{scanning ? "Scanning…" : "Run baseline scan"}</button>
+      </div>
+    );
+  }
+
+  const sourceBreakdown = result.findings_source_breakdown ?? { source: 0, test: 0, fixture: 0 };
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-      <div className="text-xs uppercase tracking-wide text-slate-400">{title}</div>
-      <div className="mt-2 text-6xl font-bold text-slate-100">{big}</div>
-      <div className="mt-1 text-sm text-slate-400">{sub}</div>
+    <div className="sonar-page-stack">
+      <div className="sonar-page-heading">
+        <div>
+          <div className="sonar-eyebrow">Current baseline</div>
+          <h1>Command Overview</h1>
+          <p>Deterministic technical-debt intelligence for the active repository.</p>
+        </div>
+        <div className="sonar-baseline-id">SCAN {result.scan_id?.slice(0, 12) ?? "LOCAL"}</div>
+      </div>
+
+      <section className="sonar-score-grid">
+        <div className="sonar-score-card sonar-score-primary">
+          <div className="sonar-score-ring">
+            <div><strong>{result.score}</strong><span>/850</span></div>
+          </div>
+          <div>
+            <div className="sonar-eyebrow">Code health score</div>
+            <div className={`sonar-grade grade-${result.grade.toLowerCase()}`}>{result.grade}</div>
+            <div className="sonar-panel-subtitle">Deterministic · reproducible · source-aware</div>
+          </div>
+        </div>
+        <MetricCard label="Findings" value={String(result.finding_count)} meta={`${result.total_debt_points} raw debt points`} />
+        <MetricCard label="Production" value={String(sourceBreakdown.source)} meta={`${sourceBreakdown.test} test · ${sourceBreakdown.fixture} fixture`} />
+        <MetricCard label="Critical" value={String(result.severity_distribution.critical)} meta={`${result.severity_distribution.error} errors`} danger={result.severity_distribution.critical > 0} />
+      </section>
+
+      <FirstScanGuide result={result} onSelectFinding={onSelectFinding} />
+
+      <div className="sonar-overview-grid">
+        <section className="sonar-panel">
+          <div className="sonar-panel-heading">
+            <div>
+              <div className="sonar-panel-title">Category health</div>
+              <div className="sonar-panel-subtitle">Scores show where debt is concentrated.</div>
+            </div>
+          </div>
+          <div className="sonar-category-list">
+            {Object.entries(result.category_scores).map(([category, score]) => (
+              <div className="sonar-category-row" key={category}>
+                <div className="sonar-category-head"><span>{category}</span><span>{score} · {result.findings_by_category[category as keyof typeof result.findings_by_category]} findings</span></div>
+                <div className="sonar-category-track"><span style={{ width: `${Math.max(0, Math.min(100, ((score - 300) / 550) * 100))}%` }} /></div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="sonar-panel">
+          <div className="sonar-panel-heading">
+            <div>
+              <div className="sonar-panel-title">Finding distribution</div>
+              <div className="sonar-panel-subtitle">Debt concentration by category.</div>
+            </div>
+          </div>
+          <CategoryBreakdownChart findingsByCategory={result.findings_by_category} />
+        </section>
+      </div>
+
+      {result.top_hotspots?.length ? (
+        <section className="sonar-panel">
+          <div className="sonar-panel-heading">
+            <div>
+              <div className="sonar-panel-title">Top risk vectors</div>
+              <div className="sonar-panel-subtitle">Highest-value files to investigate next.</div>
+            </div>
+            <button type="button" className="sonar-text-button" onClick={() => onNavigate("hotspots")}>View all hotspots</button>
+          </div>
+          <div className="sonar-hotspot-preview">
+            {result.top_hotspots.slice(0, 5).map((hotspot, index) => (
+              <button type="button" key={hotspot.file_path} className="sonar-hotspot-row" onClick={() => onNavigate("hotspots")}>
+                <span className="sonar-hotspot-rank">#{index + 1}</span>
+                <span className="sonar-hotspot-file">{hotspot.file_path}</span>
+                <span>{hotspot.finding_count} findings</span>
+                <span>{hotspot.debt_total} debt</span>
+                <strong>{hotspot.score}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function PageFrame({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  return (
+    <div className="sonar-page-stack">
+      <div className="sonar-page-heading">
+        <div>
+          <div className="sonar-eyebrow">Code Sonar</div>
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, meta, danger = false }: { label: string; value: string; meta: string; danger?: boolean }) {
+  return (
+    <div className={`sonar-metric-card ${danger ? "danger" : ""}`}>
+      <div className="sonar-eyebrow">{label}</div>
+      <div className="sonar-metric-value">{value}</div>
+      <div className="sonar-panel-subtitle">{meta}</div>
+    </div>
+  );
+}
+
+function Notice({ tone, title, children }: { tone: "danger" | "warning"; title: string; children: ReactNode }) {
+  return (
+    <div className={`sonar-notice ${tone}`}>
+      <strong>{title}</strong>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function EmptyState({ onScan, scanning }: { onScan: () => void; scanning: boolean }) {
+  return (
+    <div className="sonar-empty-state">
+      <div className="sonar-eyebrow">No active scan</div>
+      <h2>Establish a baseline first.</h2>
+      <p>Run a deterministic scan, then return here to inspect this view.</p>
+      <button type="button" className="sonar-primary-button" onClick={onScan} disabled={scanning}>{scanning ? "Scanning…" : "Run scan"}</button>
     </div>
   );
 }

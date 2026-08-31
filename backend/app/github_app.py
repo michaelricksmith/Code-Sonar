@@ -92,6 +92,17 @@ class WebhookAuditStore:
         self.path = path or (Path.home() / ".code-sonar" / "github-webhooks.jsonl")
         self._lock = RLock()
 
+    def has_delivery(self, delivery_id: str) -> bool:
+        with self._lock:
+            if not self.path.exists():
+                return False
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                if json.loads(line).get("delivery_id") == delivery_id:
+                    return True
+            return False
+
     def append(self, record: WebhookAuditRecord) -> None:
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +189,10 @@ def set_webhook_audit_store(store: WebhookAuditStore) -> None:
     _audit = store
 
 
+def get_webhook_audit_store() -> WebhookAuditStore:
+    return _audit
+
+
 def set_webhook_scan_handler(handler: ScanHandler) -> None:
     global _scan_handler
     _scan_handler = handler
@@ -213,11 +228,16 @@ def _installation_from_payload(payload: dict[str, Any]) -> GitHubInstallation | 
     )
 
 
-def _project_for_repository(full_name: str) -> str | None:
+def _project_for_repository(full_name: str, installation_id: int | None) -> str | None:
     normalized = full_name.lower()
     for project in get_project_store().list():
-        if project.provider == "github" and f"{project.owner}/{project.name}".lower() == normalized:
-            return project.project_id
+        if project.provider != "github":
+            continue
+        if f"{project.owner}/{project.name}".lower() != normalized:
+            continue
+        if project.provider_installation_id not in {None, installation_id}:
+            continue
+        return project.project_id
     return None
 
 
@@ -261,6 +281,7 @@ async def activate_installation(installation_id: int) -> dict[str, Any]:
         GitHubIntegration(
             token=token,
             auth_mode="app",
+            installation_id=installation_id,
             checkout_root=current.checkout_root,
         )
     )
@@ -289,8 +310,17 @@ async def github_webhook(
 
     event = x_github_event or "unknown"
     delivery = x_github_delivery or hashlib.sha256(body).hexdigest()[:24]
+    if get_webhook_audit_store().has_delivery(delivery):
+        return {
+            "accepted": True,
+            "duplicate": True,
+            "delivery_id": delivery,
+            "scan_triggered": False,
+        }
+
     action = payload.get("action") if isinstance(payload, dict) else None
     installation = _installation_from_payload(payload)
+    installation_id = installation.installation_id if installation else None
     if installation is not None:
         if event == "installation" and action == "deleted":
             get_installation_store().remove(installation.installation_id)
@@ -299,7 +329,11 @@ async def github_webhook(
 
     repository = payload.get("repository") if isinstance(payload, dict) else None
     full_name = str(repository.get("full_name")) if isinstance(repository, dict) else None
-    project_id = _project_for_repository(full_name) if full_name else None
+    project_id = (
+        _project_for_repository(full_name, installation_id)
+        if full_name is not None
+        else None
+    )
 
     trigger = False
     if project_id is not None and event == "push":
@@ -307,18 +341,19 @@ async def github_webhook(
         project = get_project_store().get(project_id)
         trigger = project is not None and ref == f"refs/heads/{project.default_branch}"
     elif project_id is not None and event == "pull_request":
-        trigger = action in {"closed"} and bool((payload.get("pull_request") or {}).get("merged"))
+        pull_request = payload.get("pull_request") or {}
+        trigger = action == "closed" and bool(pull_request.get("merged"))
 
     if trigger:
         background_tasks.add_task(_run_project_scan, project_id)
 
-    _audit.append(
+    get_webhook_audit_store().append(
         WebhookAuditRecord(
             delivery_id=delivery,
             event=event,
             action=str(action) if action is not None else None,
             repository_full_name=full_name,
-            installation_id=installation.installation_id if installation else None,
+            installation_id=installation_id,
             project_id=project_id,
             accepted=True,
             scan_triggered=trigger,
@@ -327,6 +362,7 @@ async def github_webhook(
     )
     return {
         "accepted": True,
+        "duplicate": False,
         "delivery_id": delivery,
         "event": event,
         "project_id": project_id,

@@ -374,7 +374,7 @@ async def github_webhook(
         pull_request = payload.get("pull_request") or {}
         trigger = action == "closed" and bool(pull_request.get("merged"))
 
-    if trigger:
+    if trigger and project_id is not None:
         background_tasks.add_task(_run_project_scan, project_id)
 
     get_webhook_audit_store().append(

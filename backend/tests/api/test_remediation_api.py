@@ -12,13 +12,16 @@ class ApprovedWorkspaceManager(GitWorktreeManager):
     def prepare(self, request: RemediationRequest) -> PreparedWorkspace:
         if not request.approved:
             raise PermissionError("Remediation workspace preparation requires explicit approval")
-        return PreparedWorkspace(
+        workspace = PreparedWorkspace(
+            workspace_id="ws_approved",
             request_id=request.request_id,
             repository_root="/repo",
             workspace_path="/isolated/worktree",
             branch_name="code-sonar/remediation/finding-request-abc123",
             base_commit="abc123",
         )
+        self._prepared[workspace.workspace_id] = workspace
+        return workspace
 
 
 def _client() -> TestClient:
@@ -46,6 +49,7 @@ def test_status_reports_dry_run_default() -> None:
     assert data["executor_name"] == "dry_run"
     assert data["dry_run_default"] is True
     assert data["isolated_workspace_required"] is True
+    assert data["opaque_workspace_ids"] is True
     assert data["deterministic_score_authority"] == "code_sonar"
 
 
@@ -57,17 +61,19 @@ def test_workspace_prepare_requires_explicit_approval() -> None:
     assert detail["code"] == "remediation_approval_required"
 
 
-def test_workspace_prepare_returns_isolated_location_without_execution() -> None:
+def test_workspace_prepare_returns_opaque_identity_without_host_paths() -> None:
     response = _client().post("/api/remediation/workspace/prepare", json=_payload(approved=True))
 
     assert response.status_code == 200
     data = response.json()
     assert data["request"]["approved"] is True
-    assert data["workspace"]["workspace_path"] == "/isolated/worktree"
-    assert data["workspace"]["repository_root"] == "/repo"
+    assert data["workspace"]["workspace_id"] == "ws_approved"
+    assert "workspace_path" not in data["workspace"]
+    assert "repository_root" not in data["workspace"]
     assert data["workspace"]["branch_name"].startswith("code-sonar/remediation/")
     assert data["execution_performed"] is False
     assert data["active_checkout_modified"] is False
+    assert data["host_paths_exposed"] is False
     assert data["deterministic_score_unchanged"] is True
 
 

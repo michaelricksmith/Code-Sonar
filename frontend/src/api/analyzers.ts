@@ -1,9 +1,4 @@
 // Code Sonar — analyzer registry / API client + drift API client.
-//
-// Provides a typed surface over the backend's analyzer registry
-// (`GET /api/analyzers`), scan endpoint (`POST /api/scan`),
-// history endpoints (`GET /api/history/list`, `GET /api/history/latest`,
-// `GET /api/history/{scan_id}`), and drift endpoint (`GET /api/drift`).
 
 export type Severity = "info" | "warning" | "error" | "critical";
 
@@ -59,6 +54,7 @@ export interface ScanSummary {
 
 export interface ScanResponse {
   repository: string;
+  scan_id: string | null;
   scanned_at: string;
   score: number;
   grade: string;
@@ -99,8 +95,6 @@ export interface SortState {
   key: SortKey;
   direction: "asc" | "desc";
 }
-
-// --- Drift types (Checkpoint 6, Lane 3) -------------------------------------
 
 export interface DriftScanRef {
   scan_id: string;
@@ -166,22 +160,30 @@ export interface DriftResult {
   by_severity: Record<string, DriftBucketCounts>;
 }
 
+export interface Hotspot {
+  file_path: string;
+  score: number;
+  finding_count: number;
+  debt_points: number;
+  severity_weight: number;
+  confidence_weight: number;
+  category_diversity: number;
+  categories: string[];
+  analyzers: string[];
+}
+
 const API_BASE = "/api";
 
 export async function fetchAnalyzers(): Promise<AnalyzerMetadata[]> {
   const res = await fetch(`${API_BASE}/analyzers`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch analyzers (HTTP ${res.status})`);
-  }
+  if (!res.ok) throw new Error(`Failed to fetch analyzers (HTTP ${res.status})`);
   const data = await res.json();
   return (data.analyzers ?? []) as AnalyzerMetadata[];
 }
 
 export async function fetchHealth(): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) {
-    throw new Error(`Health check failed (HTTP ${res.status})`);
-  }
+  if (!res.ok) throw new Error(`Health check failed (HTTP ${res.status})`);
   return res.json();
 }
 
@@ -192,9 +194,7 @@ export async function runScan(req: ScanRequest): Promise<ScanResponse> {
     body: JSON.stringify(req),
   });
   const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.detail ?? `Scan failed (HTTP ${res.status})`);
-  }
+  if (!res.ok) throw new Error(data.detail ?? `Scan failed (HTTP ${res.status})`);
   return data as ScanResponse;
 }
 
@@ -207,39 +207,28 @@ export async function fetchDrift(
   if (opts.to_scan_id) params.set("to_scan_id", opts.to_scan_id);
   const res = await fetch(`${API_BASE}/drift?${params.toString()}`);
   const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.detail ?? `Drift fetch failed (HTTP ${res.status})`);
-  }
+  if (!res.ok) throw new Error(data.detail ?? `Drift fetch failed (HTTP ${res.status})`);
   return data as DriftResult;
 }
 
 export function severityRank(severity: Severity): number {
   switch (severity) {
-    case "critical":
-      return 4;
-    case "error":
-      return 3;
-    case "warning":
-      return 2;
+    case "critical": return 4;
+    case "error": return 3;
+    case "warning": return 2;
     case "info":
-    default:
-      return 1;
+    default: return 1;
   }
 }
 
 export function gradeColor(grade: string): string {
   switch (grade) {
-    case "A":
-      return "text-emerald-400";
-    case "B":
-      return "text-lime-400";
-    case "C":
-      return "text-yellow-400";
-    case "D":
-      return "text-orange-400";
+    case "A": return "text-emerald-400";
+    case "B": return "text-lime-400";
+    case "C": return "text-yellow-400";
+    case "D": return "text-orange-400";
     case "F":
-    default:
-      return "text-rose-500";
+    default: return "text-rose-500";
   }
 }
 
@@ -259,54 +248,3 @@ export const CATEGORIES: Category[] = [
   "testing",
   "maintainability",
 ];
-
-export const DRIFT_CLASSIFICATIONS: DriftClassification[] = [
-  "new",
-  "resolved",
-  "persistent",
-  "worsened",
-  "improved",
-];
-
-// --- Hotspot types (Phase 1, Fastest-Route-to-Private-Beta) -----------------
-
-export interface Hotspot {
-  file_path: string;
-  score: number;
-  debt_total: number;
-  finding_count: number;
-  severity_max: Severity;
-  severity_max_weight: number;
-  analyzer_diversity: number;
-  analyzer_breakdown: Record<string, number>;
-  severity_breakdown: Record<string, number>;
-  category_breakdown: Record<string, number>;
-  complexity_max: number;
-  size_max: number;
-  nesting_max: number;
-  contributing_finding_ids: string[];
-}
-
-export interface HotspotResult {
-  hotspots: Hotspot[];
-  total_files: number;
-  files_with_findings: number;
-  total_findings: number;
-  total_debt: number;
-}
-
-export async function fetchHotspots(
-  repoPath: string,
-  limit: number = 50,
-): Promise<HotspotResult> {
-  const params = new URLSearchParams({
-    repo_path: repoPath,
-    limit: String(limit),
-  });
-  const res = await fetch(`${API_BASE}/hotspots?${params.toString()}`);
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.detail ?? `Hotspots fetch failed (HTTP ${res.status})`);
-  }
-  return data as HotspotResult;
-}

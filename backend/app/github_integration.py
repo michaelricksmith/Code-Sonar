@@ -49,9 +49,12 @@ class GitHubIntegration:
         client: httpx.Client | None = None,
     ) -> None:
         self.token = token if token is not None else os.getenv("CODE_SONAR_GITHUB_TOKEN", "")
-        self.auth_mode = (
-            auth_mode if auth_mode is not None else os.getenv("CODE_SONAR_GITHUB_AUTH_MODE", "oauth")
-        ).strip().lower()
+        configured_mode = (
+            auth_mode
+            if auth_mode is not None
+            else os.getenv("CODE_SONAR_GITHUB_AUTH_MODE", "oauth")
+        )
+        self.auth_mode = configured_mode.strip().lower()
         self.checkout_root = checkout_root or (Path.home() / ".code-sonar" / "repositories")
         self.client = client or httpx.Client(timeout=20.0)
 
@@ -111,7 +114,9 @@ class GitHubIntegration:
 
         if destination.exists():
             if not (destination / ".git").exists():
-                raise FileExistsError("Managed checkout destination exists but is not a Git repository")
+                raise FileExistsError(
+                    "Managed checkout destination exists but is not a Git repository"
+                )
             self._git_authenticated(
                 ["git", "-C", str(destination), "fetch", "--prune", "origin"],
                 failure="Could not refresh managed GitHub checkout",

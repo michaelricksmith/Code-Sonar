@@ -62,7 +62,11 @@ class GitHubInstallationStore:
 
     def upsert(self, record: GitHubInstallation) -> GitHubInstallation:
         with self._lock:
-            records = [item for item in self._load() if item.installation_id != record.installation_id]
+            records = [
+                item
+                for item in self._load()
+                if item.installation_id != record.installation_id
+            ]
             records.append(record)
             records.sort(key=lambda item: item.installation_id)
             self._save(records)
@@ -297,7 +301,10 @@ async def activate_installation(installation_id: int) -> dict[str, Any]:
     except PermissionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="GitHub installation-token request failed") from exc
+        raise HTTPException(
+            status_code=502,
+            detail="GitHub installation-token request failed",
+        ) from exc
 
     current = get_github_integration()
     set_github_integration(

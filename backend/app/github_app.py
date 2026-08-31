@@ -202,6 +202,11 @@ def _webhook_secret() -> str:
     return os.getenv("CODE_SONAR_GITHUB_WEBHOOK_SECRET", "")
 
 
+def _install_url() -> str | None:
+    slug = os.getenv("CODE_SONAR_GITHUB_APP_SLUG", "").strip()
+    return f"https://github.com/apps/{slug}/installations/new" if slug else None
+
+
 def _verify_signature(body: bytes, signature: str | None) -> None:
     secret = _webhook_secret()
     if not secret:
@@ -242,8 +247,25 @@ def _project_for_repository(full_name: str, installation_id: int | None) -> str 
 
 
 async def _run_project_scan(project_id: str) -> None:
-    if _scan_handler is not None:
-        await _scan_handler(project_id)
+    if _scan_handler is None:
+        return
+    project = get_project_store().get(project_id)
+    if project is None:
+        return
+
+    if project.provider == "github" and project.provider_installation_id is not None:
+        token = get_github_app_auth().installation_token(project.provider_installation_id)
+        current = get_github_integration()
+        integration = GitHubIntegration(
+            token=token,
+            auth_mode="app",
+            installation_id=project.provider_installation_id,
+            checkout_root=current.checkout_root,
+        )
+        repository = integration.get_repository(f"{project.owner}/{project.name}")
+        integration.prepare_checkout(repository)
+
+    await _scan_handler(project_id)
 
 
 @router.get("/status")
@@ -251,6 +273,7 @@ async def github_app_status() -> dict[str, Any]:
     return {
         "configured": get_github_app_auth().configured,
         "webhook_configured": bool(_webhook_secret()),
+        "install_url": _install_url(),
         "installation_count": len(get_installation_store().list()),
         "tokens_persisted": False,
         "tokens_exposed": False,

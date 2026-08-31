@@ -293,7 +293,10 @@ async def drift(
             if not earlier:
                 raise HTTPException(
                     status_code=400,
-                    detail="Need at least two scans to compute drift; found only the specified scan",
+                    detail=(
+                        "Need at least two scans to compute drift; "
+                        "found only the specified scan"
+                    ),
                 )
             baseline = earlier[-1]
         else:
@@ -302,7 +305,10 @@ async def drift(
                 next((r for r in records if r.scan_id == from_scan_id), None),
             )
             if baseline is None:
-                raise HTTPException(status_code=404, detail=f"No scan with scan_id={from_scan_id!r}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No scan with scan_id={from_scan_id!r}",
+                )
 
     result = compute_drift(baseline, current)
     return result.to_dict()

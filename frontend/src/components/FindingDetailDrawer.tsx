@@ -1,19 +1,13 @@
-// Code Sonar — finding detail drawer/modal.
-//
-// Lane 4 (Checkpoint 5): security-finding UX. For SECURITY
-// findings, the drawer renders an explicit "Why this was redacted"
-// section that never echoes the live credential. The raw evidence
-// field is suppressed; instead the surrounding context is shown via
-// the analyzer's `safe_context` metadata when present, falling back
-// to a clear redacted marker.
-
 import { useEffect } from "react";
 
 import type { Finding } from "../api/analyzers";
 import { SEVERITY_COLOR, severityRank } from "../api/analyzers";
+import { AskSonarRemediationPanel } from "./AskSonarRemediationPanel";
 
 interface FindingDetailDrawerProps {
   finding: Finding | null;
+  scanId: string | null;
+  currentScore: number | null;
   onClose: () => void;
 }
 
@@ -44,6 +38,8 @@ function isSecurityFinding(finding: Finding): boolean {
 
 export function FindingDetailDrawer({
   finding,
+  scanId,
+  currentScore,
   onClose,
 }: FindingDetailDrawerProps) {
   useEffect(() => {
@@ -141,7 +137,7 @@ export function FindingDetailDrawer({
               <span>
                 <span
                   className={
-                    "inline-flex rounded px-2 py-0.5 text-xs ring-1 mr-2 " +
+                    "mr-2 inline-flex rounded px-2 py-0.5 text-xs ring-1 " +
                     SEVERITY_COLOR[finding.severity]
                   }
                 >
@@ -151,26 +147,19 @@ export function FindingDetailDrawer({
               </span>
             }
           />
-          <Row
-            label="Confidence"
-            value={`${(finding.confidence * 100).toFixed(0)}%`}
-          />
+          <Row label="Confidence" value={`${(finding.confidence * 100).toFixed(0)}%`} />
           <Row
             label="Debt impact"
             value={
               <span>
                 +{finding.debt_points} pts
                 {finding.remediation_effort && (
-                  <span className="text-slate-400">
-                    {" "}
-                    · {finding.remediation_effort}
-                  </span>
+                  <span className="text-slate-400"> · {finding.remediation_effort}</span>
                 )}
               </span>
             }
           />
 
-          {/* Security findings: redacted evidence section. */}
           {isSecurity && (
             <div className="rounded-md border border-rose-700/40 bg-rose-900/20 p-3 text-sm">
               <div className="text-xs uppercase tracking-wide text-rose-300">
@@ -188,15 +177,13 @@ export function FindingDetailDrawer({
                 </div>
               )}
               <div className="mt-3 text-xs text-rose-200/80">
-                The live credential is <strong>never</strong> shown in this
-                view. Revoke the leaked value, store the replacement in your
-                secrets manager, and reference it via environment variables at
-                runtime.
+                The live credential is <strong>never</strong> shown in this view.
+                Revoke the leaked value, store the replacement in your secrets manager,
+                and reference it via environment variables at runtime.
               </div>
             </div>
           )}
 
-          {/* Non-security findings: show evidence as-is. */}
           {!isSecurity && (
             <Row
               label="Evidence"
@@ -211,11 +198,10 @@ export function FindingDetailDrawer({
           {finding.suggestion && (
             <Row
               label="Remediation"
-              value={
-                <p className="text-sm text-slate-200">{finding.suggestion}</p>
-              }
+              value={<p className="text-sm text-slate-200">{finding.suggestion}</p>}
             />
           )}
+
           {Object.keys(finding.metadata ?? {}).length > 0 && (
             <Row
               label="Metadata"
@@ -235,6 +221,14 @@ export function FindingDetailDrawer({
               }
             />
           )}
+
+          <div className="border-t border-slate-800 pt-4">
+            <AskSonarRemediationPanel
+              scanId={scanId}
+              finding={finding}
+              currentScore={currentScore ?? 0}
+            />
+          </div>
         </div>
       </div>
     </div>

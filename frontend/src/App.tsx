@@ -24,8 +24,7 @@ import { RiskHotspots } from "./components/RiskHotspots";
 import { ScoreChangeCallout } from "./components/ScoreChangeCallout";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
 
-const DEFAULT_REPO =
-  "C:\\Users\\bookm\\.openclaw\\workspace\\code-sonar";
+const DEFAULT_REPO = "C:\\Users\\bookm\\.openclaw\\workspace\\code-sonar";
 
 const EMPTY_FILTER: FilterState = {
   severities: new Set(),
@@ -79,6 +78,7 @@ function App() {
     setScanning(true);
     setError(null);
     setResult(null);
+    setSelected(null);
     setDrift(null);
     setDriftError(null);
     try {
@@ -98,8 +98,6 @@ function App() {
       const data = await fetchDrift(repoPath);
       setDrift(data);
     } catch (e) {
-      // Backend returns 400/404 when fewer than 2 scans exist; treat
-      // as "no drift yet" rather than an error in the UI.
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes("HTTP 400") || msg.includes("HTTP 404")) {
         setDrift(null);
@@ -117,42 +115,30 @@ function App() {
   const filtered = useMemo(() => {
     if (!result) return [] as Finding[];
     return result.findings.filter((f) => {
-      if (fileFilter !== null && f.file_path !== fileFilter) {
-        return false;
-      }
-      if (filter.severities.size > 0 && !filter.severities.has(f.severity)) {
-        return false;
-      }
-      if (filter.categories.size > 0 && !filter.categories.has(f.category)) {
-        return false;
-      }
-      if (filter.analyzers.size > 0 && !filter.analyzers.has(f.analyzer)) {
-        return false;
-      }
-      if (!matchesSearch(f, filter.search)) {
-        return false;
-      }
+      if (fileFilter !== null && f.file_path !== fileFilter) return false;
+      if (filter.severities.size > 0 && !filter.severities.has(f.severity)) return false;
+      if (filter.categories.size > 0 && !filter.categories.has(f.category)) return false;
+      if (filter.analyzers.size > 0 && !filter.analyzers.has(f.analyzer)) return false;
+      if (!matchesSearch(f, filter.search)) return false;
       return true;
     });
   }, [result, filter, fileFilter]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
-      <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Code Sonar</h1>
-          <p className="text-sm text-slate-400">
-            Credit report for your codebase
-          </p>
+          <p className="text-sm text-slate-400">Credit report for your codebase</p>
         </div>
         <div className="text-xs text-slate-500">
           API: <span className="text-slate-300">{health}</span>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8 space-y-8">
+      <main className="mx-auto max-w-6xl space-y-8 px-6 py-8">
         <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-5">
-          <label className="block text-sm font-medium text-slate-300 mb-2">
+          <label className="mb-2 block text-sm font-medium text-slate-300">
             Repository path
           </label>
           <div className="flex gap-2">
@@ -194,11 +180,11 @@ function App() {
                           ? "text-emerald-400"
                           : result.grade === "B"
                             ? "text-lime-400"
-                              : result.grade === "C"
-                                ? "text-yellow-400"
-                                : result.grade === "D"
-                                  ? "text-orange-400"
-                                  : "text-rose-500"
+                            : result.grade === "C"
+                              ? "text-yellow-400"
+                              : result.grade === "D"
+                                ? "text-orange-400"
+                                : "text-rose-500"
                       }`}
                     >
                       {result.grade}
@@ -220,27 +206,31 @@ function App() {
                 }`}
                 sub={
                   <span className="text-xs text-slate-400">
-                    source {result.findings_source_breakdown?.source ?? 0} ·
-                    test {result.findings_source_breakdown?.test ?? 0} ·
-                    fixture {result.findings_source_breakdown?.fixture ?? 0}
+                    source {result.findings_source_breakdown?.source ?? 0} · test{" "}
+                    {result.findings_source_breakdown?.test ?? 0} · fixture{" "}
+                    {result.findings_source_breakdown?.fixture ?? 0}
                   </span>
                 }
               />
             </section>
 
-            <ScoreChangeCallout
-              result={result}
-              analyzerCount={analyzers.length}
-            />
+            {!result.scan_id && (
+              <div className="rounded-md border border-amber-700/60 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
+                This scan completed but was not persisted to history. Ask Sonar remediation is disabled for this scan.
+              </div>
+            )}
+
+            <ScoreChangeCallout result={result} analyzerCount={analyzers.length} />
 
             {result.top_hotspots && result.top_hotspots.length > 0 && (
               <RiskHotspots
                 hotspots={result.top_hotspots}
                 hotspotSummary={{
                   total_files: result.top_hotspots.length,
-                  files_with_findings: result.findings.length > 0
-                    ? new Set(result.findings.map((f) => f.file_path)).size
-                    : 0,
+                  files_with_findings:
+                    result.findings.length > 0
+                      ? new Set(result.findings.map((f) => f.file_path)).size
+                      : 0,
                   total_findings: result.finding_count,
                   total_debt: result.total_debt_points,
                 }}
@@ -276,7 +266,7 @@ function App() {
             </section>
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-              <h2 className="text-lg font-semibold mb-4">Category scores</h2>
+              <h2 className="mb-4 text-lg font-semibold">Category scores</h2>
               <div className="space-y-3">
                 {(
                   Object.keys(result.category_scores) as Array<
@@ -299,10 +289,7 @@ function App() {
                           style={{
                             width: `${Math.max(
                               0,
-                              Math.min(
-                                100,
-                                ((catScore - 300) / 550) * 100,
-                              ),
+                              Math.min(100, ((catScore - 300) / 550) * 100),
                             )}%`,
                           }}
                         />
@@ -313,9 +300,7 @@ function App() {
               </div>
             </section>
 
-            <CategoryBreakdownChart
-              findingsByCategory={result.findings_by_category}
-            />
+            <CategoryBreakdownChart findingsByCategory={result.findings_by_category} />
 
             <section className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
               <div className="mb-4 flex items-center justify-between">
@@ -339,18 +324,22 @@ function App() {
               </div>
             </section>
 
-            <AnalyzerMetadataPanel
-              refreshKey={result ? Date.now() : undefined}
-            />
+            <AnalyzerMetadataPanel refreshKey={result ? Date.now() : undefined} />
 
             <footer className="text-xs text-slate-500">
               Scanned at {result.scanned_at}
+              {result.scan_id && <> · scan {result.scan_id}</>}
             </footer>
           </>
         )}
       </main>
 
-      <FindingDetailDrawer finding={selected} onClose={() => setSelected(null)} />
+      <FindingDetailDrawer
+        finding={selected}
+        scanId={result?.scan_id ?? null}
+        currentScore={result?.score ?? null}
+        onClose={() => setSelected(null)}
+      />
     </div>
   );
 }
@@ -366,9 +355,7 @@ function SummaryCard({
 }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-6">
-      <div className="text-xs uppercase tracking-wide text-slate-400">
-        {title}
-      </div>
+      <div className="text-xs uppercase tracking-wide text-slate-400">{title}</div>
       <div className="mt-2 text-6xl font-bold text-slate-100">{big}</div>
       <div className="mt-1 text-sm text-slate-400">{sub}</div>
     </div>

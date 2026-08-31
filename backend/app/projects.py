@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -78,6 +78,17 @@ class ProjectStore:
             records.sort(key=lambda item: item.project_id)
             self._save(records)
         return record
+
+    def record_scan(self, project_id: str, *, scan_id: str, score: int) -> ProjectRecord:
+        with self._lock:
+            records = self._load()
+            current = next((item for item in records if item.project_id == project_id), None)
+            if current is None:
+                raise LookupError("Project not found")
+            updated = replace(current, latest_scan_id=scan_id, latest_score=score)
+            records = [updated if item.project_id == project_id else item for item in records]
+            self._save(records)
+            return updated
 
 
 class GitHubProjectConnectRequest(BaseModel):

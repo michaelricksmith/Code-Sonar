@@ -1,9 +1,4 @@
-"""Security validators for Code Sonar MVP.
-
-Implements the controls documented in backend/SECURITY.md. Single-file
-module on purpose: avoids cross-file import ordering issues and keeps the
-security surface easy to audit.
-"""
+"""Security validators for Code Sonar MVP."""
 
 from __future__ import annotations
 
@@ -17,23 +12,24 @@ MAX_FILES_PER_SCAN: int = 10_000
 MAX_FILE_READ_TIMEOUT: int = 5
 MAX_EVIDENCE_LENGTH: int = 500
 
-
-# Allowlisted scan root. Production deployments should set this (or the
-# CODESONAR_SCAN_ROOT env var) to a controlled directory and run with
-# CODESONAR_ENFORCE_SCAN_ROOT=1. Tests and the MVP self-scan run without
-# the allowlist so they can target temp directories or the workspace.
-SCAN_ROOT_DIR: Path = Path(
-    os.environ.get("CODESONAR_SCAN_ROOT", "/tmp/code-sonar-scans")
-)
+SCAN_ROOT_DIR: Path = Path(os.environ.get("CODESONAR_SCAN_ROOT", "/tmp/code-sonar-scans"))
 _ENFORCE_SCAN_ROOT: bool = os.environ.get("CODESONAR_ENFORCE_SCAN_ROOT", "0") == "1"
-
 
 EXCLUDED_DIRS: frozenset[str] = frozenset({
     ".git", ".svn", ".hg",
-    "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
+    "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "venv", "env", ".venv", "virtualenv",
-    "dist", "build", "target", "out",
+    "dist", "build", "target", "out", "htmlcov", "coverage",
     ".next", ".nuxt", ".output",
+    ".smoke-out", ".code-sonar", ".codesonar",
+})
+
+GENERATED_FILE_NAMES: frozenset[str] = frozenset({
+    ".coverage",
+    "coverage.xml",
+    "coverage.json",
+    "junit.xml",
+    "test-results.xml",
 })
 
 BINARY_EXTENSIONS: frozenset[str] = frozenset({
@@ -48,21 +44,10 @@ BINARY_EXTENSIONS: frozenset[str] = frozenset({
     ".ttf", ".woff", ".woff2", ".eot",
 })
 
-# Generated dependency-metadata files. Filename-specific (not extension-only)
-# so legitimate .json/.yaml source and config files remain analyzable.
 LOCKFILE_NAMES: frozenset[str] = frozenset({
-    "package-lock.json",
-    "npm-shrinkwrap.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "bun.lockb",
-    "poetry.lock",
-    "Pipfile.lock",
-    "composer.lock",
-    "Cargo.lock",
-    "Gemfile.lock",
-    "pdm.lock",
-    "uv.lock",
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    "bun.lockb", "poetry.lock", "Pipfile.lock", "composer.lock", "Cargo.lock",
+    "Gemfile.lock", "pdm.lock", "uv.lock",
 })
 
 
@@ -70,18 +55,7 @@ class RepositoryValidationError(ValueError):
     """Raised when a repository path fails security validation."""
 
 
-def validate_repo_path(
-    raw_path: object,
-    scan_root: Path | None = None,
-    enforce_root: bool | None = None,
-) -> Path:
-    """Validate and resolve a repository path.
-
-    Returns the resolved absolute Path on success. Raises
-    RepositoryValidationError on None / empty / non-existent /
-    non-directory input, or when the resolved path lies outside the
-    allowlisted scan root.
-    """
+def validate_repo_path(raw_path: object, scan_root: Path | None = None, enforce_root: bool | None = None) -> Path:
     if raw_path is None:
         raise RepositoryValidationError("repository path is required")
     text = str(raw_path).strip()
@@ -92,14 +66,10 @@ def validate_repo_path(
     try:
         resolved = p.resolve(strict=True)
     except (FileNotFoundError, RuntimeError) as exc:
-        raise RepositoryValidationError(
-            "invalid repository path (not found): " + text
-        ) from exc
+        raise RepositoryValidationError("invalid repository path (not found): " + text) from exc
 
     if not resolved.is_dir():
-        raise RepositoryValidationError(
-            "invalid repository path (not a directory): " + text
-        )
+        raise RepositoryValidationError("invalid repository path (not a directory): " + text)
 
     enforce = _ENFORCE_SCAN_ROOT if enforce_root is None else enforce_root
     if enforce:
@@ -108,10 +78,8 @@ def validate_repo_path(
             resolved.relative_to(root)
         except ValueError as exc:
             raise RepositoryValidationError(
-                "repository path is outside the allowed scan root "
-                + str(root) + ": " + str(resolved)
+                "repository path is outside the allowed scan root " + str(root) + ": " + str(resolved)
             ) from exc
-
     return resolved
 
 
@@ -136,7 +104,6 @@ def is_binary_content(path: Path, sniff_bytes: int = 8192) -> bool:
 
 
 def is_lockfile(path: Path) -> bool:
-    """Return True for generated dependency-metadata filenames."""
     return path.name in LOCKFILE_NAMES
 
 
@@ -144,14 +111,19 @@ def is_excluded_directory(path: Path) -> bool:
     return any(part in EXCLUDED_DIRS for part in path.parts)
 
 
+def is_generated_artifact(path: Path) -> bool:
+    """Return True for generated test/coverage/runtime artifacts."""
+    return path.name in GENERATED_FILE_NAMES
+
+
 def is_safe_to_read(path: Path, repo_root: Path) -> bool:
     if is_symlink(path):
         return False
     try:
         rel = path.resolve().relative_to(repo_root.resolve())
-    except ValueError:
+    except (ValueError, OSError):
         return False
-    if is_excluded_directory(rel):
+    if is_excluded_directory(rel) or is_generated_artifact(rel):
         return False
     if is_binary_extension(path):
         return False
@@ -168,13 +140,10 @@ def is_safe_to_read(path: Path, repo_root: Path) -> bool:
 
 def assert_within_scan_limits(file_count: int, total_size: int) -> None:
     if file_count > MAX_FILES_PER_SCAN:
-        raise RepositoryValidationError(
-            "repository exceeds file limit (" + str(MAX_FILES_PER_SCAN) + ")"
-        )
+        raise RepositoryValidationError("repository exceeds file limit (" + str(MAX_FILES_PER_SCAN) + ")")
     if total_size > MAX_REPO_SIZE_BYTES:
         raise RepositoryValidationError(
-            "repository exceeds size limit ("
-            + str(MAX_REPO_SIZE_BYTES) + " bytes)"
+            "repository exceeds size limit (" + str(MAX_REPO_SIZE_BYTES) + " bytes)"
         )
 
 
@@ -187,9 +156,7 @@ def redact_secrets(text: str | None) -> str | None:
     return _SECRET_RE.sub("[REDACTED]", text)
 
 
-def truncate_evidence(
-    text: str | None, max_length: int = MAX_EVIDENCE_LENGTH
-) -> str:
+def truncate_evidence(text: str | None, max_length: int = MAX_EVIDENCE_LENGTH) -> str:
     if text is None:
         return ""
     if len(text) <= max_length:

@@ -29,6 +29,9 @@ FIXTURE_DIR_NAMES: Final[frozenset[str]] = frozenset({
     "examples",
     "example",
     "example_data",
+})
+
+FIXTURE_ROOT_NAMES: Final[frozenset[str]] = frozenset({
     "demo",
     "demos",
     "sample",
@@ -60,6 +63,12 @@ def classify_path(rel_path: str) -> str:
     if basename in FIXTURE_FILENAMES:
         return FIXTURE
 
+    # Dedicated top-level demo/sample repositories exist only to exercise the
+    # analyzers, so every finding beneath them is fixture context even when the
+    # sample repository contains its own tests directory.
+    if parts[0] in FIXTURE_ROOT_NAMES:
+        return FIXTURE
+
     if basename == _CONFTEST:
         return TEST
     if basename.startswith(_TEST_PREFIX) and basename.endswith((".py", ".pyi")):
@@ -67,15 +76,15 @@ def classify_path(rel_path: str) -> str:
     if basename.endswith((_TEST_SUFFIX_PY, _TEST_SUFFIX_PYI)):
         return TEST
 
-    # Fixture roots take precedence over nested test-like names. A demo/sample
-    # repository exists specifically to exercise analyzers and must never be
-    # treated as production debt simply because it contains its own tests/ tree.
-    for part in parts[:-1]:
-        if part in FIXTURE_DIR_NAMES:
-            return FIXTURE
+    # A real repository tests/ tree remains test context even when it contains
+    # a nested fixtures/ directory. This preserves the historical classifier
+    # contract and keeps dashboard source-breakdown semantics stable.
     for part in parts[:-1]:
         if part in TEST_DIR_NAMES:
             return TEST
+    for part in parts[:-1]:
+        if part in FIXTURE_DIR_NAMES:
+            return FIXTURE
 
     return SOURCE
 

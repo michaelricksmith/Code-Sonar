@@ -1,4 +1,4 @@
-﻿"""Repository scanning service. Orchestrates analyzers with security gates."""
+"""Repository scanning service. Orchestrates analyzers with security gates."""
 
 from __future__ import annotations
 
@@ -24,11 +24,7 @@ from app.security import (
 
 
 def get_registered_analyzers() -> list[Analyzer]:
-    """Return all analyzers eligible to run against the target repository.
-
-    Order is preserved for deterministic output: analyzers run in the
-    order they appear here, and finding IDs are stable across runs.
-    """
+    """Return analyzers in deterministic execution order."""
     return [
         CommentMarkersAnalyzer(),
         OversizedFilesAnalyzer(),
@@ -42,11 +38,6 @@ def get_registered_analyzers() -> list[Analyzer]:
 
 
 def get_analyzer_metadata() -> list[dict[str, object]]:
-    """Return public metadata for every registered analyzer.
-
-    Consumers (UI, CI, integrations) can introspect the analyzer
-    pipeline without importing analyzer modules directly.
-    """
     return [
         {
             "name": analyzer.name,
@@ -58,19 +49,24 @@ def get_analyzer_metadata() -> list[dict[str, object]]:
     ]
 
 
-def _scan_path(repo_path: Path) -> list[Finding]:
-    """Run all analyzers against an already-validated repo path.
+def _finding_is_scannable(finding: Finding, repo_path: Path) -> bool:
+    """Keep only findings attached to files that pass the repository read policy.
 
-    The analyzers themselves do their own file walks; the service is
-    responsible only for: (1) calling each analyzer, (2) enforcing the
-    file-count/size caps, (3) redaction and truncation of evidence.
+    Analyzers currently perform their own filesystem walks. This service-level
+    gate guarantees generated/runtime artifacts cannot leak into the canonical
+    finding set even if an individual analyzer sees them during its walk.
     """
+    raw = finding.file_path.replace("\\", "/")
+    candidate = repo_path.joinpath(*[part for part in raw.split("/") if part])
+    return candidate.is_file() and is_safe_to_read(candidate, repo_path)
+
+
+def _scan_path(repo_path: Path) -> list[Finding]:
+    """Run analyzers and return the canonical, security-filtered finding set."""
     file_count = 0
     total_size = 0
     for path in repo_path.rglob("*"):
-        if not path.is_file():
-            continue
-        if not is_safe_to_read(path, repo_path):
+        if not path.is_file() or not is_safe_to_read(path, repo_path):
             continue
         try:
             total_size += path.stat().st_size
@@ -86,12 +82,14 @@ def _scan_path(repo_path: Path) -> list[Finding]:
         except Exception:
             continue
         for finding in produced:
+            if not _finding_is_scannable(finding, repo_path):
+                continue
             finding.evidence = truncate_evidence(redact_secrets(finding.evidence or ""))
             findings.append(finding)
     return findings
 
 
 def scan_repository(repo_path: object) -> list[Finding]:
-    """Validate, scan, and return aggregated findings from all analyzers."""
+    """Validate, scan, and return aggregated canonical findings."""
     resolved = validate_repo_path(repo_path)
     return _scan_path(resolved)

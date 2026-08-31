@@ -10,6 +10,7 @@ export interface ProjectRecord {
   connected_at: string;
   latest_scan_id: string | null;
   latest_score: number | null;
+  provider_installation_id: number | null;
 }
 
 export interface ProjectHistorySummary {
@@ -39,6 +40,9 @@ export interface ProjectDashboard {
 export interface GitHubConnectionStatus {
   configured: boolean;
   auth_mode: "oauth" | "app" | null;
+  app_installable: boolean;
+  installation_count: number;
+  webhook_configured: boolean;
   token_persisted: false;
   token_exposed: false;
   managed_checkout: true;
@@ -85,6 +89,12 @@ export async function fetchProjectDrift(projectId: string): Promise<DriftResult>
 export async function fetchGitHubConnectionStatus(): Promise<GitHubConnectionStatus> {
   const res = await fetch(`${API_BASE}/connect/github/status`);
   return (await decode(res, "Failed to load GitHub connection status")) as GitHubConnectionStatus;
+}
+
+export async function fetchGitHubAppInstallUrl(): Promise<string> {
+  const res = await fetch("/api/github-app/install-url");
+  const data = await decode(res, "Failed to create GitHub App install URL");
+  return String(data.install_url);
 }
 
 export async function fetchGitHubRepositories(): Promise<GitHubRepository[]> {

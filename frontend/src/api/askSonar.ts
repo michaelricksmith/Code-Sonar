@@ -1,5 +1,36 @@
 export type RemediationRisk = "low" | "medium" | "high" | "critical";
 
+export interface AskSonarStatus {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
+  network_checked: false;
+  remediation_planning_available: boolean;
+}
+
+export interface GroundedAnswerResponse {
+  scan_id: string;
+  question: string;
+  deterministic_score: number;
+  deterministic_grade: string;
+  deterministic_score_unchanged: true;
+  answer: {
+    answer: string;
+    used_sources: string[];
+    provider_name: string;
+    model_name: string;
+  };
+  grounding: {
+    context_schema_version: string;
+    allowed_sources: string[];
+    source_policy: {
+      deterministic_is_authoritative: boolean;
+      ml_is_advisory: boolean;
+      never_infer_missing_repository_facts: boolean;
+    };
+  };
+}
+
 export interface RemediationPlan {
   plan_schema_version: string;
   plan_id: string;
@@ -86,6 +117,33 @@ async function decodeError(res: Response, fallback: string): Promise<Error> {
     // Fall through to the stable fallback below.
   }
   return new Error(`${fallback} (HTTP ${res.status})`);
+}
+
+export async function fetchAskSonarStatus(): Promise<AskSonarStatus> {
+  const res = await fetch(`${API_BASE}/status`);
+  if (!res.ok) throw await decodeError(res, "Failed to read Ask Sonar status");
+  return (await res.json()) as AskSonarStatus;
+}
+
+export async function askSonar(input: {
+  scanId: string;
+  question: string;
+  topFindingsLimit?: number;
+  similarLimit?: number;
+}): Promise<GroundedAnswerResponse> {
+  const res = await fetch(`${API_BASE}/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scan_id: input.scanId,
+      question: input.question,
+      task: "debt_risk",
+      top_findings_limit: input.topFindingsLimit ?? 10,
+      similar_limit: input.similarLimit ?? 3,
+    }),
+  });
+  if (!res.ok) throw await decodeError(res, "Ask Sonar could not answer");
+  return (await res.json()) as GroundedAnswerResponse;
 }
 
 export async function fetchRemediationPlan(

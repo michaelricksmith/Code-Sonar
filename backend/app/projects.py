@@ -12,10 +12,10 @@ from threading import RLock
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.github_integration import get_github_integration
+from app.github_integration import GitHubIntegration, get_github_integration
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,7 @@ class ProjectRecord:
     local_checkout_path: str
     latest_scan_id: str | None = None
     latest_score: int | None = None
+    provider_installation_id: int | None = None
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +42,7 @@ class ProjectRecord:
             "connected_at": self.connected_at,
             "latest_scan_id": self.latest_scan_id,
             "latest_score": self.latest_score,
+            "provider_installation_id": self.provider_installation_id,
         }
 
 
@@ -74,6 +76,18 @@ class ProjectStore:
         with self._lock:
             return next((item for item in self._load() if item.project_id == project_id), None)
 
+    def find_by_full_name(self, full_name: str) -> ProjectRecord | None:
+        normalized = full_name.strip().lower()
+        with self._lock:
+            return next(
+                (
+                    item
+                    for item in self._load()
+                    if f"{item.owner}/{item.name}".lower() == normalized
+                ),
+                None,
+            )
+
     def upsert(self, record: ProjectRecord) -> ProjectRecord:
         with self._lock:
             records = [item for item in self._load() if item.project_id != record.project_id]
@@ -93,6 +107,16 @@ class ProjectStore:
             self._save(records)
             return updated
 
+    def bind_installation(self, project_id: str, installation_id: int) -> ProjectRecord:
+        with self._lock:
+            records = self._load()
+            current = next((item for item in records if item.project_id == project_id), None)
+            if current is None:
+                raise LookupError("Project not found")
+            updated = replace(current, provider_installation_id=installation_id)
+            self._save([updated if item.project_id == project_id else item for item in records])
+            return updated
+
 
 class GitHubProjectConnectRequest(BaseModel):
     owner: str = Field(min_length=1, max_length=100)
@@ -102,6 +126,7 @@ class GitHubProjectConnectRequest(BaseModel):
 
 class ManagedGitHubConnectRequest(BaseModel):
     repository_full_name: str = Field(min_length=3, max_length=220)
+    installation_id: int | None = Field(default=None, ge=1)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -159,6 +184,25 @@ def connect_github_project(request: GitHubProjectConnectRequest) -> ProjectRecor
     )
 
 
+def _resolve_github_integration(
+    installation_id: int | None,
+) -> tuple[GitHubIntegration, int | None]:
+    from app.github_app import get_github_app_runtime
+
+    runtime = get_github_app_runtime()
+    installations = runtime.installations.list() if runtime.configured else []
+    if installations:
+        selected_id = installation_id or installations[0].installation_id
+        if runtime.installations.get(selected_id) is None:
+            raise LookupError("GitHub App installation is not registered")
+        return runtime.integration_for_installation(selected_id), selected_id
+
+    integration = get_github_integration()
+    if not integration.configured:
+        raise PermissionError("GitHub integration is not configured")
+    return integration, None
+
+
 _store = ProjectStore()
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -188,10 +232,19 @@ async def get_project(project_id: str) -> dict[str, Any]:
 
 @router.get("/connect/github/status")
 async def github_connection_status() -> dict[str, Any]:
-    integration = get_github_integration()
+    from app.github_app import get_github_app_runtime
+
+    runtime = get_github_app_runtime()
+    installations = runtime.installations.list() if runtime.configured else []
+    static_integration = get_github_integration()
+    app_ready = runtime.configured and bool(installations)
+    static_ready = static_integration.configured
     return {
-        "configured": integration.configured,
-        "auth_mode": integration.auth_mode if integration.configured else None,
+        "configured": app_ready or static_ready,
+        "auth_mode": "app" if app_ready else (static_integration.auth_mode if static_ready else None),
+        "app_installable": runtime.configured,
+        "installation_count": len(installations),
+        "webhook_configured": runtime.settings.webhook_configured,
         "token_persisted": False,
         "token_exposed": False,
         "managed_checkout": True,
@@ -199,29 +252,36 @@ async def github_connection_status() -> dict[str, Any]:
 
 
 @router.get("/connect/github/repositories")
-async def github_repositories() -> dict[str, Any]:
-    integration = get_github_integration()
-    if not integration.configured:
-        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
+async def github_repositories(
+    installation_id: int | None = Query(default=None, ge=1),
+) -> dict[str, Any]:
     try:
+        integration, selected_installation_id = _resolve_github_integration(installation_id)
         repositories = integration.list_repositories()
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="GitHub repository discovery failed") from exc
     return {
         "count": len(repositories),
         "repositories": [item.to_public_dict() for item in repositories],
+        "installation_id": selected_installation_id,
         "token_exposed": False,
     }
 
 
 @router.post("/connect/github/managed")
 async def connect_managed_github(request: ManagedGitHubConnectRequest) -> dict[str, Any]:
-    integration = get_github_integration()
-    if not integration.configured:
-        raise HTTPException(status_code=503, detail="GitHub integration is not configured")
     try:
+        integration, selected_installation_id = _resolve_github_integration(
+            request.installation_id
+        )
         repository = integration.get_repository(request.repository_full_name)
         checkout = integration.prepare_checkout(repository)
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LookupError as exc:
@@ -239,6 +299,7 @@ async def connect_managed_github(request: ManagedGitHubConnectRequest) -> dict[s
         default_branch=repository.default_branch,
         connected_at=datetime.now(timezone.utc).isoformat(),
         local_checkout_path=str(checkout),
+        provider_installation_id=selected_installation_id,
     )
     get_project_store().upsert(record)
     return {

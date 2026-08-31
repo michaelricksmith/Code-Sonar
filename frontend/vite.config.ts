@@ -10,6 +10,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        '/api/health': {
+          target: apiTarget,
+          changeOrigin: true,
+          rewrite: () => '/health',
+        },
         '/api': {
           target: apiTarget,
           changeOrigin: true,

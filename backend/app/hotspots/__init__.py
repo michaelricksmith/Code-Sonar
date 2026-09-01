@@ -237,12 +237,6 @@ def _build_hotspot_for_file(file_path: str, file_findings: list[Finding]) -> Hot
 
     analyzer_breakdown: Counter[str] = Counter(f.analyzer for f in file_findings)
     analyzer_diversity = len(analyzer_breakdown)
-    category_breakdown: Counter[str] = Counter(
-        f.category.value if isinstance(f.category, FindingSeverity) else str(f.category)
-        for f in file_findings
-    )
-    # The ``category`` attribute is a FindingCategory enum, not
-    # FindingSeverity. Re-do the breakdown correctly.
     category_breakdown = Counter(
         f.category.value for f in file_findings
     )
@@ -251,7 +245,7 @@ def _build_hotspot_for_file(file_path: str, file_findings: list[Finding]) -> Hot
     size_max = _extract_metadata_max(file_findings, METADATA_SIZE_KEYS)
     nesting_max = _extract_metadata_max(file_findings, METADATA_NESTING_KEYS)
 
-    contributing_finding_ids = [f.id for f in file_findings]
+    contributing_finding_ids = sorted(f.id for f in file_findings)
 
     score = debt_total + severity_max_weight + finding_count + analyzer_diversity * 2
 

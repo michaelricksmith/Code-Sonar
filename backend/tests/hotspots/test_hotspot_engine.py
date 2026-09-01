@@ -215,6 +215,28 @@ class TestDeterminism:
         r_b = compute_hotspots(findings_b).to_dict()
         assert r_a == r_b
 
+    def test_two_findings_same_file_ids_a_z_order_contributing_ids(self) -> None:
+        findings_original = [
+            make_finding(
+                file_path="src/a.py", debt_points=5, severity=FindingSeverity.WARNING,
+                finding_id="z-id", line_start=10,
+            ),
+            make_finding(
+                file_path="src/a.py", debt_points=5, severity=FindingSeverity.WARNING,
+                finding_id="a-id", line_start=20,
+            ),
+        ]
+        findings_reversed = list(reversed(findings_original))
+
+        r_original = compute_hotspots(findings_original)
+        r_reversed = compute_hotspots(findings_reversed)
+
+        dict_original = r_original.to_dict()
+        dict_reversed = r_reversed.to_dict()
+
+        assert dict_original == dict_reversed
+        assert dict_original["hotspots"][0]["contributing_finding_ids"] == ["a-id", "z-id"]
+
 
 class TestMetadataExtraction:
     def test_complexity_max_extracted_from_cc(self) -> None:

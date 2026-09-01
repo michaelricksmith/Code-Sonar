@@ -1,5 +1,7 @@
 # Code Sonar — Security Documentation
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 **Last Updated:** 2026-08-22  
 **Version:** 1.0 (MVP)  
 **Scope:** Repository ingestion and analysis security

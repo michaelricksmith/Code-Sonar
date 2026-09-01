@@ -1,5 +1,7 @@
 # Demo Repository — `demo/sample_repo`
 
+**Part of Code Sonar, created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 A small, self-contained Python sample repository for Code Sonar's
 private-beta demo. Intentionally produces:
 

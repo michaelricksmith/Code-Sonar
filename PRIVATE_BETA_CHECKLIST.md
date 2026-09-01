@@ -1,5 +1,7 @@
 # Code Sonar — Private-Beta Checklist (v0.1.0-beta.1)
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 This checklist is the acceptance gate for putting Code Sonar in front
 of 5–10 private-beta users. It is the source of truth for "ready or
 not ready." Each item is either ✅ (verified) or has explicit next steps.
@@ -84,9 +86,9 @@ Expected: `summary.new_count ≥ 1` (the AWS access key in state-B), `summary.re
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 15 | Tests green | ✅ | **324 passed, 1 skipped** (`pytest --no-header --no-cov -q`); no regression from C6's 307/1 baseline |
+| 15 | Tests green | ✅ | **414 passed, 1 skipped** (verified 2026-08-31); focused hotspot suite 18/18 with 100% engine coverage |
 | 16 | Determinism green | ✅ | Repeated scans return byte-identical results; drift comparison is ordering-independent; finding IDs are stable across additions of unrelated files; hotspot ranking is deterministic; `test_analyzer_determinism.py::test_registry_is_complete` guards against analyzer/test drift |
-| 17 | Frontend build green | ✅ | `vite build` produces 40 modules / 180.00 kB / 54.98 kB gzip in ~350 ms; `tsc --noEmit` reports zero errors |
+| 17 | Frontend build green | ✅ | Vite 8 production build passes with 26 modules; TypeScript reports zero errors; Tailwind/PostCSS compilation is verified |
 | 18 | No known secret exposure | ✅ | `app.security.redact_secrets` is called on every persisted `evidence`; `FindingSnapshot.to_dict()` re-applies it on the way out; verified by `tests/history/test_history.py::TestRedactionInPersistedRecord::test_persisted_evidence_is_redacted` and `tests/security/test_validators.py::test_secrets_are_redacted_in_persistence` |
 | 19 | No debug-only paths required | ✅ | All prod paths are reachable without env vars; the only env var is `CODESONAR_HOME` (optional, defaults to `~/.code-sonar/`) |
 
@@ -108,6 +110,12 @@ Expected: `summary.new_count ≥ 1` (the AWS access key in state-B), `summary.re
 
 `v0.1.0-beta.1` — first private-beta prerelease. Not published publicly.
 
+### Checklist
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 23 | Ownership and IP attribution preserved | ✅ | `README.md`, `OWNERSHIP.md`, `LICENSE`, `DEVELOPMENT_STATUS.md`, `CODE_SONAR_HANDOFF.md`, npm/Python package metadata, and RICK's local agent contract credit Michael Smith (`michaelricksmith`) as creator, builder, owner, maintainer, and IP rights holder; RICK/AI tools are identified as assistants only |
+
 ### Release notes (highlights)
 
 - **Hotspots MVP** — deterministic per-file risk ranking with explainable breakdown (debt + severity + finding count + analyzer diversity). Top 10 included in every scan response; full ranking available via `GET /api/hotspots`.
@@ -128,7 +136,7 @@ Expected: `summary.new_count ≥ 1` (the AWS access key in state-B), `summary.re
 | 5 | No background queue; long scans block the request thread | Acceptable for private beta (most scans complete in <2s); future checkpoint |
 | 6 | No multi-user, no auth, no orgs | Defer per "do not overbuild" |
 | 7 | v0.1.0-beta.1 is not publicly released | Internal / private-beta only |
-| 8 | The OAuth-app credential blocker means `git push` from the dev environment to `origin` fails (no Windows Credential Manager entry, no `GH_TOKEN`/`GITHUB_TOKEN`, `gh` unauthenticated) | Commits accumulate on local main; the next public push will be done manually by Michael with a credential |
+| 8 | Product is private beta and proprietary; public distribution and licensing are not enabled | Access and use require Michael Smith's express authorization; verified work is pushed to `origin/main` |
 
 ### Rollback instructions
 

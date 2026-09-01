@@ -1,5 +1,7 @@
 # Code Sonar ML Intelligence Specification
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 **Status:** ML-0 baseline
 **Branch:** `feature/ml-intelligence-layer`
 **Principle:** Machine learning augments Code Sonar; it does not replace the deterministic scoring engine.

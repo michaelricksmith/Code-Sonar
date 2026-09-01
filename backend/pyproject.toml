@@ -2,6 +2,8 @@
 name = "code-sonar"
 version = "0.1.0"
 description = "Credit report for your codebase"
+authors = [{ name = "Michael Smith", email = "michaelricksmith@gmail.com" }]
+license = { text = "Proprietary" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

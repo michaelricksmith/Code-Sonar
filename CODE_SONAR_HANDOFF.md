@@ -1,6 +1,35 @@
 # Code Sonar — End-of-Day Handoff
 
-**Date:** 2026-08-22 01:15 PDT
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
+> **Current handoff — 2026-08-31 PDT**
+> Work is saved and synchronized to GitHub through commit `331b611` before this documentation update. Read `README.md`, the top of `DEVELOPMENT_STATUS.md`, and `CHANGELOG.md` as the current source of truth. The 2026-08-22 handoff below is retained only as historical context and must not be used to select new work.
+
+## Current verification
+
+- Backend: **414 passed, 1 skipped**.
+- Hotspot suite: **18 passed** with 100% engine coverage.
+- Frontend TypeScript/Vite 8 production build: passed.
+- npm audit: 0 known vulnerabilities.
+- Tailwind/PostCSS production compilation: working.
+- Recent commits: `02207ea` hotspot determinism, `61f086a` frontend security, `331b611` Tailwind compilation.
+
+## Current continuation instructions
+
+1. Confirm `main` matches `origin/main`.
+2. Choose one bounded task based on the real repository, not the archived checkpoint below.
+3. Have RICK assign the correct specialist, independently review the diff, and run focused plus release-level verification.
+4. Update status and changelog documents before committing.
+5. Commit only intended tracked files and push to `origin/main`.
+6. Preserve unrelated local RICK/OpenClaw files.
+
+Michael Smith retains all product, release, ownership, and licensing authority. Do not attribute ownership to RICK or any AI/tool, grant a public license, rewrite Git history, or perform destructive cleanup without Michael Smith's explicit approval.
+
+---
+
+## Archived handoff from 2026-08-22
+
+**Historical date:** 2026-08-22 01:15 PDT
 **Status:** Work checkpoint — ready to resume tomorrow
 
 ---

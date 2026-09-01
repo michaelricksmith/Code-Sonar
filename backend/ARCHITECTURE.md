@@ -1,5 +1,7 @@
 # Code Sonar Architecture — MVP Backend
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 **Version:** 0.1.0  
 **Last Updated:** 2026-08-22  
 **Status:** Architecture validated, ready for implementation

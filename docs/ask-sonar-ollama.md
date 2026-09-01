@@ -1,5 +1,7 @@
 # Ask Sonar with Ollama
 
+**Part of Code Sonar, created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 Ask Sonar can use a local Ollama model while keeping Code Sonar's deterministic score authoritative.
 
 ## Requirements

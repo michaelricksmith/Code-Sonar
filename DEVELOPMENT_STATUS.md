@@ -1,6 +1,32 @@
 # Code Sonar — Development Status
 
-**Last Updated:** 2026-08-22 19:55 PDT
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
+> **Authoritative current snapshot — 2026-08-31 PDT**
+> Product status: private beta; active development. Branch `main` was verified through commit `331b611` before this documentation update. The historical Checkpoint 6 record below is retained for provenance and is no longer the current repository state.
+
+## Current verified state (2026-08-31)
+
+- Intelligence UI and credit-report workflow shipped through merge `d73e9ba`.
+- Hotspot same-file finding order made deterministic with regression coverage in `02207ea`.
+- Frontend dependency security completed in `61f086a`; npm audit reports **0 vulnerabilities**.
+- Tailwind/PostCSS production compilation restored in `331b611`.
+- Backend verification: **414 passed, 1 skipped**, with 85% measured coverage.
+- Hotspot verification: **18 passed**, hotspot engine at 100% coverage.
+- Frontend TypeScript and Vite 8 production build: passed.
+- Completed work is committed and pushed to `origin/main` after verification.
+
+## Current ownership and operating rules
+
+Code Sonar—including its source code, scoring system, analyzers, product design, specifications, branding, documentation, datasets, and related materials—is proprietary intellectual property created, built, directed, owned, and maintained by Michael Smith (`michaelricksmith`). RICK, Codex, OpenClaw agents, and other development tools assist under Michael Smith's direction and hold no ownership or intellectual-property rights.
+
+Documentation must be updated with each completed task. RICK/OpenClaw state, PID, log, and workspace-contract files remain local operational artifacts unless Michael Smith explicitly approves them for version control.
+
+---
+
+## Archived historical checkpoint record (2026-08-22)
+
+**Historical record updated:** 2026-08-22 19:55 PDT
 **Checkpoint:** Checkpoint 6 — Drift Detection + Finding History (committed locally, not yet pushed)
 **Last Commit:** `fc3084d` (Checkpoint 5) on local main; Checkpoint 6 work is uncommitted and pending
 **Branch:** `main`

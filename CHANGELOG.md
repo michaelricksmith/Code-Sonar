@@ -1,8 +1,37 @@
 # Code Sonar — Changelog
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 All notable changes to Code Sonar are documented in this file. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/)
 without semantic-versioning.
+
+---
+
+## [Unreleased] — 2026-08-31
+
+### Added
+
+- Rebuilt intelligence-focused dashboard and credit-report workflow through merge commit `d73e9ba`.
+- Added same-file ordering regression coverage for risk-hotspot serialization.
+- Added `frontend/postcss.config.cjs` so Tailwind utilities compile into production CSS.
+
+### Fixed
+
+- Made `contributing_finding_ids` deterministic regardless of finding input order (`02207ea`).
+- Removed redundant hotspot category-breakdown computation (`02207ea`).
+- Restored the frontend production build environment and Tailwind processing (`331b611`).
+
+### Security and maintenance
+
+- Removed unused vulnerable `react-router-dom` and `vitest` dependencies.
+- Upgraded Vite to 8.2.2 and `@vitejs/plugin-react` to 6.1.1 (`61f086a`).
+- Verified `npm audit`: 0 vulnerabilities.
+- Verified backend: 414 passed, 1 skipped; frontend TypeScript/Vite production build: passed.
+
+### Ownership
+
+- Clarified that Michael Smith (`michaelricksmith`) is Code Sonar's creator, builder, owner, maintainer, and intellectual-property rights holder. RICK and other development tools are assistants only and hold no ownership rights.
 
 ---
 
@@ -37,7 +66,7 @@ publicly.
   - Together they demonstrate the full drift story (NEW + RESOLVED + WORSENED)
   - AWS access key is intentionally fake-looking (not a real credential)
 
-- **`PRIVATE_BETA_CHECKLIST.md`** — 22-item acceptance gate for private-beta
+- **`PRIVATE_BETA_CHECKLIST.md`** — originally a 22-item acceptance gate for private beta; now includes a 23rd ownership/IP preservation gate
   readiness (INSTALLATION / SCAN / UX / QUALITY / DOCUMENTATION / RELEASE)
 
 ### Checkpoint 6 (carried in from prior commit `0d7b220`)
@@ -58,7 +87,7 @@ publicly.
 
 - ruff: All checks passed
 - mypy: Success, no issues found in 27 source files (+1 from C6's 26)
-- pytest: **324 passed, 1 skipped** (up from 307 at C6; +17 from hotspots tests)
+- Historical release baseline: pytest **324 passed, 1 skipped**. Current verified baseline is **414 passed, 1 skipped** as documented in the 2026-08-31 Unreleased section.
 - frontend tsc --noEmit: clean
 - vite build: 40 modules, 180.00 kB / 54.98 kB gzip, 348 ms
 - Drift determinism: byte-identical for reordered inputs and repeated calls
@@ -74,8 +103,7 @@ See `PRIVATE_BETA_CHECKLIST.md` § Known limitations. Highlights:
 - Single-process FastAPI (SQLite swap is a future seam via `HistoryStore` ABC)
 - No multi-user / auth / orgs (deferred)
 - Not publicly released (internal / private-beta only)
-- `git push` from the dev environment fails with OAuth-app credential blocker;
-  commits accumulate on local main and reach `origin/main` manually
+- Historical development environments required manual authenticated pushes; the current workflow verifies and pushes completed tasks to `origin/main`
 
 ---
 

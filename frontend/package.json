@@ -1,6 +1,8 @@
 {
   "name": "code-sonar-dashboard",
   "version": "0.1.0",
+  "author": "Michael Smith <michaelricksmith@gmail.com>",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "scripts": {

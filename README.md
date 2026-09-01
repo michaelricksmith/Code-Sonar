@@ -1,5 +1,9 @@
 # Code Sonar
 
+**Created, built, and owned by Michael Smith (GitHub: [michaelricksmith](https://github.com/michaelricksmith)).**
+
+Copyright © 2026 Michael Smith. Code Sonar—including its source code, product design, specifications, branding, and documentation—is proprietary intellectual property. All rights reserved unless Michael Smith expressly grants otherwise in writing.
+
 > **Credit report for your codebase.**
 
 Code Sonar scans a software repository, produces a single credit-score-style
@@ -388,7 +392,7 @@ and asserts the loaded record has it replaced with `[REDACTED]`.
 | 5 | No multi-user / auth / orgs | Deferred per "do not overbuild" |
 | 6 | Self-scan puts the workspace at 529/F | This is by design — Code Sonar reports uncomfortable results when the evidence supports them |
 | 7 | v0.1.0-beta.1 is not publicly released | Internal / private-beta only |
-| 8 | `git push` from the dev environment fails (OAuth-app credential blocker) | Commits accumulate on local main; the next public push is done manually with a credential |
+| 8 | Private-beta product; public licensing and distribution are not enabled | Access and use require Michael Smith's express authorization |
 
 ---
 
@@ -400,7 +404,7 @@ and asserts the loaded record has it replaced with `[REDACTED]`.
 Sonar and can give honest feedback on real repositories.
 
 See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
-22-item acceptance gate. All items are ✅ as of the release.
+23-item acceptance gate. All items are ✅ as of the current verification.
 
 ---
 
@@ -415,11 +419,15 @@ See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
 | Checkpoint 5 (dead_code analyzer + scoring audit + security UX + shared determinism) | ✅ Shipped (`fc3084d`) |
 | Checkpoint 6 (drift detection + scan history) | ✅ Shipped (`0d7b220`) |
 | Checkpoint 7 (risk hotspots + private-beta productization) | ✅ Shipped (this release) |
+| Intelligence UI rebuild | ✅ Shipped (`d73e9ba`) |
+| Hotspot determinism hardening | ✅ Shipped (`02207ea`) |
+| Frontend dependency security | ✅ Shipped (`61f086a`; npm audit: 0 vulnerabilities) |
+| Tailwind production compilation | ✅ Shipped (`331b611`) |
 | CI #1 fix | ✅ Shipped (`0235901`) |
 | GitHub repo | ✅ Private (`michaelricksmith/code-sonar`) |
 | `.github/workflows/ci.yml` | ✅ 3-job pipeline (backend ruff + mypy + pytest on Python 3.11, frontend tsc + vite on Node 20, smoke self-scan) |
 
-**Total tests:** **324 passed, 1 skipped** (no regression from C6's 307/1 baseline; +17 from the hotspots tests in this checkpoint).
+**Current backend baseline:** **414 passed, 1 skipped** (verified 2026-08-31). The focused hotspot suite is 18/18 with 100% hotspot-engine coverage. The frontend TypeScript/Vite 8 production build passes and `npm audit` reports 0 vulnerabilities.
 
 See [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md) and [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
@@ -427,10 +435,17 @@ See [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md) and [`CHANGELOG.md`](CHANGE
 
 ## 17. License / status
 
-**License:** TBD (private beta; license decision deferred until public
-release).
+See [`OWNERSHIP.md`](OWNERSHIP.md) for the canonical ownership and intellectual-property notice.
 
-**Maintainer:** RICK (assistant) under Michael Smith's direction.
+**License:** Proprietary — all rights reserved. No license to use,
+copy, modify, distribute, sublicense, or commercialize Code Sonar is
+granted unless Michael Smith expressly provides one in writing.
+
+**Creator, owner, and maintainer:** Michael Smith (`michaelricksmith`).
+
+**Development assistance:** RICK and other software-development tools
+operate only under Michael Smith's direction and do not hold ownership
+or intellectual-property rights in Code Sonar.
 
 **Contact:** open a GitHub issue on `michaelricksmith/code-sonar`.
 

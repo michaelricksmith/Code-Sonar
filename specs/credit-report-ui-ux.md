@@ -1,5 +1,7 @@
 # Code Sonar — Credit Report UI/UX Spec
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 **Last Updated:** 2026-08-21
 **Status:** Draft for Michael review
 

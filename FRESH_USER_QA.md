@@ -1,5 +1,7 @@
 # Fresh-User QA Simulation — v0.1.0-beta.1
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 This file documents the 10-step fresh-user QA walkthrough Michael
 specified in the Fastest-Route-to-Private-Beta brief. It validates
 that **a technically capable person who did not build Code Sonar** can

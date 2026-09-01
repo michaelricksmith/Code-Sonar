@@ -1,7 +1,9 @@
 # Code Sonar — Market Analysis & Competitive Landscape
 
+**Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
+
 **Last Updated:** 2026-08-21
-**Author:** VP Strategy (via Rick)
+**Author and owner:** Michael Smith, with research assistance from RICK
 **Status:** Draft for Michael review
 
 ---

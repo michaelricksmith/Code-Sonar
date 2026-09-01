@@ -4,7 +4,7 @@ Code Sonar was created, built, directed, and is owned by Michael Smith (GitHub: 
 
 ## Decision
 
-The repositories below were researched on August 31, 2026. Installation is deliberately deferred until September 1, 2026. Nothing in this roadmap authorizes unattended installation, credential access, or broad execution permissions.
+The repositories below were researched on August 31, 2026. Michael Smith approved the first installation wave on September 1, 2026. That approval did not authorize credential access, publishing, destructive actions, paid services, or unrestricted execution permissions.
 
 ## Recommended repositories
 
@@ -43,7 +43,39 @@ The repositories below were researched on August 31, 2026. Installation is delib
 
 OpenCode, Langfuse, and Temporal require separate resource and architecture reviews before installation.
 
+## Installation record — September 1, 2026
+
+| Capability | Installed version | Location / integration | Verification |
+|---|---:|---|---|
+| Playwright | 1.62.1 | `frontend` development dependency plus Chromium | Version check and real headless Chromium launch passed. |
+| Trivy | 0.74.0 | `C:\Users\bookm\.openclaw\tools\trivy\0.74.0` | Official archive checksum verified; narrow read-only secret scan passed. |
+| Mermaid CLI | 11.16.0 | `C:\Users\bookm\.openclaw\tools\mermaid-cli` | SVG render passed. |
+| Sumy | 0.13.0 | Isolated RICK Python environment | Real two-sentence extractive summary passed after installing local `punkt_tab` data. |
+| Debugpy | 1.8.21 | Isolated RICK Python environment | Version/import check passed. |
+| VS Code JS Debug | 1.117.0 | Already bundled with installed VS Code | Built-in extension package version verified; replacement was unnecessary. |
+| Streamlit | 1.62.0 | Isolated RICK Python environment | CLI version check passed. |
+
+Python tools are isolated under `C:\Users\bookm\.openclaw\tools\rick-capabilities-python`. Stable command shims were added to the existing user npm command directory for Trivy, Mermaid, Sumy, Debugpy, and Streamlit.
+
+OpenClaw skills were assigned by role without widening tool permissions:
+
+- Planner: `diagram-maker`
+- Builder: `diagram-maker`, `local-prototyping`
+- Tester: `code-sonar-playwright`, `code-sonar-security`, `node-inspect-debugger`, `python-debugpy`, `local-prototyping`
+- Researcher: `agent-reach`, `local-summarize`
+- RICK/main remains a coordinator with no direct execution skill.
+
+The OpenClaw gateway was restarted and returned healthy. Execution-capable agents retain their existing approval gates.
+
+## Rollback
+
+- Playwright: remove `@playwright/test` from `frontend/package.json`, restore the lockfile through normal version control, and remove its browser cache only if no other project uses it.
+- Trivy: remove its command shim, then remove `C:\Users\bookm\.openclaw\tools\trivy\0.74.0`.
+- Mermaid: remove its command shim, then remove `C:\Users\bookm\.openclaw\tools\mermaid-cli`.
+- Sumy, Debugpy, and Streamlit: remove their command shims, then remove the isolated `rick-capabilities-python` environment.
+- VS Code JS Debug: no rollback is needed because the approved version was already a built-in VS Code component.
+- OpenClaw integration: restore the pre-change skill allowlists from the configuration backup or set the affected agent `skills` arrays back to their prior values, validate, and restart the gateway.
+
 ## Research note
 
 The public `anthropics/skills` repository had substantially more stars than the selected skill validator, but GitHub did not expose a single repository-wide license during review. Treat it as reference material and verify licensing per directory before reuse.
-

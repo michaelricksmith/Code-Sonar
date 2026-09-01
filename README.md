@@ -423,11 +423,12 @@ See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
 | Hotspot determinism hardening | ✅ Shipped (`02207ea`) |
 | Frontend dependency security | ✅ Shipped (`61f086a`; npm audit: 0 vulnerabilities) |
 | Tailwind production compilation | ✅ Shipped (`331b611`) |
+| RICK development capability wave | ✅ Playwright 1.62.1, Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, VS Code JS Debug 1.117.0, Streamlit 1.62.0 |
 | CI #1 fix | ✅ Shipped (`0235901`) |
 | GitHub repo | ✅ Private (`michaelricksmith/code-sonar`) |
 | `.github/workflows/ci.yml` | ✅ 3-job pipeline (backend ruff + mypy + pytest on Python 3.11, frontend tsc + vite on Node 20, smoke self-scan) |
 
-**Current backend baseline:** **414 passed, 1 skipped** (verified 2026-08-31). The focused hotspot suite is 18/18 with 100% hotspot-engine coverage. The frontend TypeScript/Vite 8 production build passes and `npm audit` reports 0 vulnerabilities.
+**Current backend baseline:** **414 passed, 1 skipped** (verified 2026-08-31). The focused hotspot suite is 18/18 with 100% hotspot-engine coverage. Frontend lint and the TypeScript/Vite 8 production build pass, and `npm audit` reports 0 vulnerabilities. Playwright is now pinned as a frontend development dependency for browser-level testing.
 
 See [`DEVELOPMENT_STATUS.md`](DEVELOPMENT_STATUS.md) and [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 

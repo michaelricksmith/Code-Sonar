@@ -2,8 +2,17 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Authoritative current snapshot — 2026-08-31 PDT**
-> Product status: private beta; active development. Branch `main` was verified through commit `331b611` before this documentation update. The historical Checkpoint 6 record below is retained for provenance and is no longer the current repository state.
+> **Authoritative current snapshot — 2026-09-01 PDT**
+> Product status: private beta; active development. The RICK development environment now includes the verified first capability wave described in `docs/RICK_CAPABILITY_ROADMAP.md`. The historical Checkpoint 6 record below is retained for provenance and is no longer the current repository state.
+
+## RICK development environment update (2026-09-01)
+
+- Pinned Playwright 1.62.1 in the frontend and verified a real headless Chromium launch.
+- Added a TypeScript-aware ESLint 9 flat configuration; frontend lint passes.
+- Installed isolated, pinned Trivy, Mermaid CLI, Sumy, Debugpy, and Streamlit tooling.
+- Verified the installed VS Code already contains JavaScript Debugger 1.117.0.
+- Added role-specific OpenClaw skills without granting RICK/main shell execution or weakening existing approval gates.
+- Restarted and verified the OpenClaw gateway after skill assignment.
 
 ## Current verified state (2026-08-31)
 

@@ -8,16 +8,20 @@ without semantic-versioning.
 
 ---
 
-## [Unreleased] — 2026-08-31
+## [Unreleased] — 2026-09-01
 
 ### Added
 
+- Added pinned Playwright 1.62.1 as a frontend development dependency and installed its Chromium runtime for browser-level validation.
+- Added RICK's isolated first capability wave: Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, and Streamlit 1.62.0; verified the existing VS Code JS Debug 1.117.0 component.
+- Added role-scoped OpenClaw skills for browser testing, security scanning, diagrams, local summarization, debugging, and Streamlit prototypes while preserving existing execution approval gates.
 - Rebuilt intelligence-focused dashboard and credit-report workflow through merge commit `d73e9ba`.
 - Added same-file ordering regression coverage for risk-hotspot serialization.
 - Added `frontend/postcss.config.cjs` so Tailwind utilities compile into production CSS.
 
 ### Fixed
 
+- Updated `eslint-plugin-react-hooks` from the incompatible 4.6 line to 5.2.0 and added an ESLint 9 flat configuration so the frontend lint command runs without forced or legacy dependency bypasses.
 - Made `contributing_finding_ids` deterministic regardless of finding input order (`02207ea`).
 - Removed redundant hotspot category-breakdown computation (`02207ea`).
 - Restored the frontend production build environment and Tailwind processing (`331b611`).

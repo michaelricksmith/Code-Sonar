@@ -2,17 +2,20 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Current handoff — 2026-08-31 PDT**
-> Work is saved and synchronized to GitHub through commit `331b611` before this documentation update. Read `README.md`, the top of `DEVELOPMENT_STATUS.md`, and `CHANGELOG.md` as the current source of truth. The 2026-08-22 handoff below is retained only as historical context and must not be used to select new work.
+> **Current handoff — 2026-09-01 PDT**
+> RICK's first development-capability wave is installed and verified locally. Read `docs/RICK_CAPABILITY_ROADMAP.md`, `README.md`, the top of `DEVELOPMENT_STATUS.md`, and `CHANGELOG.md` as the current source of truth. The 2026-08-22 handoff below is retained only as historical context and must not be used to select new work.
 
 ## Current verification
 
 - Backend: **414 passed, 1 skipped**.
 - Hotspot suite: **18 passed** with 100% engine coverage.
 - Frontend TypeScript/Vite 8 production build: passed.
+- Frontend ESLint 9 validation: passed.
 - npm audit: 0 known vulnerabilities.
 - Tailwind/PostCSS production compilation: working.
 - Recent commits: `02207ea` hotspot determinism, `61f086a` frontend security, `331b611` Tailwind compilation.
+- RICK tools verified: Playwright 1.62.1, Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, VS Code JS Debug 1.117.0, and Streamlit 1.62.0.
+- OpenClaw gateway: restarted after role-specific skill assignment and healthy.
 
 ## Current continuation instructions
 

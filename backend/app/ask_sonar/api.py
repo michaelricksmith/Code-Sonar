@@ -17,6 +17,7 @@ from app.remediation.runtime import (
     get_remediation_executor,
     get_remediation_orchestrator,
 )
+from app.security.tenant import current_tenant_id
 
 router = APIRouter(prefix="/api/ask-sonar", tags=["ask-sonar"])
 
@@ -44,7 +45,7 @@ class AskSonarRemediationApproval(BaseModel):
 
 def _require_scan(scan_id: str) -> ScanRecord:
     record = get_scan(scan_id)
-    if record is None:
+    if record is None or record.tenant_id != current_tenant_id():
         raise HTTPException(
             status_code=404,
             detail={

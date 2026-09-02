@@ -165,7 +165,9 @@ def test_activation_verifies_ephemeral_token_without_mutating_global_integration
         set_active_installation_id(previous_active)
 
 
-def test_installation_event_is_persisted_without_token(tmp_path: Path, monkeypatch: object) -> None:
+def test_unknown_installation_event_does_not_claim_a_tenant(
+    tmp_path: Path, monkeypatch: object
+) -> None:
     secret = "webhook-secret"
     monkeypatch.setenv("CODE_SONAR_GITHUB_WEBHOOK_SECRET", secret)  # type: ignore[attr-defined]
     previous = get_installation_store()
@@ -192,9 +194,9 @@ def test_installation_event_is_persisted_without_token(tmp_path: Path, monkeypat
             },
         )
         assert response.status_code == 200
-        installations = get_installation_store().list()
-        assert installations[0].installation_id == 777
-        assert "token" not in (tmp_path / "installations.json").read_text(encoding="utf-8").lower()
+        assert response.json()["scan_triggered"] is False
+        assert get_installation_store().list() == []
+        assert not (tmp_path / "installations.json").exists()
     finally:
         set_installation_store(previous)
         set_webhook_audit_store(previous_audit)
@@ -207,6 +209,7 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
     secret = "webhook-secret"
     monkeypatch.setenv("CODE_SONAR_GITHUB_WEBHOOK_SECRET", secret)  # type: ignore[attr-defined]
     previous_projects = get_project_store()
+    previous_installations = get_installation_store()
     previous_audit = get_webhook_audit_store()
     previous_jobs = get_webhook_job_store()
     project_store = ProjectStore(tmp_path / "projects.json")
@@ -223,6 +226,11 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
     )
     project_store.upsert(project)
     set_project_store(project_store)
+    installation_store = GitHubInstallationStore(tmp_path / "installations.json")
+    installation_store.upsert(
+        GitHubInstallation(900, "octo", "Organization", "now", "now")
+    )
+    set_installation_store(installation_store)
     set_webhook_audit_store(WebhookAuditStore(tmp_path / "audit.jsonl"))
     set_webhook_job_store(WebhookScanJobStore(tmp_path / "jobs.json"))
     calls: list[str] = []
@@ -236,6 +244,7 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
         {
             "ref": "refs/heads/main",
             "repository": {"id": 123, "full_name": "octo/example"},
+            "installation": {"id": 900},
         }
     ).encode()
     headers = {
@@ -271,12 +280,14 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
         set_webhook_audit_store(previous_audit)
         set_webhook_job_store(previous_jobs)
         set_project_store(previous_projects)
+        set_installation_store(previous_installations)
 
 
 def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypatch: object) -> None:
     secret = "webhook-secret"
     monkeypatch.setenv("CODE_SONAR_GITHUB_WEBHOOK_SECRET", secret)  # type: ignore[attr-defined]
     previous_projects = get_project_store()
+    previous_installations = get_installation_store()
     previous_audit = get_webhook_audit_store()
     project_store = ProjectStore(tmp_path / "projects.json")
     project_store.upsert(
@@ -292,6 +303,11 @@ def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypat
         )
     )
     set_project_store(project_store)
+    installation_store = GitHubInstallationStore(tmp_path / "installations.json")
+    installation_store.upsert(
+        GitHubInstallation(901, "octo", "Organization", "now", "now")
+    )
+    set_installation_store(installation_store)
     set_webhook_audit_store(WebhookAuditStore(tmp_path / "audit.jsonl"))
     calls: list[str] = []
 
@@ -304,6 +320,7 @@ def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypat
         {
             "ref": "refs/heads/feature/example",
             "repository": {"id": 123, "full_name": "octo/example"},
+            "installation": {"id": 901},
         }
     ).encode()
     try:
@@ -324,3 +341,4 @@ def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypat
         set_webhook_scan_handler(scan_project)
         set_webhook_audit_store(previous_audit)
         set_project_store(previous_projects)
+        set_installation_store(previous_installations)

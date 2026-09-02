@@ -21,10 +21,17 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from app.github_integration import GitHubIntegration, get_github_integration
 from app.projects import get_project_store
+from app.security.tenant import (
+    LOCAL_TENANT_ID,
+    bind_tenant,
+    current_tenant_id,
+    reset_tenant,
+)
 
 _GITHUB_API = "https://api.github.com"
 _API_VERSION = "2026-03-10"
 _INSTALL_STATE_TTL_SECONDS = 15 * 60
+_UNASSIGNED_WEBHOOK_TENANT = "__unassigned_webhook__"
 ScanHandler = Callable[[str], Awaitable[Any]]
 
 
@@ -40,9 +47,12 @@ class GitHubInstallation:
     installed_at: str
     updated_at: str
     repository_selection: str = "selected"
+    tenant_id: str = LOCAL_TENANT_ID
 
     def to_public_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("tenant_id", None)
+        return data
 
 
 class GitHubInstallationStore:
@@ -67,30 +77,58 @@ class GitHubInstallationStore:
 
     def list(self) -> list[GitHubInstallation]:
         with self._lock:
-            return self._load()
+            return [item for item in self._load() if item.tenant_id == current_tenant_id()]
 
     def get(self, installation_id: int) -> GitHubInstallation | None:
         with self._lock:
             return next(
-                (item for item in self._load() if item.installation_id == installation_id),
+                (
+                    item
+                    for item in self._load()
+                    if item.installation_id == installation_id
+                    and item.tenant_id == current_tenant_id()
+                ),
                 None,
             )
 
+    def tenant_for_installation(self, installation_id: int) -> str | None:
+        """Resolve webhook ownership without trusting payload identity fields."""
+        with self._lock:
+            tenant_ids = {
+                item.tenant_id
+                for item in self._load()
+                if item.installation_id == installation_id
+            }
+        return next(iter(tenant_ids)) if len(tenant_ids) == 1 else None
+
     def upsert(self, record: GitHubInstallation) -> GitHubInstallation:
         with self._lock:
+            tenant_id = current_tenant_id()
+            if record.tenant_id != tenant_id:
+                record = replace(record, tenant_id=tenant_id)
             records = [
                 item
                 for item in self._load()
-                if item.installation_id != record.installation_id
+                if not (
+                    item.installation_id == record.installation_id
+                    and item.tenant_id == tenant_id
+                )
             ]
             records.append(record)
-            records.sort(key=lambda item: item.installation_id)
+            records.sort(key=lambda item: (item.tenant_id, item.installation_id))
             self._save(records)
         return record
 
     def remove(self, installation_id: int) -> None:
         with self._lock:
-            records = [item for item in self._load() if item.installation_id != installation_id]
+            tenant_id = current_tenant_id()
+            records = [
+                item
+                for item in self._load()
+                if not (
+                    item.installation_id == installation_id and item.tenant_id == tenant_id
+                )
+            ]
             self._save(records)
 
 
@@ -107,6 +145,12 @@ class WebhookAuditRecord:
     received_at: str
     outcome: str = "received"
     job_id: str | None = None
+    tenant_id: str = LOCAL_TENANT_ID
+
+    def to_public_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data.pop("tenant_id", None)
+        return data
 
 
 class WebhookAuditStore:
@@ -136,12 +180,22 @@ class WebhookAuditStore:
 
     def has_delivery(self, delivery_id: str) -> bool:
         with self._lock:
-            return any(item.delivery_id == delivery_id for item in self._load())
+            return any(
+                item.delivery_id == delivery_id
+                and item.tenant_id == current_tenant_id()
+                for item in self._load()
+            )
 
     def claim(self, record: WebhookAuditRecord) -> bool:
         with self._lock:
+            tenant_id = current_tenant_id()
+            if record.tenant_id != tenant_id:
+                record = replace(record, tenant_id=tenant_id)
             records = self._load()
-            if any(item.delivery_id == record.delivery_id for item in records):
+            if any(
+                item.delivery_id == record.delivery_id and item.tenant_id == tenant_id
+                for item in records
+            ):
                 return False
             records.append(record)
             self._save(records)
@@ -149,6 +203,9 @@ class WebhookAuditStore:
 
     def append(self, record: WebhookAuditRecord) -> None:
         with self._lock:
+            tenant_id = current_tenant_id()
+            if record.tenant_id != tenant_id:
+                record = replace(record, tenant_id=tenant_id)
             records = self._load()
             records.append(record)
             self._save(records)
@@ -156,18 +213,33 @@ class WebhookAuditStore:
     def update(self, delivery_id: str, **changes: Any) -> WebhookAuditRecord:
         with self._lock:
             records = self._load()
-            current = next((item for item in records if item.delivery_id == delivery_id), None)
+            tenant_id = current_tenant_id()
+            current = next(
+                (
+                    item
+                    for item in records
+                    if item.delivery_id == delivery_id and item.tenant_id == tenant_id
+                ),
+                None,
+            )
             if current is None:
                 raise LookupError("Webhook delivery not found")
             updated = replace(current, **changes)
             self._save(
-                [updated if item.delivery_id == delivery_id else item for item in records]
+                [
+                    updated
+                    if item.delivery_id == delivery_id and item.tenant_id == tenant_id
+                    else item
+                    for item in records
+                ]
             )
             return updated
 
     def list(self, limit: int = 50) -> list[WebhookAuditRecord]:
         with self._lock:
-            return self._load()[-limit:]
+            return [
+                item for item in self._load() if item.tenant_id == current_tenant_id()
+            ][-limit:]
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,9 +254,12 @@ class WebhookScanJob:
     scan_id: str | None = None
     score: int | None = None
     error: str | None = None
+    tenant_id: str = LOCAL_TENANT_ID
 
     def to_public_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("tenant_id", None)
+        return data
 
 
 class WebhookScanJobStore:
@@ -211,7 +286,14 @@ class WebhookScanJobStore:
 
     def get(self, job_id: str) -> WebhookScanJob | None:
         with self._lock:
-            return next((item for item in self._load() if item.job_id == job_id), None)
+            return next(
+                (
+                    item
+                    for item in self._load()
+                    if item.job_id == job_id and item.tenant_id == current_tenant_id()
+                ),
+                None,
+            )
 
     def enqueue(
         self,
@@ -220,7 +302,8 @@ class WebhookScanJobStore:
         project_id: str,
         installation_id: int | None,
     ) -> WebhookScanJob:
-        material = f"{delivery_id}:{project_id}"
+        tenant_id = current_tenant_id()
+        material = f"{tenant_id}:{delivery_id}:{project_id}"
         job_id = "ghjob_" + hashlib.sha256(material.encode()).hexdigest()[:24]
         now = _utcnow()
         with self._lock:
@@ -236,6 +319,7 @@ class WebhookScanJobStore:
                 state="queued",
                 created_at=now,
                 updated_at=now,
+                tenant_id=tenant_id,
             )
             jobs.append(job)
             self._save(jobs)
@@ -244,11 +328,26 @@ class WebhookScanJobStore:
     def update(self, job_id: str, **changes: Any) -> WebhookScanJob:
         with self._lock:
             jobs = self._load()
-            current = next((item for item in jobs if item.job_id == job_id), None)
+            tenant_id = current_tenant_id()
+            current = next(
+                (
+                    item
+                    for item in jobs
+                    if item.job_id == job_id and item.tenant_id == tenant_id
+                ),
+                None,
+            )
             if current is None:
                 raise LookupError("Webhook scan job not found")
             updated = replace(current, updated_at=_utcnow(), **changes)
-            self._save([updated if item.job_id == job_id else item for item in jobs])
+            self._save(
+                [
+                    updated
+                    if item.job_id == job_id and item.tenant_id == tenant_id
+                    else item
+                    for item in jobs
+                ]
+            )
             return updated
 
 
@@ -317,7 +416,7 @@ _audit = WebhookAuditStore()
 _jobs = WebhookScanJobStore()
 _app_auth = GitHubAppAuth()
 _scan_handler: ScanHandler | None = None
-_active_installation_id: int | None = None
+_active_installation_ids: dict[str, int] = {}
 router = APIRouter(prefix="/api/github-app", tags=["github-app"])
 
 
@@ -363,12 +462,15 @@ def set_webhook_scan_handler(handler: ScanHandler) -> None:
 
 
 def set_active_installation_id(installation_id: int | None) -> None:
-    global _active_installation_id
-    _active_installation_id = installation_id
+    tenant_id = current_tenant_id()
+    if installation_id is None:
+        _active_installation_ids.pop(tenant_id, None)
+    else:
+        _active_installation_ids[tenant_id] = installation_id
 
 
 def get_active_installation_id() -> int | None:
-    return _active_installation_id
+    return _active_installation_ids.get(current_tenant_id())
 
 
 def _webhook_secret() -> str:
@@ -466,7 +568,15 @@ def _ephemeral_integration(installation_id: int) -> GitHubIntegration:
     )
 
 
-async def _run_project_scan_job(job_id: str) -> None:
+async def _run_project_scan_job(job_id: str, tenant_id: str | None = None) -> None:
+    tenant_token = bind_tenant(tenant_id or current_tenant_id())
+    try:
+        await _run_project_scan_job_for_bound_tenant(job_id)
+    finally:
+        reset_tenant(tenant_token)
+
+
+async def _run_project_scan_job_for_bound_tenant(job_id: str) -> None:
     job_store = get_webhook_job_store()
     job = job_store.get(job_id)
     if job is None or job.state != "queued":
@@ -478,7 +588,10 @@ async def _run_project_scan_job(job_id: str) -> None:
         project = get_project_store().get(job.project_id)
         if project is None:
             raise LookupError("Project not found")
-        installation_id = project.provider_installation_id or job.installation_id
+        # Only managed App checkouts are refreshed with an installation token.
+        # Legacy verified local checkouts can still receive a matched webhook,
+        # but must not silently change their checkout authentication mode.
+        installation_id = project.provider_installation_id
         if installation_id is not None:
             integration = _ephemeral_integration(installation_id)
             repository = integration.get_repository(f"{project.owner}/{project.name}")
@@ -601,7 +714,7 @@ async def get_webhook_job(job_id: str) -> dict[str, Any]:
 @router.get("/webhook-deliveries")
 async def get_webhook_deliveries() -> dict[str, Any]:
     records = get_webhook_audit_store().list()
-    return {"count": len(records), "deliveries": [asdict(item) for item in records]}
+    return {"count": len(records), "deliveries": [item.to_public_dict() for item in records]}
 
 
 @router.post("/webhook")
@@ -618,6 +731,21 @@ async def github_webhook(
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid GitHub webhook payload") from exc
+
+    raw_installation = payload.get("installation") if isinstance(payload, dict) else None
+    raw_installation_id = (
+        int(raw_installation["id"])
+        if isinstance(raw_installation, dict) and "id" in raw_installation
+        else None
+    )
+    webhook_tenant = (
+        get_installation_store().tenant_for_installation(raw_installation_id)
+        if raw_installation_id is not None
+        else None
+    )
+    # The verified installation ID is the only tenant selector for webhooks.
+    # Payload tenant fields and request headers are never consulted.
+    bind_tenant(webhook_tenant or _UNASSIGNED_WEBHOOK_TENANT)
 
     event = x_github_event or "unknown"
     delivery = x_github_delivery or hashlib.sha256(body).hexdigest()[:24]
@@ -649,7 +777,7 @@ async def github_webhook(
             "scan_triggered": False,
         }
 
-    if installation is not None:
+    if installation is not None and webhook_tenant is not None:
         if event == "installation" and action == "deleted":
             get_installation_store().remove(installation.installation_id)
             if get_active_installation_id() == installation.installation_id:
@@ -680,9 +808,15 @@ async def github_webhook(
             outcome="scan_queued",
             job_id=job_id,
         )
-        background_tasks.add_task(_run_project_scan_job, job_id)
+        background_tasks.add_task(_run_project_scan_job, job_id, webhook_tenant)
     else:
-        outcome = "installation_updated" if event == "installation" else "ignored"
+        outcome = (
+            "unknown_installation"
+            if raw_installation_id is not None and webhook_tenant is None
+            else "installation_updated"
+            if event == "installation"
+            else "ignored"
+        )
         get_webhook_audit_store().update(delivery, outcome=outcome)
 
     return {

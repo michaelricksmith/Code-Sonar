@@ -37,8 +37,15 @@
   executor, and remediation kind and are cleaned on every workflow exit. Legacy
   caller-controlled execution primitives are closed, and public scan/history/
   remediation payloads no longer expose host repository paths.
+- API credentials can now be bound to tenants with
+  `CODESONAR_API_TENANT_TOKENS`. Server-derived tenant identity scopes project,
+  scan/history, Ask Sonar/remediation-plan, and GitHub-installation access;
+  cross-tenant lookups return not found and caller tenant headers have no
+  authority. Verified GitHub webhooks derive ownership only from a stored
+  installation ID and carry it into tenant-scoped jobs; unknown installations
+  cannot resolve projects. Legacy single-token local operation remains compatible.
 - Tailwind/PostCSS production compilation restored in `331b611`.
-- Backend verification: **414 passed, 1 skipped**, with 85% measured coverage.
+- Backend verification: **434 passed, 1 skipped**, with 86% measured coverage.
 - Hotspot verification: **18 passed**, hotspot engine at 100% coverage.
 - Frontend TypeScript and Vite 8 production build: passed.
 - Completed work is committed and pushed to `origin/main` after verification.

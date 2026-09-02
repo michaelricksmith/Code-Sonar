@@ -19,8 +19,15 @@ context boundary and its live API behavior.
   authorization; immutable scan/finding/commit/executor binding; guaranteed
   worktree cleanup; direct remediation primitives closed; host paths removed
   from public scan/history/remediation responses.
+- Tenant-isolation checkpoint: bearer credentials resolve to a server-owned
+  tenant identity; projects, scan history, Ask Sonar/remediation plans, and
+  GitHub installations deny cross-tenant lookup. A caller tenant header cannot
+  override the credential binding. Signed webhooks resolve the tenant only from
+  the stored installation owner and preserve it through queued scans; unknown
+  installations cannot select a project. This is an application-layer checkpoint,
+  not the final encrypted production data store.
 
-- Backend: **414 passed, 1 skipped**.
+- Backend: **434 passed, 1 skipped** with 86% measured coverage.
 - Hotspot suite: **18 passed** with 100% engine coverage.
 - Frontend TypeScript/Vite 8 production build: passed.
 - Frontend ESLint 9 validation: passed.
@@ -29,7 +36,8 @@ context boundary and its live API behavior.
 - Recent commits: `02207ea` hotspot determinism, `61f086a` frontend security, `331b611` Tailwind compilation.
 - The current security increment adds fail-closed API bearer authentication,
   exact-origin CORS, and default scan-root containment. Local launchers opt into
-  loopback-only developer mode; deployments must set `CODESONAR_API_TOKEN`,
+  loopback-only developer mode; single-tenant deployments set `CODESONAR_API_TOKEN`,
+  multi-tenant deployments set `CODESONAR_API_TENANT_TOKENS`, and all deployments set
   `CODESONAR_SCAN_ROOT`, `CODESONAR_CORS_ORIGINS`, and `CODESONAR_HOST`.
 - RICK tools verified: Playwright 1.62.1, Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, VS Code JS Debug 1.117.0, and Streamlit 1.62.0.
 - OpenClaw gateway: restarted after role-specific skill assignment and healthy.

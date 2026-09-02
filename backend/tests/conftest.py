@@ -15,6 +15,8 @@ def explicit_test_development_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CODESONAR_LOCAL_DEV", "1")
     monkeypatch.setenv("CODESONAR_HOST", "127.0.0.1")
     monkeypatch.setenv("CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH", "1")
+    monkeypatch.delenv("CODESONAR_API_TOKEN", raising=False)
+    monkeypatch.delenv("CODESONAR_API_TENANT_TOKENS", raising=False)
 
 
 @pytest.fixture

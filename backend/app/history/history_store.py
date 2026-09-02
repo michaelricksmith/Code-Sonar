@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from app.history.scan_record import SCHEMA_VERSION, ScanRecord
+from app.security.tenant import current_tenant_id
 
 
 class HistoryStore(ABC):
@@ -76,7 +77,7 @@ class InMemoryHistoryStore(HistoryStore):
         records = [
             r
             for r in self._records
-            if _is_compatible_schema(r.schema_version)
+            if _is_compatible_schema(r.schema_version) and r.tenant_id == current_tenant_id()
         ]
         if repository_id is not None:
             records = [r for r in records if r.repository_id == repository_id]
@@ -88,7 +89,7 @@ class InMemoryHistoryStore(HistoryStore):
 
     def get(self, scan_id: str) -> ScanRecord | None:
         for r in self._records:
-            if r.scan_id == scan_id:
+            if r.scan_id == scan_id and r.tenant_id == current_tenant_id():
                 return r
         return None
 
@@ -144,7 +145,7 @@ class JsonlHistoryStore(HistoryStore):
     def load_all(
         self, repository_id: str | None = None
     ) -> list[ScanRecord]:
-        records = list(self._iter_records())
+        records = [r for r in self._iter_records() if r.tenant_id == current_tenant_id()]
         if repository_id is not None:
             records = [r for r in records if r.repository_id == repository_id]
         return _sort_records(records)
@@ -155,7 +156,7 @@ class JsonlHistoryStore(HistoryStore):
 
     def get(self, scan_id: str) -> ScanRecord | None:
         for r in self._iter_records():
-            if r.scan_id == scan_id:
+            if r.scan_id == scan_id and r.tenant_id == current_tenant_id():
                 return r
         return None
 

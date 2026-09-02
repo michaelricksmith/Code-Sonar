@@ -32,6 +32,7 @@ from typing import Any
 from app.models.finding import Finding
 from app.scoring.engine import SCORING_VERSION, ScoringResult
 from app.security import redact_secrets
+from app.security.tenant import LOCAL_TENANT_ID, current_tenant_id
 
 SCHEMA_VERSION: str = "1.0"
 
@@ -153,6 +154,7 @@ class ScanRecord:
 
     __slots__ = (
         "scan_id",
+        "tenant_id",
         "repository_id",
         "repository_path",
         "scanned_at",
@@ -186,8 +188,10 @@ class ScanRecord:
         findings_source_breakdown: dict[str, int],
         findings: list[FindingSnapshot],
         scoring_version: str = "legacy-unversioned",
+        tenant_id: str = LOCAL_TENANT_ID,
     ) -> None:
         self.scan_id = scan_id
+        self.tenant_id = tenant_id
         self.repository_id = repository_id
         self.repository_path = repository_path
         self.scanned_at = scanned_at
@@ -206,6 +210,7 @@ class ScanRecord:
     def to_dict(self) -> dict[str, Any]:
         return {
             "scan_id": self.scan_id,
+            "tenant_id": self.tenant_id,
             "repository_id": self.repository_id,
             "repository_path": self.repository_path,
             "scanned_at": self.scanned_at,
@@ -226,6 +231,7 @@ class ScanRecord:
     def from_dict(cls, data: dict[str, Any]) -> "ScanRecord":
         record = cls.__new__(cls)
         record.scan_id = data["scan_id"]
+        record.tenant_id = data.get("tenant_id", LOCAL_TENANT_ID)
         record.repository_id = data["repository_id"]
         record.repository_path = data["repository_path"]
         record.scanned_at = data["scanned_at"]
@@ -265,6 +271,7 @@ def build_scan_record(
     """
     return ScanRecord(
         scan_id=scan_id or uuid.uuid4().hex,
+        tenant_id=current_tenant_id(),
         repository_id=repository_id,
         repository_path=repository_path,
         scanned_at=scanned_at or _utcnow_iso(),

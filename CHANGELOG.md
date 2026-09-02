@@ -11,6 +11,10 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added server-derived tenant identity from unique configured bearer tokens,
+  tenant-scoped projects, scan history, Ask Sonar/remediation-plan access and
+  GitHub installations, plus cross-tenant denial regression coverage. Caller
+  tenant headers do not influence authorization.
 - Unified local and managed GitHub repository selection into one active frontend
   context shared by Overview, Findings, Risk Map, History, Ask Sonar, and
   Remediations. Persisted project baselines retain the backend's deterministic

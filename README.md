@@ -365,6 +365,13 @@ Code Sonar treats secrets as **first-class security concerns**:
 - Every `/api/**` route requires `Authorization: Bearer <token>` from
   `CODESONAR_API_TOKEN`. The GitHub webhook is the sole exception because it
   retains its dedicated HMAC verification.
+- Shared deployments can configure `CODESONAR_API_TENANT_TOKENS` as a JSON
+  object mapping tenant IDs to unique bearer tokens. Tenant identity is derived
+  only from that server-side credential binding; `X-Code-Sonar-Tenant` and
+  other caller-provided identity headers are ignored. Projects, scans/history,
+  Ask Sonar grounding and remediation plans, and GitHub installations are
+  tenant-scoped. The legacy `CODESONAR_API_TOKEN` remains bound to
+  `CODESONAR_TENANT_ID` (default `local`) for single-tenant compatibility.
 - The server refuses to start without a token. Tokenless operation requires
   both `CODESONAR_LOCAL_DEV=1` and a loopback `CODESONAR_HOST`.
 - `CODESONAR_CORS_ORIGINS` is a comma-separated exact origin allowlist. Its
@@ -382,6 +389,10 @@ Code Sonar treats secrets as **first-class security concerns**:
 - Prepared remediation worktrees and branches are cleaned after every workflow
   exit. Public scan, history, and remediation responses do not include server
   repository paths.
+
+This checkpoint provides application-layer tenant isolation for the existing
+local stores. It does not replace the planned encrypted, transactional
+production persistence layer.
 
 1. **Detection** — the `secrets` analyzer matches AWS access keys, AWS
    secret keys, GitHub PATs, Slack tokens, JWTs, and high-entropy

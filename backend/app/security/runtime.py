@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 from urllib.parse import urlsplit
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
+
+from app.security.tenant import LOCAL_TENANT_ID, bind_tenant, reset_tenant
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 DEFAULT_CORS_ORIGINS = (
@@ -38,13 +41,59 @@ def configured_origins() -> tuple[str, ...]:
 
 def validate_runtime_security_config() -> None:
     host = os.environ.get("CODESONAR_HOST", "127.0.0.1").strip().lower()
-    token = os.environ.get("CODESONAR_API_TOKEN", "").strip()
-    if not token and (not local_dev_enabled() or host not in LOCAL_HOSTS):
+    credentials = configured_tenant_credentials()
+    if not credentials and (not local_dev_enabled() or host not in LOCAL_HOSTS):
         raise RuntimeError(
             "CODESONAR_API_TOKEN is required unless CODESONAR_LOCAL_DEV=1 "
             "and CODESONAR_HOST is loopback"
         )
     configured_origins()
+
+
+def configured_tenant_credentials() -> dict[str, str]:
+    """Load server-owned tenant-to-token bindings.
+
+    ``CODESONAR_API_TENANT_TOKENS`` is a JSON object. The legacy single token
+    remains supported and is bound to ``CODESONAR_TENANT_ID`` (``local`` by
+    default). Caller-supplied tenant headers are intentionally ignored.
+    """
+    bindings: dict[str, str] = {}
+    raw = os.environ.get("CODESONAR_API_TENANT_TOKENS", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be a JSON object")
+        for tenant_id, credential in parsed.items():
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                raise RuntimeError("Tenant identifiers must be non-empty strings")
+            if not isinstance(credential, str) or not credential.strip():
+                raise RuntimeError("Tenant API tokens must be non-empty strings")
+            bindings[tenant_id.strip()] = credential.strip()
+    legacy = os.environ.get("CODESONAR_API_TOKEN", "").strip()
+    if legacy:
+        tenant_id = os.environ.get("CODESONAR_TENANT_ID", LOCAL_TENANT_ID).strip()
+        if not tenant_id:
+            raise RuntimeError("CODESONAR_TENANT_ID must be non-empty")
+        if tenant_id in bindings and bindings[tenant_id] != legacy:
+            raise RuntimeError("Conflicting API tokens configured for the same tenant")
+        bindings[tenant_id] = legacy
+    tokens = list(bindings.values())
+    if len(tokens) != len(set(tokens)):
+        raise RuntimeError("Tenant API tokens must be unique")
+    return bindings
+
+
+def _authenticate_tenant(authorization: str) -> str | None:
+    scheme, _, credential = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not credential:
+        return None
+    for tenant_id, expected in configured_tenant_credentials().items():
+        if hmac.compare_digest(credential, expected):
+            return tenant_id
+    return None
 
 
 class ApiBoundaryMiddleware(BaseHTTPMiddleware):
@@ -61,18 +110,24 @@ class ApiBoundaryMiddleware(BaseHTTPMiddleware):
             and request.url.path.startswith("/api/")
             and request.url.path != WEBHOOK_PATH
         ):
-            token = os.environ.get("CODESONAR_API_TOKEN", "").strip()
-            if token:
-                scheme, _, credential = request.headers.get("authorization", "").partition(" ")
-                if scheme.lower() != "bearer" or not hmac.compare_digest(credential, token):
-                    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-            elif not local_dev_enabled():
+            credentials = configured_tenant_credentials()
+            tenant_id = _authenticate_tenant(request.headers.get("authorization", ""))
+            if credentials and tenant_id is None:
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+            if not credentials and not local_dev_enabled():
                 return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
-        if request.method == "OPTIONS" and origin:
-            response: Response = Response(status_code=204)
+            tenant_token = bind_tenant(tenant_id or LOCAL_TENANT_ID)
         else:
-            response = await call_next(request)
+            tenant_token = bind_tenant(LOCAL_TENANT_ID)
+
+        try:
+            if request.method == "OPTIONS" and origin:
+                response: Response = Response(status_code=204)
+            else:
+                response = await call_next(request)
+        finally:
+            reset_tenant(tenant_token)
         if origin:
             response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
             response.headers["Vary"] = "Origin"

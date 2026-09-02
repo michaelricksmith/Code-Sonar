@@ -21,6 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 
 from app.github_integration import GitHubIntegration, get_github_integration
 from app.projects import get_project_store
+from app.security.tenant import LOCAL_TENANT_ID, current_tenant_id
 
 _GITHUB_API = "https://api.github.com"
 _API_VERSION = "2026-03-10"
@@ -40,9 +41,12 @@ class GitHubInstallation:
     installed_at: str
     updated_at: str
     repository_selection: str = "selected"
+    tenant_id: str = LOCAL_TENANT_ID
 
     def to_public_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("tenant_id", None)
+        return data
 
 
 class GitHubInstallationStore:
@@ -67,30 +71,48 @@ class GitHubInstallationStore:
 
     def list(self) -> list[GitHubInstallation]:
         with self._lock:
-            return self._load()
+            return [item for item in self._load() if item.tenant_id == current_tenant_id()]
 
     def get(self, installation_id: int) -> GitHubInstallation | None:
         with self._lock:
             return next(
-                (item for item in self._load() if item.installation_id == installation_id),
+                (
+                    item
+                    for item in self._load()
+                    if item.installation_id == installation_id
+                    and item.tenant_id == current_tenant_id()
+                ),
                 None,
             )
 
     def upsert(self, record: GitHubInstallation) -> GitHubInstallation:
         with self._lock:
+            tenant_id = current_tenant_id()
+            if record.tenant_id != tenant_id:
+                record = replace(record, tenant_id=tenant_id)
             records = [
                 item
                 for item in self._load()
-                if item.installation_id != record.installation_id
+                if not (
+                    item.installation_id == record.installation_id
+                    and item.tenant_id == tenant_id
+                )
             ]
             records.append(record)
-            records.sort(key=lambda item: item.installation_id)
+            records.sort(key=lambda item: (item.tenant_id, item.installation_id))
             self._save(records)
         return record
 
     def remove(self, installation_id: int) -> None:
         with self._lock:
-            records = [item for item in self._load() if item.installation_id != installation_id]
+            tenant_id = current_tenant_id()
+            records = [
+                item
+                for item in self._load()
+                if not (
+                    item.installation_id == installation_id and item.tenant_id == tenant_id
+                )
+            ]
             self._save(records)
 
 
@@ -317,7 +339,7 @@ _audit = WebhookAuditStore()
 _jobs = WebhookScanJobStore()
 _app_auth = GitHubAppAuth()
 _scan_handler: ScanHandler | None = None
-_active_installation_id: int | None = None
+_active_installation_ids: dict[str, int] = {}
 router = APIRouter(prefix="/api/github-app", tags=["github-app"])
 
 
@@ -363,12 +385,15 @@ def set_webhook_scan_handler(handler: ScanHandler) -> None:
 
 
 def set_active_installation_id(installation_id: int | None) -> None:
-    global _active_installation_id
-    _active_installation_id = installation_id
+    tenant_id = current_tenant_id()
+    if installation_id is None:
+        _active_installation_ids.pop(tenant_id, None)
+    else:
+        _active_installation_ids[tenant_id] = installation_id
 
 
 def get_active_installation_id() -> int | None:
-    return _active_installation_id
+    return _active_installation_ids.get(current_tenant_id())
 
 
 def _webhook_secret() -> str:

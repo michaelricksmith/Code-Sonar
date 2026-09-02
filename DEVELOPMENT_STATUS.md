@@ -18,6 +18,12 @@
 
 ## Current verified state (2026-08-31)
 
+- The populated Overview now presents the deterministic 300–850 result as a
+  semantic credit-report signal core. Its sonar field, severity signals,
+  grade/risk language, provenance, and top priorities are derived exclusively
+  from the active live scan. Desktop and mobile browser smoke checks passed,
+  and the duplicate root-level project dashboard was removed.
+
 - The frontend now has one active repository and scan baseline across the
   credit report, findings, risk, history, Ask Sonar, and remediation surfaces.
   Managed project selection and scans update that shared context; the former

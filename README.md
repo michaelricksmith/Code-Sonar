@@ -461,6 +461,7 @@ See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
 | Checkpoint 7 (risk hotspots + private-beta productization) | ✅ Shipped (this release) |
 | Intelligence UI rebuild | ✅ Shipped (`d73e9ba`) |
 | Unified repository/scan UI context | ✅ Implemented across core product areas |
+| Credit Report Signal Core | ✅ Live-data sonar score hero, accessible meter, responsive priority queue |
 | Hotspot determinism hardening | ✅ Shipped (`02207ea`) |
 | Frontend dependency security | ✅ Shipped (`61f086a`; npm audit: 0 vulnerabilities) |
 | Tailwind production compilation | ✅ Shipped (`331b611`) |

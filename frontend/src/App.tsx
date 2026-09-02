@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { fetchAnalyzers, fetchDrift, fetchHealth, runScan } from "./api/analyzers";
 import type { AnalyzerMetadata, DriftResult, Finding, FilterState, ScanResponse, SortState } from "./api/analyzers";
 import { askSonar, fetchAskSonarStatus } from "./api/askSonar";
 import type { AskSonarStatus, GroundedAnswerResponse } from "./api/askSonar";
 import { AnalyzerMetadataPanel } from "./components/AnalyzerMetadataPanel";
+import { CreditReportHero } from "./components/CreditReportHero";
 import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
+import { OverviewPriorities } from "./components/OverviewPriorities";
 import { ProjectDashboardPanel } from "./components/ProjectDashboardPanel";
 import { fetchProjectDrift } from "./api/projects";
 import type { ProjectDashboard, ProjectRecord } from "./api/projects";
@@ -292,45 +294,11 @@ function Overview({ result, repoPath, setRepoPath, scanning, drift, priorities, 
   const breakdown = result.findings_source_breakdown ?? { source: 0, test: 0, fixture: 0 };
   const delta = drift?.summary.score_delta ?? null;
   const categories = Object.entries(result.category_scores).sort((a, b) => a[1] - b[1]);
-  const progress = Math.max(0, Math.min(100, ((result.score - 300) / 550) * 100));
-  const ringStyle = { "--score-progress": `${progress}%` } as CSSProperties;
 
   return <div className="cs-overview">
-    <section className="cs-command-center">
-      <div className="cs-command-grid">
-        <div className="cs-score-station">
-          <div className="cs-score-scale"><span>300</span><span>Code Sonar score</span><span>850</span></div>
-          <div className={`cs-score-orbit ${scoreTone(result.score)}`} style={ringStyle}>
-            <div><strong>{result.score}</strong><span>/ 850</span><small>DETERMINISTIC SCORE</small></div>
-          </div>
-          <div className={`cs-grade-badge ${scoreTone(result.score)}`}><strong>{result.grade}</strong><span>{gradeLabel(result.grade)}</span></div>
-        </div>
-        <div className="cs-score-copy">
-          <span className="cs-kicker">Current repository baseline</span>
-          <h1>{repoName(result.repository)} code health</h1>
-          <p>{scoreSummary(result.score, result.severity_distribution.critical)}</p>
-          <div className="cs-score-meta">
-            {delta !== null ? <span className={delta >= 0 ? "positive" : "negative"}>{delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} since previous scan</span> : <span>First recorded baseline</span>}
-            <span>Scanned {new Date(result.scanned_at).toLocaleString()}</span>
-          </div>
-          <div className="cs-hero-actions"><button className="cs-button primary" onClick={openSonar}>Ask Sonar what this means</button><button className="cs-button ghost" onClick={() => showFindings()}>View all findings</button></div>
-        </div>
-        <div className="cs-signal-stack" aria-label="Baseline signal summary">
-          <div><span>Critical</span><strong>{result.severity_distribution.critical}</strong></div>
-          <div><span>Errors</span><strong>{result.severity_distribution.error}</strong></div>
-          <div><span>Warnings</span><strong>{result.severity_distribution.warning}</strong></div>
-          <div><span>Information</span><strong>{result.severity_distribution.info}</strong></div>
-        </div>
-      </div>
-      <div className="cs-scan-ledger">
-        <span><small>Repository</small><strong>{compactPath(result.repository)}</strong></span>
-        <span><small>Scan ID</small><strong>{result.scan_id ? result.scan_id.slice(0, 12) : "Unavailable"}</strong></span>
-        <span><small>Findings analyzed</small><strong>{result.finding_count}</strong></span>
-        <span><small>Debt measured</small><strong>{result.total_debt_points} points</strong></span>
-      </div>
-    </section>
+    <CreditReportHero result={result} scoreDelta={delta} onOpenSonar={openSonar} onShowFindings={() => showFindings()} />
     <section className="cs-metric-strip"><Metric label="Critical risks" value={String(result.severity_distribution.critical)} detail="needs attention" tone={result.severity_distribution.critical ? "danger" : "normal"} /><Metric label="Technical debt" value={String(result.total_debt_points)} detail="debt points" /><Metric label="Findings" value={String(result.finding_count)} detail={`${breakdown.source} source · ${breakdown.test} test · ${breakdown.fixture} fixture`} /><Metric label="Files at risk" value={String(new Set(result.findings.map((finding) => finding.file_path)).size)} detail="with findings" /></section>
-    <div className="cs-overview-grid"><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">What to fix first</span><h3>Top priorities</h3></div><button className="cs-link-button" onClick={() => showFindings()}>View all {result.finding_count} →</button></div><PriorityList findings={priorities} select={select} openSonar={openSonar} /></section><section className="cs-category-card"><div className="cs-card-head"><div><span className="cs-kicker">Score drivers</span><h3>Category health</h3></div></div><div className="cs-category-stack">{categories.map(([category, score]) => <div className="cs-category-row" key={category}><div><span>{category}</span><strong>{score}</strong></div><div className="cs-category-bar"><span style={{ width: `${Math.max(0, Math.min(100, ((score - 300) / 550) * 100))}%` }} /></div><small>{result.findings_by_category[category as keyof typeof result.findings_by_category]} findings</small></div>)}</div></section></div>
+    <div className="cs-overview-grid"><OverviewPriorities findings={priorities} totalFindings={result.finding_count} onSelect={select} onOpenSonar={(finding) => { select(finding); openSonar(); }} onShowAll={() => showFindings()} /><section className="cs-category-card"><div className="cs-card-head"><div><span className="cs-kicker">Score drivers</span><h3>Category health</h3></div></div><div className="cs-category-stack">{categories.map(([category, score]) => <div className="cs-category-row" key={category}><div><span>{category}</span><strong>{score}</strong></div><div className="cs-category-bar"><span style={{ width: `${Math.max(0, Math.min(100, ((score - 300) / 550) * 100))}%` }} /></div><small>{result.findings_by_category[category as keyof typeof result.findings_by_category]} findings</small></div>)}</div></section></div>
   </div>;
 }
 
@@ -351,7 +319,4 @@ function NoBaseline({ scan, scanning }: { scan: () => void; scanning: boolean })
 function Notice({ tone, title, children }: { tone: "danger" | "warning"; title: string; children: ReactNode }) { return <div className={`cs-notice ${tone}`}><strong>{title}</strong><span>{children}</span></div>; }
 function pageTitle(page: PageId): string { return ({ overview: "Code health overview", repositories: "Repositories", findings: "Findings", risk: "Risk map", history: "History", remediations: "Remediations", integrations: "Integrations", settings: "Engine & rules" })[page]; }
 function compactPath(path: string): string { const parts = path.replace(/\\/g, "/").split("/"); return parts.length > 4 ? `…/${parts.slice(-4).join("/")}` : path.replace(/\\/g, "/"); }
-function gradeLabel(grade: string): string { return ({ A: "Excellent", B: "Healthy", C: "Watch", D: "At risk", F: "High risk" } as Record<string, string>)[grade] ?? "Code health"; }
-function scoreSummary(score: number, critical: number): string { if (critical > 0) return `${critical} critical finding${critical === 1 ? "" : "s"} require attention. Focus on concentrated production risk before broad cleanup.`; if (score >= 760) return "The repository is in strong shape. Protect the baseline and address emerging debt before it compounds."; if (score >= 650) return "The codebase is generally healthy, with a few concentrated areas that should be addressed next."; if (score >= 550) return "Technical debt is materially affecting maintainability. Prioritize the highest-risk files first."; return "Debt is significantly affecting code health. Use the priority queue to attack the highest-impact production risks first."; }
-
 export default App;

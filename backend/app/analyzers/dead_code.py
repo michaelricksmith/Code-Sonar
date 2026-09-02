@@ -42,6 +42,7 @@ produce byte-identical IDs.
 from __future__ import annotations
 
 import ast
+import hashlib
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
@@ -130,8 +131,15 @@ def _join(parent: Optional[str], name: str) -> str:
 class _FileAnalysis:
     """Aggregated state per parsed Python file."""
 
-    __slots__ = ("tree", "source_lines", "rel_path", "is_test_file", "private_defs",
-                 "public_defs", "all_names_referenced")
+    __slots__ = (
+        "tree",
+        "source_lines",
+        "rel_path",
+        "is_test_file",
+        "private_defs",
+        "public_defs",
+        "all_names_referenced",
+    )
 
     def __init__(
         self,
@@ -197,19 +205,19 @@ def _collect_definitions(
                     analysis.all_names_referenced.add(inner.id)
                 elif isinstance(inner, ast.Import):
                     for alias in inner.names:
-                        analysis.all_names_referenced.add(
-                            alias.asname or alias.name.split(".")[0]
-                        )
+                        analysis.all_names_referenced.add(alias.asname or alias.name.split(".")[0])
                 elif isinstance(inner, ast.ImportFrom):
                     for alias in inner.names:
-                        analysis.all_names_referenced.add(
-                            alias.asname or alias.name
-                        )
+                        analysis.all_names_referenced.add(alias.asname or alias.name)
 
 
-def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
-                      start_lineno: int, rel_path: str,
-                      parent_qualname: Optional[str]) -> Iterator[Finding]:
+def _find_unreachable(
+    body: list[ast.stmt],
+    source_lines: list[str],
+    start_lineno: int,
+    rel_path: str,
+    parent_qualname: Optional[str],
+) -> Iterator[Finding]:
     """Find statements after a terminal that can never execute.
 
     Walks each block linearly. After a ``return``, ``raise``,
@@ -219,8 +227,9 @@ def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
     """
     terminals = (ast.Return, ast.Raise, ast.Break, ast.Continue)
     for stmt in body:
-        if isinstance(stmt, (ast.If, ast.While, ast.For, ast.AsyncFor,
-                             ast.With, ast.AsyncWith, ast.Try)):
+        if isinstance(
+            stmt, (ast.If, ast.While, ast.For, ast.AsyncFor, ast.With, ast.AsyncWith, ast.Try)
+        ):
             # Recurse into compound blocks; unreachable detection is
             # local to each block. (Note: a ``return`` inside an ``if``
             # does NOT make the *following* ``if`` unreachable.)
@@ -228,7 +237,10 @@ def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
                 inner = getattr(stmt, field_name, None)
                 if isinstance(inner, list):
                     yield from _find_unreachable(
-                        inner, source_lines, start_lineno, rel_path,
+                        inner,
+                        source_lines,
+                        start_lineno,
+                        rel_path,
                         parent_qualname,
                     )
             if isinstance(stmt, (ast.For, ast.AsyncFor)):
@@ -240,12 +252,14 @@ def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
         # Found a terminal. Look at siblings AFTER it in the parent body.
         idx = body.index(stmt)
         unreachable_siblings: list[ast.stmt] = []
-        for nxt in body[idx + 1:]:
+        for nxt in body[idx + 1 :]:
             # Skip docstrings (first stmt Expr(Constant str)).
-            if (isinstance(nxt, ast.Expr)
-                    and isinstance(nxt.value, ast.Constant)
-                    and isinstance(nxt.value.value, str)
-                    and len(unreachable_siblings) == 0):
+            if (
+                isinstance(nxt, ast.Expr)
+                and isinstance(nxt.value, ast.Constant)
+                and isinstance(nxt.value.value, str)
+                and len(unreachable_siblings) == 0
+            ):
                 continue
             unreachable_siblings.append(nxt)
         if not unreachable_siblings:
@@ -254,9 +268,7 @@ def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
         last = unreachable_siblings[-1]
         start_line = getattr(first, "lineno", start_lineno) or start_lineno
         end_line = (
-            getattr(last, "end_lineno", None)
-            or getattr(last, "lineno", start_line)
-            or start_line
+            getattr(last, "end_lineno", None) or getattr(last, "lineno", start_line) or start_line
         )
         yield _build_unreachable_finding(
             rel_path=rel_path,
@@ -269,6 +281,11 @@ def _find_unreachable(body: list[ast.stmt], source_lines: list[str],
         )
 
 
+def _stable_finding_id(*parts: object) -> str:
+    payload = "\x1f".join(str(part) for part in parts).encode("utf-8")
+    return "finding_dead_code_" + hashlib.sha256(payload).hexdigest()[:16]
+
+
 def _build_unreachable_finding(
     rel_path: str,
     parent_qualname: Optional[str],
@@ -279,9 +296,8 @@ def _build_unreachable_finding(
     stmt_count: int,
 ) -> Finding:
     scope_key = parent_qualname if parent_qualname else "<module>"
-    finding_id = (
-        "finding_dead_code_"
-        + f"{hash((rel_path, 'unreachable', scope_key, start_line, end_line)) & 0xFFFFFFFF:08x}"
+    finding_id = _stable_finding_id(
+        rel_path, "unreachable", scope_key, start_line, end_line, terminal_line
     )
     where = f"in {parent_qualname}" if parent_qualname else "at module scope"
     evidence = (
@@ -327,12 +343,9 @@ def _build_unused_private_finding(
     kind: str,
     reference_count: int,
 ) -> Finding:
-    finding_id = (
-        "finding_dead_code_"
-        f"{hash((rel_path, 'unused-private', qualname)) & 0xFFFFFFFF:08x}"
-    )
     start = getattr(node, "lineno", 1) or 1
     end = getattr(node, "end_lineno", start) or start
+    finding_id = _stable_finding_id(rel_path, "unused-private", qualname, start, end)
     severity = FindingSeverity.WARNING
     debt_points = 4
     return Finding(
@@ -345,14 +358,8 @@ def _build_unused_private_finding(
         line_start=start,
         line_end=end,
         symbol=qualname,
-        evidence=(
-            f"symbol={qualname} kind={kind} "
-            f"references_in_file={reference_count}"
-        ),
-        message=(
-            f"Private {kind} '{qualname}' is defined but never "
-            f"referenced in {rel_path}"
-        ),
+        evidence=(f"symbol={qualname} kind={kind} " f"references_in_file={reference_count}"),
+        message=(f"Private {kind} '{qualname}' is defined but never " f"referenced in {rel_path}"),
         suggestion=(
             "Remove the private definition if it is no longer needed, "
             "or expose it as a public symbol if it is part of the "
@@ -375,11 +382,9 @@ def _build_stale_fixture_finding(
     qualname: str,
     kind: str,
     references_in_repo: int,
+    start_line: int,
 ) -> Finding:
-    finding_id = (
-        "finding_dead_code_"
-        f"{hash((rel_path, 'stale-fixture', qualname)) & 0xFFFFFFFF:08x}"
-    )
+    finding_id = _stable_finding_id(rel_path, "stale-fixture", qualname, start_line)
     return Finding(
         id=finding_id,
         rule_id="dead_code:stale-fixture",
@@ -387,12 +392,11 @@ def _build_stale_fixture_finding(
         severity=FindingSeverity.INFO,
         confidence=0.85,
         file_path=rel_path,
-        line_start=1,
-        line_end=1,
+        line_start=start_line,
+        line_end=start_line,
         symbol=qualname,
         evidence=(
-            f"test_symbol={qualname} kind={kind} "
-            f"references_in_repository={references_in_repo}"
+            f"test_symbol={qualname} kind={kind} " f"references_in_repository={references_in_repo}"
         ),
         message=(
             f"Test {kind} '{qualname}' in {rel_path} is never imported "
@@ -450,8 +454,7 @@ class DeadCodeAnalyzer(Analyzer):
                 rel_path=rel_path,
                 is_test_file=is_test,
             )
-            _collect_definitions(getattr(tree, "body", []), analysis,
-                                 parent_qualname=None)
+            _collect_definitions(getattr(tree, "body", []), analysis, parent_qualname=None)
             analyses.append(analysis)
 
         # Aggregate names referenced anywhere in non-test files (for stale-fixture
@@ -467,23 +470,27 @@ class DeadCodeAnalyzer(Analyzer):
         # Pass 2: produce findings.
         for a in analyses:
             # 1) Unreachable code (apply at module scope and inside every function).
-            findings.extend(_find_unreachable(
-                body=getattr(a.tree, "body", []),
-                source_lines=a.source_lines,
-                start_lineno=1,
-                rel_path=a.rel_path,
-                parent_qualname=None,
-            ))
+            findings.extend(
+                _find_unreachable(
+                    body=getattr(a.tree, "body", []),
+                    source_lines=a.source_lines,
+                    start_lineno=1,
+                    rel_path=a.rel_path,
+                    parent_qualname=None,
+                )
+            )
             for node in ast.walk(a.tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     qualname = node.name  # local qualname for finding; not nested
-                    findings.extend(_find_unreachable(
-                        body=getattr(node, "body", []),
-                        source_lines=a.source_lines,
-                        start_lineno=getattr(node, "lineno", 1) or 1,
-                        rel_path=a.rel_path,
-                        parent_qualname=qualname,
-                    ))
+                    findings.extend(
+                        _find_unreachable(
+                            body=getattr(node, "body", []),
+                            source_lines=a.source_lines,
+                            start_lineno=getattr(node, "lineno", 1) or 1,
+                            rel_path=a.rel_path,
+                            parent_qualname=qualname,
+                        )
+                    )
 
             # 2) Unused private definitions.
             for node, qualname, kind in a.private_defs:
@@ -492,20 +499,20 @@ class DeadCodeAnalyzer(Analyzer):
                     continue
                 def_name = node.name
                 # Count references in this file other than the definition itself.
-                ref_count = sum(
-                    1 for n in a.all_names_referenced if n == def_name
-                )
+                ref_count = sum(1 for n in a.all_names_referenced if n == def_name)
                 # ``ast.Name`` references for the def itself are not
                 # counted, so any non-zero count means the private
                 # name is used somewhere else in the file.
                 if ref_count == 0:
-                    findings.append(_build_unused_private_finding(
-                        rel_path=a.rel_path,
-                        qualname=qualname,
-                        node=node,
-                        kind=kind,
-                        reference_count=ref_count,
-                    ))
+                    findings.append(
+                        _build_unused_private_finding(
+                            rel_path=a.rel_path,
+                            qualname=qualname,
+                            node=node,
+                            kind=kind,
+                            reference_count=ref_count,
+                        )
+                    )
 
             # 3) Stale test fixtures (only when confidence is strong).
             if a.is_test_file:
@@ -538,11 +545,14 @@ class DeadCodeAnalyzer(Analyzer):
                         continue
                     # Only flag if the symbol is *defined* (i.e. has a body),
                     # not just imported/re-exported.
-                    findings.append(_build_stale_fixture_finding(
-                        rel_path=a.rel_path,
-                        qualname=qualname,
-                        kind=kind,
-                        references_in_repo=0,
-                    ))
+                    findings.append(
+                        _build_stale_fixture_finding(
+                            rel_path=a.rel_path,
+                            qualname=qualname,
+                            kind=kind,
+                            references_in_repo=0,
+                            start_line=getattr(node, "lineno", 1) or 1,
+                        )
+                    )
 
         return findings

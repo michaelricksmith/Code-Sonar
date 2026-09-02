@@ -353,6 +353,27 @@ Per the Checkpoint 5 closing menu, three candidates remain:
   and rank-correlation evaluation once blinded expert labels are collected.
 - No scoring weights, debt points, or grade thresholds changed in this checkpoint.
 
+## Calibration Evidence v1 (2026-09-02)
+
+- Versioned contracts cover anonymized repository metadata, frozen scans,
+  individual and adjudicated expert labels, and finding reviews.
+- Validation fails closed on incomplete scans, incompatible versions, unsafe
+  identity/source fields, and invalid label values; canonical SHA-256 hashes
+  make frozen evidence tamper-evident.
+- The dependency-light evaluator provides grade agreement, ordinal correlation,
+  weighted kappa, analyzer precision, severity agreement, deterministic
+  bootstrap confidence intervals, and sampling-stratum breakdowns.
+- Score computation now rejects duplicate finding IDs, canonicalizes input
+  ordering, uses accurate deterministic summation, and explains each finding's
+  effective penalty plus category caps and weights.
+- The 12-case manifest contains planned anonymous sampling slots only. No
+  repositories were selected and no labels were fabricated.
+- Scoring remains version `1.0` because the established calibration regression
+  profiles retained their outputs; no weights or thresholds were changed.
+- Duplicate rejection exposed colliding dead-code IDs for same-named methods;
+  stable SHA-256 location-aware IDs resolved the analyzer defect. Validation:
+  445 passed, 1 skipped; Ruff, strict mypy, frontend lint/build, and self-scan pass.
+
 ---
 
 ## Live Checkpoint 6 self-scan (RESTORED state, matches BASELINE)

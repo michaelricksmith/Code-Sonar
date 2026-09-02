@@ -83,6 +83,7 @@ class ScanResponse(BaseModel):
     category_scores: dict[str, int]
     severity_distribution: dict[str, int]
     findings_by_category: dict[str, int]
+    penalty_explanation: dict[str, Any]
     findings: list[dict[str, Any]]
     summary: dict[str, Any]
     top_hotspots: list[dict[str, Any]] = Field(default_factory=list)
@@ -180,6 +181,7 @@ def _build_scan_response(
         category_scores=scoring_result.category_scores,
         severity_distribution=scoring_result.severity_distribution,
         findings_by_category=scoring_result.findings_by_category,
+        penalty_explanation=scoring_result.penalty_explanation,
         findings=[
             {k: v for k, v in f.model_dump(mode="json").items() if k != "detected_at"}
             for f in findings

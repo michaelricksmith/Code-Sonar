@@ -1,5 +1,19 @@
 {
-  "benchmark_version": "1.0-template",
+  "contract_version": "calibration-evidence-v1",
+  "benchmark_version": "pilot-1-template",
   "scoring_version": "1.0",
-  "cases": []
+  "cases": [
+    {"case_id":"csb-001","strata":{"size":"small","shape":"library","profile":"placeholder"}},
+    {"case_id":"csb-002","strata":{"size":"small","shape":"service","profile":"placeholder"}},
+    {"case_id":"csb-003","strata":{"size":"small","shape":"cli","profile":"placeholder"}},
+    {"case_id":"csb-004","strata":{"size":"small","shape":"controlled","profile":"placeholder"}},
+    {"case_id":"csb-005","strata":{"size":"medium","shape":"library","profile":"placeholder"}},
+    {"case_id":"csb-006","strata":{"size":"medium","shape":"service","profile":"placeholder"}},
+    {"case_id":"csb-007","strata":{"size":"medium","shape":"cli","profile":"placeholder"}},
+    {"case_id":"csb-008","strata":{"size":"medium","shape":"controlled","profile":"placeholder"}},
+    {"case_id":"csb-009","strata":{"size":"large","shape":"library","profile":"placeholder"}},
+    {"case_id":"csb-010","strata":{"size":"large","shape":"service","profile":"placeholder"}},
+    {"case_id":"csb-011","strata":{"size":"large","shape":"multi-package","profile":"placeholder"}},
+    {"case_id":"csb-012","strata":{"size":"large","shape":"controlled","profile":"placeholder"}}
+  ]
 }

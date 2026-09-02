@@ -33,9 +33,9 @@ class TestUnreachableCode:
             tmp_path / "m.py",
             "def f():\n"
             "    return 1\n"
-            "    x = 2\n"          # unreachable
-            "    y = 3\n"          # unreachable
-            "    z = 4\n",         # unreachable
+            "    x = 2\n"  # unreachable
+            "    y = 3\n"  # unreachable
+            "    z = 4\n",  # unreachable
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -52,9 +52,7 @@ class TestUnreachableCode:
     def test_statements_after_raise_flagged(self, tmp_path):
         _write(
             tmp_path / "m.py",
-            "def f():\n"
-            "    raise ValueError('nope')\n"
-            "    cleanup()\n",
+            "def f():\n" "    raise ValueError('nope')\n" "    cleanup()\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -80,11 +78,7 @@ class TestUnreachableCode:
     def test_no_finding_when_all_reachable(self, tmp_path):
         _write(
             tmp_path / "m.py",
-            "def f():\n"
-            "    if True:\n"
-            "        return 1\n"
-            "    else:\n"
-            "        return 2\n",
+            "def f():\n" "    if True:\n" "        return 1\n" "    else:\n" "        return 2\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         # Only the return itself, no unreachable siblings.
@@ -97,8 +91,7 @@ class TestUnreachableCode:
         # by additional statements IS detected as unreachable.
         _write(
             tmp_path / "m.py",
-            "raise SystemExit(0)\n"
-            "print('after exit')\n",
+            "raise SystemExit(0)\n" "print('after exit')\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -124,11 +117,7 @@ class TestUnusedPrivate:
     def test_private_function_never_used_flagged(self, tmp_path):
         _write(
             tmp_path / "m.py",
-            "def _helper():\n"
-            "    return 1\n"
-            "\n"
-            "def public():\n"
-            "    return 2\n",
+            "def _helper():\n" "    return 1\n" "\n" "def public():\n" "    return 2\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [(f.rule_id, f.symbol) for f in findings]
@@ -137,11 +126,7 @@ class TestUnusedPrivate:
     def test_private_function_referenced_not_flagged(self, tmp_path):
         _write(
             tmp_path / "m.py",
-            "def _helper():\n"
-            "    return 1\n"
-            "\n"
-            "def public():\n"
-            "    return _helper()\n",
+            "def _helper():\n" "    return 1\n" "\n" "def public():\n" "    return _helper()\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -151,8 +136,7 @@ class TestUnusedPrivate:
         # Cross-module is not in scope; only private (underscore) names flagged.
         _write(
             tmp_path / "m.py",
-            "def never_called():\n"
-            "    return 1\n",
+            "def never_called():\n" "    return 1\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -174,8 +158,7 @@ class TestUnusedPrivate:
     def test_async_function_also_flagged(self, tmp_path):
         _write(
             tmp_path / "m.py",
-            "async def _afn():\n"
-            "    return 1\n",
+            "async def _afn():\n" "    return 1\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [(f.rule_id, f.symbol) for f in findings]
@@ -227,8 +210,7 @@ class TestStaleFixture:
         # A non-test public function in production source is NOT a stale fixture.
         _write(
             tmp_path / "main.py",
-            "def public_api():\n"
-            "    return 1\n",
+            "def public_api():\n" "    return 1\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [f.rule_id for f in findings]
@@ -239,19 +221,31 @@ class TestStaleFixture:
         test_dir.mkdir()
         _write(
             test_dir / "conftest.py",
-            "def pytest_collection_modifyitems():\n"
-            "    return None\n",
+            "def pytest_collection_modifyitems():\n" "    return None\n",
         )
         findings = DeadCodeAnalyzer().analyze(tmp_path)
         rules = [(f.rule_id, f.symbol) for f in findings]
         # conftest helper should be skipped, not flagged stale.
-        assert not any(
-            r == "dead_code:stale-fixture" and "conftest" in (s or "")
-            for r, s in rules
-        )
+        assert not any(r == "dead_code:stale-fixture" and "conftest" in (s or "") for r, s in rules)
 
 
 class TestDeterminism:
+    def test_same_named_methods_receive_unique_stable_ids(self, tmp_path):
+        _write(
+            tmp_path / "models.py",
+            "class First:\n"
+            "    def _load(self):\n"
+            "        return 1\n"
+            "class Second:\n"
+            "    def _load(self):\n"
+            "        return 2\n",
+        )
+        first = DeadCodeAnalyzer().analyze(tmp_path)
+        second = DeadCodeAnalyzer().analyze(tmp_path)
+        ids = [finding.id for finding in first]
+        assert len(ids) == len(set(ids))
+        assert ids == [finding.id for finding in second]
+
     def test_repeat_scan_yields_byte_identical_findings(self, tmp_path):
         _write(
             tmp_path / "m.py",
@@ -266,17 +260,11 @@ class TestDeterminism:
         first = analyzer.analyze(tmp_path)
         second = analyzer.analyze(tmp_path)
         first_dump = sorted(
-            [
-                {k: v for k, v in f.model_dump().items() if k != "detected_at"}
-                for f in first
-            ],
+            [{k: v for k, v in f.model_dump().items() if k != "detected_at"} for f in first],
             key=lambda d: d["id"],
         )
         second_dump = sorted(
-            [
-                {k: v for k, v in f.model_dump().items() if k != "detected_at"}
-                for f in second
-            ],
+            [{k: v for k, v in f.model_dump().items() if k != "detected_at"} for f in second],
             key=lambda d: d["id"],
         )
         assert first_dump == second_dump
@@ -284,9 +272,7 @@ class TestDeterminism:
     def test_finding_ids_unique_within_scan(self, tmp_path):
         _write(
             tmp_path / "a.py",
-            "def _a():\n    return 1\n"
-            "def _b():\n    return 2\n"
-            "def _c():\n    return 3\n",
+            "def _a():\n    return 1\n" "def _b():\n    return 2\n" "def _c():\n    return 3\n",
         )
         _write(
             tmp_path / "b.py",

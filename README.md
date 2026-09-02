@@ -511,3 +511,11 @@ Sonar returns an incomplete-scan error and does not issue a score or grade.
 Historical records preserve the scoring version; older records load as
 `legacy-unversioned`. A label-free benchmark template lives in
 `backend/benchmarks/scoring/` for future blinded expert calibration.
+
+Calibration Evidence v1 adds privacy-safe, versioned evidence contracts and a
+capture/evaluation workflow. Captured artifacts contain anonymous case IDs and
+derived finding facts only—never repository identity, source evidence, or host
+paths. The 12-case manifest is a sampling skeleton, not claimed repository data
+or fabricated expert labels. Scoring now rejects duplicate finding IDs and
+publishes a deterministic contribution explanation for each finding and
+category. Weights and grade thresholds remain unchanged.

@@ -278,3 +278,19 @@ analyzer failure. Successful scan responses expose per-analyzer status and
 as `legacy-unversioned`. The benchmark scaffold is intentionally empty pending
 real frozen outputs and blinded expert labels. Weights and thresholds are
 unchanged. Run the focused scoring/API/history tests before integration.
+
+## 2026-09-02 — Calibration Evidence v1 handoff
+
+Branch `scoring/calibration-evidence-v1` establishes the evidence system needed
+to measure grade accuracy without changing calibration. It adds anonymized,
+hashed data contracts, a safe frozen-scan capture command, a metrics evaluator,
+and a 12-slot metadata-only pilot manifest. The scorer now rejects duplicate
+finding IDs and emits deterministic finding/category contribution details.
+Existing calibration profiles retain their scores, so `SCORING_VERSION` stays
+at `1.0`. The next product step is collecting real blinded expert labels; until
+then, no score-accuracy claim or retuning is justified.
+
+Final validation: 445 backend tests passed and 1 skipped with 86% coverage;
+Ruff, strict mypy, frontend lint/build, and an eight-analyzer self-scan passed.
+The self-scan initially revealed duplicate dead-code IDs for same-named methods;
+the analyzer now uses stable location-aware SHA-256 IDs and the rerun passed.

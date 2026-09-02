@@ -55,6 +55,10 @@ def test_complete_scan_exposes_status_and_scoring_version(test_repo_fixture) -> 
     assert data["scoring_version"] == SCORING_VERSION
     assert data["analyzer_execution"]
     assert all(item["status"] == "completed" for item in data["analyzer_execution"])
+    assert data["penalty_explanation"]["findings"] == sorted(
+        data["penalty_explanation"]["findings"],
+        key=lambda item: item["finding_id"],
+    )
 
 
 def test_scoring_version_persists_and_round_trips_api(test_repo_fixture) -> None:

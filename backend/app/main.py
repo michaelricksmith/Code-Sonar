@@ -24,7 +24,7 @@ from app.ml.api import router as ml_router
 from app.projects import get_project_store
 from app.projects import router as projects_router
 from app.remediation.api import router as remediation_router
-from app.scoring.engine import calculate_score
+from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
 from app.services.repository import (
@@ -76,6 +76,8 @@ class ScanResponse(BaseModel):
     scanned_at: str
     score: int
     grade: str
+    scoring_version: str
+    analyzer_execution: list[dict[str, Any]]
     total_debt_points: int
     finding_count: int
     category_scores: dict[str, int]
@@ -111,6 +113,7 @@ def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
         "repository_path": record.repository_path,
         "scanned_at": record.scanned_at,
         "schema_version": record.schema_version,
+        "scoring_version": record.scoring_version,
         "score": record.score,
         "grade": record.grade,
         "total_debt_points": record.total_debt_points,
@@ -136,6 +139,7 @@ def _record_summary(record: ScanRecord) -> dict[str, Any]:
         "repository_path": record.repository_path,
         "scanned_at": record.scanned_at,
         "schema_version": record.schema_version,
+        "scoring_version": record.scoring_version,
         "score": record.score,
         "grade": record.grade,
         "total_debt_points": record.total_debt_points,
@@ -160,6 +164,7 @@ def _build_scan_response(
     scoring_result: Any,
     scanned_at: str,
     scan_id: str | None,
+    analyzer_execution: list[dict[str, Any]],
 ) -> ScanResponse:
     hotspot_result = compute_hotspots(findings, top_n=10)
     return ScanResponse(
@@ -168,6 +173,8 @@ def _build_scan_response(
         scanned_at=scanned_at,
         score=scoring_result.score,
         grade=scoring_result.grade,
+        scoring_version=SCORING_VERSION,
+        analyzer_execution=analyzer_execution,
         total_debt_points=scoring_result.total_debt_points,
         finding_count=scoring_result.finding_count,
         category_scores=scoring_result.category_scores,
@@ -197,10 +204,22 @@ async def scan(request: ScanRequest) -> ScanResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        findings = scan_repository(repo_path)
+        execution = scan_repository(repo_path)
+        if not execution.complete:
+            failures = [item.analyzer for item in execution.analyzers if item.status == "failed"]
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "Scan incomplete; no authoritative score was produced",
+                    "failed_analyzers": failures,
+                },
+            )
+        findings = list(execution.findings)
         scoring_result = calculate_score(findings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Scan failed: " + str(exc)) from exc
 
@@ -225,6 +244,7 @@ async def scan(request: ScanRequest) -> ScanResponse:
         scoring_result=scoring_result,
         scanned_at=scanned_at,
         scan_id=persisted_scan_id,
+        analyzer_execution=[item.__dict__ for item in execution.analyzers],
     )
 
 
@@ -240,10 +260,22 @@ async def scan_project(project_id: str) -> ScanResponse:
         raise HTTPException(status_code=409, detail="Project checkout is unavailable") from exc
 
     try:
-        findings = scan_repository(repo_path)
+        execution = scan_repository(repo_path)
+        if not execution.complete:
+            failures = [item.analyzer for item in execution.analyzers if item.status == "failed"]
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "Project scan incomplete; no authoritative score was produced",
+                    "failed_analyzers": failures,
+                },
+            )
+        findings = list(execution.findings)
         scoring_result = calculate_score(findings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Project scan failed") from exc
 
@@ -264,6 +296,7 @@ async def scan_project(project_id: str) -> ScanResponse:
         scoring_result=scoring_result,
         scanned_at=scanned_at,
         scan_id=record.scan_id,
+        analyzer_execution=[item.__dict__ for item in execution.analyzers],
     )
 
 
@@ -314,9 +347,14 @@ async def hotspots(
     except RepositoryValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        findings = scan_repository(repo_path_obj)
+        execution = scan_repository(repo_path_obj)
+        if not execution.complete:
+            raise HTTPException(status_code=503, detail="Scan incomplete")
+        findings = list(execution.findings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Scan failed: " + str(exc)) from exc
     return compute_hotspots(findings, top_n=limit).to_dict()

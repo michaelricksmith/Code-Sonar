@@ -478,3 +478,12 @@ another scan, and understand what changed.
 ## Repository onboarding
 
 The first-run experience offers three honest entry points: local checkout scanning through the native `POST /api/scan` `repo_path` contract; managed repository connection through the existing GitHub App/project workflow; and a visibly disabled ZIP option marked as coming soon. The onboarding layer preserves the deterministic 300–850 score as the product authority. Ask Sonar and ML remain evidence-grounded advisory layers.
+
+## Scoring authority and calibration
+
+Authoritative scan responses now identify `scoring_version` and report the
+completion status of every registered analyzer. If any analyzer fails, Code
+Sonar returns an incomplete-scan error and does not issue a score or grade.
+Historical records preserve the scoring version; older records load as
+`legacy-unversioned`. A label-free benchmark template lives in
+`backend/benchmarks/scoring/` for future blinded expert calibration.

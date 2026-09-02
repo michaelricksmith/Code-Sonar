@@ -250,3 +250,12 @@ All files saved. No blockers. Clear next task. Runtime verified. Handoff complet
 ## 2026-09-02 — UI integration handoff
 
 Branch `feature/original-ui-integration` adds a space-inspired first-run repository gateway to the actual frontend. It does not replace the native dashboard or backend contracts. Local scans continue through `repo_path`; GitHub continues through the secure App/project workflow; ZIP is a disabled coming-soon card. The next safe action is tester validation before opening a pull request.
+
+## 2026-09-02 — Scoring authority checkpoint
+
+The backend now refuses to issue an authoritative score or grade after any
+analyzer failure. Successful scan responses expose per-analyzer status and
+`scoring_version=1.0`; history persists that version while loading older records
+as `legacy-unversioned`. The benchmark scaffold is intentionally empty pending
+real frozen outputs and blinded expert labels. Weights and thresholds are
+unchanged. Run the focused scoring/API/history tests before integration.

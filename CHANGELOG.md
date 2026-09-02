@@ -11,6 +11,10 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added Calibration Evidence v1: anonymized and hashable evidence contracts,
+  privacy-safe scan capture, deterministic benchmark metrics with confidence
+  intervals/strata, and a metadata-only 12-case pilot manifest.
+- Added deterministic per-finding and per-category score contribution details.
 - Added server-derived tenant identity from unique configured bearer tokens,
   tenant-scoped projects, scan history, Ask Sonar/remediation-plan access and
   GitHub installations, plus cross-tenant denial regression coverage. Caller
@@ -35,6 +39,11 @@ without semantic-versioning.
 - Added `frontend/postcss.config.cjs` so Tailwind utilities compile into production CSS.
 
 ### Fixed
+
+- Scoring now rejects duplicate finding IDs and uses canonical ordering plus
+  accurate summation so adversarial input permutations cannot change results.
+- Dead-code finding IDs now use stable SHA-256 inputs including source location,
+  preventing same-named methods from colliding across classes.
 
 - Prevented partial analyzer runs from silently producing an authoritative
   score or perfect A grade; incomplete scans now fail closed without a grade.

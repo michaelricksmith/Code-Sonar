@@ -9,7 +9,8 @@ large test suites and fixtures cannot overwhelm real production findings.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+from math import fsum
 from typing import Any
 
 from app.models.finding import Finding, FindingCategory, FindingSeverity
@@ -29,6 +30,7 @@ class ScoringResult:
         severity_distribution: dict[str, int],
         findings_by_category: dict[str, int],
         findings_source_breakdown: dict[str, int],
+        penalty_explanation: dict[str, Any],
     ):
         self.score = score
         self.grade = grade
@@ -38,6 +40,7 @@ class ScoringResult:
         self.severity_distribution = severity_distribution
         self.findings_by_category = findings_by_category
         self.findings_source_breakdown = findings_source_breakdown
+        self.penalty_explanation = penalty_explanation
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +53,7 @@ class ScoringResult:
             "severity_distribution": self.severity_distribution,
             "findings_by_category": self.findings_by_category,
             "findings_source_breakdown": self.findings_source_breakdown,
+            "penalty_explanation": self.penalty_explanation,
         }
 
 
@@ -93,6 +97,11 @@ NON_SOURCE_CATEGORY_CAP = MAX_PENALTY * SOURCE_CONTEXT_MODIFIER[TEST]
 
 def calculate_score(findings: list[Finding]) -> ScoringResult:
     """Calculate the deterministic Code Sonar score for normalized findings."""
+    finding_ids = [finding.id for finding in findings]
+    duplicate_ids = sorted(item for item, count in Counter(finding_ids).items() if count > 1)
+    if duplicate_ids:
+        raise ValueError(f"Duplicate finding IDs are not scoreable: {', '.join(duplicate_ids)}")
+
     if not findings:
         return ScoringResult(
             score=PERFECT_SCORE,
@@ -103,31 +112,39 @@ def calculate_score(findings: list[Finding]) -> ScoringResult:
             severity_distribution={sev.value: 0 for sev in FindingSeverity},
             findings_by_category={cat.value: 0 for cat in FindingCategory},
             findings_source_breakdown={k: 0 for k in SOURCE_CONTEXT_MODIFIER},
+            penalty_explanation={
+                "total_penalty": 0.0,
+                "categories": {},
+                "findings": [],
+            },
         )
 
+    canonical_findings = sorted(findings, key=lambda finding: finding.id)
     findings_by_category_map: dict[FindingCategory, list[Finding]] = defaultdict(list)
-    for finding in findings:
+    for finding in canonical_findings:
         findings_by_category_map[finding.category].append(finding)
 
-    total_debt_points = sum(f.debt_points for f in findings)
+    total_debt_points = sum(f.debt_points for f in canonical_findings)
 
     severity_counts: dict[str, int] = {sev.value: 0 for sev in FindingSeverity}
-    for finding in findings:
+    for finding in canonical_findings:
         severity_counts[finding.severity.value] += 1
 
     source_counts: dict[str, int] = {k: 0 for k in SOURCE_CONTEXT_MODIFIER}
-    for finding in findings:
+    for finding in canonical_findings:
         cls = classify_path(finding.file_path)
         source_counts[cls if cls in source_counts else SOURCE] += 1
 
-    category_penalties: dict[FindingCategory, float] = {
+    category_details = {
         category: _calculate_category_penalty(findings_by_category_map.get(category, []))
         for category in FindingCategory
     }
+    category_penalties = {
+        category: float(details["capped_penalty"]) for category, details in category_details.items()
+    }
 
-    total_penalty = sum(
-        category_penalties.get(cat, 0.0) * CATEGORY_WEIGHTS.get(cat, 0.0)
-        for cat in FindingCategory
+    total_penalty = fsum(
+        category_penalties.get(cat, 0.0) * CATEGORY_WEIGHTS.get(cat, 0.0) for cat in FindingCategory
     )
 
     raw_score = PERFECT_SCORE - total_penalty
@@ -149,11 +166,24 @@ def calculate_score(findings: list[Finding]) -> ScoringResult:
         score=final_score,
         grade=_score_to_grade(final_score),
         total_debt_points=total_debt_points,
-        finding_count=len(findings),
+        finding_count=len(canonical_findings),
         category_scores=category_scores,
         severity_distribution=severity_counts,
         findings_by_category=findings_count_by_category,
         findings_source_breakdown=source_counts,
+        penalty_explanation={
+            "total_penalty": total_penalty,
+            "categories": {
+                category.value: {
+                    **details,
+                    "weight": CATEGORY_WEIGHTS.get(category, 0.0),
+                    "weighted_penalty": category_penalties[category]
+                    * CATEGORY_WEIGHTS.get(category, 0.0),
+                }
+                for category, details in category_details.items()
+            },
+            "findings": [_finding_explanation(finding) for finding in canonical_findings],
+        },
     )
 
 
@@ -163,7 +193,31 @@ def _confidence_modifier(finding: Finding) -> float:
     return 1.0
 
 
-def _calculate_category_penalty(findings: list[Finding]) -> float:
+def _finding_explanation(finding: Finding) -> dict[str, Any]:
+    severity_weight = SEVERITY_WEIGHTS.get(finding.severity, 1.0)
+    confidence_modifier = _confidence_modifier(finding)
+    path_class = classify_path(finding.file_path)
+    context_modifier = SOURCE_CONTEXT_MODIFIER.get(path_class, 1.0)
+    severity_bonus = SEVERITY_BONUS.get(finding.severity, 0.0)
+    weighted_debt_penalty = finding.debt_points * severity_weight
+    confidence_adjusted_penalty = weighted_debt_penalty * confidence_modifier + severity_bonus
+    return {
+        "finding_id": finding.id,
+        "analyzer": finding.analyzer,
+        "category": finding.category.value,
+        "path_class": path_class,
+        "debt_points": finding.debt_points,
+        "severity_weight": severity_weight,
+        "severity_bonus": severity_bonus,
+        "confidence_modifier": confidence_modifier,
+        "context_modifier": context_modifier,
+        "weighted_debt_penalty": weighted_debt_penalty,
+        "confidence_adjusted_penalty": confidence_adjusted_penalty,
+        "effective_penalty": confidence_adjusted_penalty * context_modifier,
+    }
+
+
+def _calculate_category_penalty(findings: list[Finding]) -> dict[str, float | bool]:
     """Calculate a bounded category penalty with per-finding context weighting.
 
     Production and non-production contributions are accumulated separately.
@@ -173,26 +227,33 @@ def _calculate_category_penalty(findings: list[Finding]) -> float:
     repository's score while leaving their raw findings and debt visible.
     """
     if not findings:
-        return 0.0
+        return {
+            "source_penalty": 0.0,
+            "non_source_penalty": 0.0,
+            "bounded_non_source_penalty": 0.0,
+            "non_source_cap_applied": False,
+            "category_cap_applied": False,
+            "capped_penalty": 0.0,
+        }
 
-    source_penalty = 0.0
-    non_source_penalty = 0.0
-    for finding in findings:
-        severity_weight = SEVERITY_WEIGHTS.get(finding.severity, 1.0)
-        confidence_modifier = _confidence_modifier(finding)
-        path_class = classify_path(finding.file_path)
-        context_modifier = SOURCE_CONTEXT_MODIFIER.get(path_class, 1.0)
-        contribution = (
-            finding.debt_points * severity_weight * confidence_modifier
-            + SEVERITY_BONUS.get(finding.severity, 0.0)
-        ) * context_modifier
-        if path_class == SOURCE:
-            source_penalty += contribution
-        else:
-            non_source_penalty += contribution
+    explanations = [_finding_explanation(finding) for finding in findings]
+    source_penalty = fsum(
+        float(item["effective_penalty"]) for item in explanations if item["path_class"] == SOURCE
+    )
+    non_source_penalty = fsum(
+        float(item["effective_penalty"]) for item in explanations if item["path_class"] != SOURCE
+    )
 
     bounded_non_source = min(NON_SOURCE_CATEGORY_CAP, non_source_penalty)
-    return min(MAX_PENALTY, source_penalty + bounded_non_source)
+    combined = source_penalty + bounded_non_source
+    return {
+        "source_penalty": source_penalty,
+        "non_source_penalty": non_source_penalty,
+        "bounded_non_source_penalty": bounded_non_source,
+        "non_source_cap_applied": non_source_penalty > NON_SOURCE_CATEGORY_CAP,
+        "category_cap_applied": combined > MAX_PENALTY,
+        "capped_penalty": min(MAX_PENALTY, combined),
+    }
 
 
 def _score_to_grade(score: int) -> str:

@@ -8,9 +8,11 @@ without semantic-versioning.
 
 ---
 
-## [Unreleased] — 2026-09-01
+## [Unreleased] — 2026-09-02
 
 ### Added
+- Phase 2 began with a responsive application shell, accessible mobile navigation, and a redesigned real-data credit-score command center. The command center preserves the deterministic 300–850 score, grade, category normalization, findings, debt, severity, priority, repository, and scan metadata from the native scan response.
+
 
 - Added pinned Playwright 1.62.1 as a frontend development dependency and installed its Chromium runtime for browser-level validation.
 - Added RICK's isolated first capability wave: Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, and Streamlit 1.62.0; verified the existing VS Code JS Debug 1.117.0 component.

@@ -350,6 +350,37 @@ class WebhookScanJobStore:
             )
             return updated
 
+    def claim_queued(self, job_id: str, **_: Any) -> bool:
+        """Atomically claim a queued job inside this process.
+
+        SQL persistence overrides this with a database compare-and-set lease.
+        """
+        with self._lock:
+            jobs = self._load()
+            tenant_id = current_tenant_id()
+            current = next(
+                (
+                    item
+                    for item in jobs
+                    if item.job_id == job_id
+                    and item.tenant_id == tenant_id
+                    and item.state == "queued"
+                ),
+                None,
+            )
+            if current is None:
+                return False
+            updated = replace(current, state="running", updated_at=_utcnow(), error=None)
+            self._save(
+                [
+                    updated
+                    if item.job_id == job_id and item.tenant_id == tenant_id
+                    else item
+                    for item in jobs
+                ]
+            )
+            return True
+
 
 class GitHubAppAuth:
     """Mint short-lived GitHub App installation tokens without persisting them."""
@@ -581,7 +612,8 @@ async def _run_project_scan_job_for_bound_tenant(job_id: str) -> None:
     job = job_store.get(job_id)
     if job is None or job.state != "queued":
         return
-    job_store.update(job_id, state="running", error=None)
+    if not job_store.claim_queued(job_id):
+        return
     try:
         if _scan_handler is None:
             raise RuntimeError("Webhook scan handler is not configured")

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
-from app.history import JsonlHistoryStore
 from app.ml.evaluation import ModelRegistry
 from app.ml.features import ScanFeatureVector, extract_scan_features
 from app.ml.similarity import SimilarityIndex
@@ -94,7 +93,9 @@ def set_feature_provider(provider: FeatureProvider | None) -> None:
 
 def _persisted_scan_features(scan_id: str) -> ScanFeatureVector | None:
     """Build the current feature vector from a persisted redacted scan record."""
-    record = JsonlHistoryStore().get(scan_id)
+    from app.main import get_history_store
+
+    record = get_history_store().get(scan_id)
     if record is None:
         return None
     return extract_scan_features(record)

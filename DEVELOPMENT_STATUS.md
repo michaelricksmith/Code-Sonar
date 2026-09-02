@@ -18,6 +18,17 @@
 
 ## Current verified state (2026-08-31)
 
+- Transactional persistence foundation is implemented behind existing store
+  contracts. PostgreSQL is mandatory outside local development; SQLite remains
+  a test/single-process option only. The Alembic schema has tenant-aware keys,
+  atomic scan/baseline writes, webhook replay/lease controls, encrypted checkout
+  paths, explicit import ledgering, and data-root permission checks.
+- This does **not** complete production KMS, key rotation, retention/deletion/
+  export automation, backup/PITR configuration, restore drills, or PostgreSQL
+  row-level-security policy. Those remain client-readiness gates.
+- Backend verification: **453 passed, 2 skipped** locally; one skip is the
+  PostgreSQL integration test that CI runs against its PostgreSQL 17 service.
+
 - The populated Overview now presents the deterministic 300–850 result as a
   semantic credit-report signal core. Its sonar field, severity signals,
   grade/risk language, provenance, and top priorities are derived exclusively

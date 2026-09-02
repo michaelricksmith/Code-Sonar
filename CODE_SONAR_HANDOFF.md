@@ -19,6 +19,15 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Transactional persistence foundation: SQLAlchemy unit of work, Alembic
+  tenant-aware schema, PostgreSQL shared-deployment gate, atomic project scans,
+  atomic webhook claims/leases, encrypted checkout paths, guarded data root,
+  and explicit ledgered legacy imports. Local SQLite is not presented as SaaS
+  readiness. Production KMS, retention/export/deletion, backup/PITR and restore
+  drills remain open gates.
+- Backend: **453 passed, 2 skipped** locally; PostgreSQL concurrency coverage is
+  configured on the CI PostgreSQL 17 service.
+
 - Remediation security checkpoint: server-minted signed/expiring/single-use
   authorization; immutable scan/finding/commit/executor binding; guaranteed
   worktree cleanup; direct remediation primitives closed; host paths removed

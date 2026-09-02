@@ -11,6 +11,15 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added a tenant-aware SQLAlchemy persistence unit of work and Alembic baseline
+  for projects, scans/findings, GitHub installations/webhooks/jobs, and
+  remediation outcomes. Project scan persistence is atomic, webhook claims and
+  worker leases use database compare-and-set semantics, and PostgreSQL is
+  required for shared deployments.
+- Added tenant-bound AES-GCM checkout-path encryption for local SQL development,
+  a production encryption-provider injection contract, guarded data-root
+  permission checks, and an explicit idempotent legacy JSON/JSONL importer with
+  a transactional verification ledger.
 - Added the Credit Report Signal Core: an accessible semantic 300–850 meter,
   live-evidence sonar field, integrated grade/risk narrative, scan provenance,
   and a clearer three-item remediation priority queue.

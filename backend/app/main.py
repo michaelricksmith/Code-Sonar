@@ -46,6 +46,9 @@ app.add_middleware(ApiBoundaryMiddleware)
 async def validate_security_configuration() -> None:
     """Fail closed before serving when authentication or CORS is unsafe."""
     validate_runtime_security_config()
+    from app.persistence import configure_persistence_from_env
+
+    configure_persistence_from_env()
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(remediation_router)
@@ -289,8 +292,14 @@ async def scan_project(project_id: str) -> ScanResponse:
         scoring=scoring_result,
         scanned_at=scanned_at,
     )
-    get_history_store().append(record)
-    get_project_store().record_scan(project_id, scan_id=record.scan_id, score=record.score)
+    from app.persistence.runtime import record_project_scan_atomically
+
+    record_project_scan_atomically(
+        project_id,
+        record,
+        history_store=get_history_store(),
+        project_store=get_project_store(),
+    )
 
     return _build_scan_response(
         repository_label=f"{project.owner}/{project.name}",

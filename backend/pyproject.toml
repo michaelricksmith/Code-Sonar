@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     "sqlalchemy>=2.0.35",
     "alembic>=1.13.0",
+    "psycopg[binary]>=3.2.0",
     "gitpython>=3.1.43",
     "radon>=6.0.1",
     "python-multipart>=0.0.9",

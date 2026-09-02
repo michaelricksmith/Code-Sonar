@@ -108,9 +108,6 @@ class JsonlHistoryStore(HistoryStore):
             path = _default_history_path()
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # Touch the file so reads work even before any append.
-        if not self._path.exists():
-            self._path.touch()
 
     @property
     def path(self) -> Path:

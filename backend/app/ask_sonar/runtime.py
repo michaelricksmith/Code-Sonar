@@ -11,7 +11,7 @@ import os
 from typing import Callable
 
 from app.ask_sonar.answering import AnswerProviderProtocol
-from app.history import JsonlHistoryStore, ScanRecord
+from app.history import ScanRecord
 
 ScanProvider = Callable[[str], ScanRecord | None]
 _scan_provider: ScanProvider | None = None
@@ -25,7 +25,9 @@ def set_scan_provider(provider: ScanProvider | None) -> None:
 
 
 def _persisted_scan(scan_id: str) -> ScanRecord | None:
-    return JsonlHistoryStore().get(scan_id)
+    from app.main import get_history_store
+
+    return get_history_store().get(scan_id)
 
 
 def get_scan(scan_id: str) -> ScanRecord | None:

@@ -10,6 +10,22 @@ jobs:
   backend:
     name: Backend tests + lint
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: code_sonar
+          POSTGRES_PASSWORD: code_sonar_test
+          POSTGRES_DB: code_sonar_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U code_sonar -d code_sonar_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CODESONAR_TEST_POSTGRES_URL: postgresql+psycopg://code_sonar:code_sonar_test@127.0.0.1:5432/code_sonar_test
     defaults:
       run:
         working-directory: backend

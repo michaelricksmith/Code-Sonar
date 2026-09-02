@@ -360,6 +360,13 @@ the Fastest-Route-to-Private-Beta brief.
 
 Code Sonar treats secrets as **first-class security concerns**:
 
+The optional transactional persistence boundary uses SQLAlchemy repositories
+and an Alembic tenant-aware baseline. Shared deployments fail closed unless
+PostgreSQL and a deployment-injected production encryption provider are
+configured; SQLite and the bundled AES-GCM provider are local-development only.
+See [Transactional persistence](docs/TRANSACTIONAL_PERSISTENCE.md) for migration,
+legacy import, filesystem, and remaining-readiness boundaries.
+
 ### API and repository boundary
 
 - Every `/api/**` route requires `Authorization: Bearer <token>` from

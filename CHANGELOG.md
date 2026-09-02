@@ -11,6 +11,9 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added the Credit Report Signal Core: an accessible semantic 300–850 meter,
+  live-evidence sonar field, integrated grade/risk narrative, scan provenance,
+  and a clearer three-item remediation priority queue.
 - Added Calibration Evidence v1: anonymized and hashable evidence contracts,
   privacy-safe scan capture, deterministic benchmark metrics with confidence
   intervals/strata, and a metadata-only 12-case pilot manifest.
@@ -39,6 +42,10 @@ without semantic-versioning.
 - Added `frontend/postcss.config.cjs` so Tailwind utilities compile into production CSS.
 
 ### Fixed
+
+- Removed the duplicate GitHub project dashboard mounted above every page; the
+  tenant-aware project panel now appears only inside Repositories and retains
+  the unified active-project context.
 
 - Scoring now rejects duplicate finding IDs and uses canonical ordering plus
   accurate summation so adversarial input permutations cannot change results.

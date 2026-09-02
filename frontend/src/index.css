@@ -758,3 +758,170 @@ body {
   .cs-sidebar { transition: none; }
   .cs-command-center::after { animation: none; }
 }
+
+/* Credit Report Signal Core — populated Overview only */
+.cs-credit-hero {
+  --credit-accent: #ff6b7a;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--credit-accent) 28%, transparent);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 16% 45%, color-mix(in srgb, var(--credit-accent) 13%, transparent), transparent 31%),
+    radial-gradient(circle at 78% 10%, rgba(78, 236, 210, .08), transparent 34%),
+    linear-gradient(135deg, #101a29 0%, #0a101a 58%, #080d15 100%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .06);
+}
+.cs-credit-hero.good { --credit-accent: #54e8ac; }
+.cs-credit-hero.fair { --credit-accent: #68c9ff; }
+.cs-credit-hero.warn { --credit-accent: #ffbf69; }
+.cs-credit-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .2;
+  background-image: linear-gradient(rgba(117, 240, 221, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(117, 240, 221, .12) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at 19% 48%, #000, transparent 43%);
+}
+.cs-credit-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, .9fr) minmax(360px, 1.35fr) minmax(170px, .52fr);
+  gap: clamp(24px, 3vw, 50px);
+  align-items: center;
+  padding: clamp(30px, 4vw, 52px);
+}
+.cs-sonar-field {
+  position: relative;
+  width: min(100%, 310px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 14, 23, .98) 0 31%, rgba(8, 20, 30, .84) 32% 60%, rgba(7, 17, 26, .64) 61% 100%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--credit-accent) 20%, transparent), 0 0 90px color-mix(in srgb, var(--credit-accent) 16%, transparent), inset 0 0 65px rgba(78, 236, 210, .06);
+}
+.cs-sonar-grid { position: absolute; inset: 5%; overflow: hidden; border-radius: 50%; opacity: .24; background: linear-gradient(transparent 49.65%, #75f0dd 50%, transparent 50.35%), linear-gradient(90deg, transparent 49.65%, #75f0dd 50%, transparent 50.35%); }
+.cs-sonar-ring { position: absolute; border: 1px solid rgba(117, 240, 221, .22); border-radius: 50%; }
+.cs-sonar-ring.ring-outer { inset: 5%; }
+.cs-sonar-ring.ring-middle { inset: 22%; border-style: dashed; }
+.cs-sonar-ring.ring-inner { inset: 38%; }
+.cs-sonar-sweep {
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(117, 240, 221, 0) 0 76%, rgba(117, 240, 221, .03) 82%, rgba(117, 240, 221, .32) 99%, rgba(117, 240, 221, .65));
+  animation: cs-signal-sweep 8s linear infinite;
+  mask-image: radial-gradient(circle, transparent 0 10%, #000 11%);
+}
+.cs-sonar-blip {
+  --blip-color: #8bcff5;
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 2px solid rgba(5, 13, 20, .9);
+  border-radius: 50%;
+  background: var(--blip-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--blip-color) 14%, transparent), 0 0 16px var(--blip-color);
+  transform: translate(-50%, -50%);
+}
+.cs-sonar-blip.critical { --blip-color: #ff6b7a; width: 11px; height: 11px; }
+.cs-sonar-blip.error { --blip-color: #ff9d72; }
+.cs-sonar-blip.warning { --blip-color: #ffcf70; }
+.cs-sonar-blip.info { --blip-color: #68c9ff; }
+.cs-credit-meter { position: relative; z-index: 2; width: 46%; aspect-ratio: 1; display: grid; place-content: center; justify-items: center; border: 1px solid color-mix(in srgb, var(--credit-accent) 34%, transparent); border-radius: 50%; background: radial-gradient(circle at 38% 28%, #172737, #09121d 68%); box-shadow: 0 0 42px color-mix(in srgb, var(--credit-accent) 18%, transparent); text-align: center; }
+.cs-credit-authority { color: #9aafc2; font: 800 10px/1.2 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.cs-credit-meter strong { margin: 6px 0 2px; color: #f4f8fb; font-size: clamp(48px, 5vw, 76px); font-variant-numeric: tabular-nums; line-height: .9; letter-spacing: -.07em; text-shadow: 0 0 26px color-mix(in srgb, var(--credit-accent) 22%, transparent); }
+.cs-credit-meter small { color: #718397; font: 700 10px/1 ui-monospace, monospace; letter-spacing: .12em; }
+.cs-credit-story { min-width: 0; }
+.cs-credit-grade-line { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 15px; }
+.cs-credit-grade-line > span { color: #7f91a5; font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.cs-credit-grade-line strong { color: var(--credit-accent); font-size: 54px; line-height: .8; }
+.cs-credit-grade-line b { color: #dce6ed; font-size: 14px; font-weight: 750; }
+.cs-credit-story h1 { margin: 0; color: #f4f8fb; font-size: clamp(30px, 3.2vw, 48px); line-height: 1.02; letter-spacing: -.045em; }
+.cs-credit-story > p { max-width: 650px; margin: 15px 0 0; color: #a9b7c5; font-size: 13px; line-height: 1.65; }
+.cs-credit-movement { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 17px; color: #8191a3; font-size: 11px; }
+.cs-credit-movement .positive { color: #65e5ad; }
+.cs-credit-movement .negative { color: #ff8792; }
+.cs-credit-movement .neutral { color: #a9b7c5; }
+.cs-credit-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 23px; }
+.cs-credit-actions .cs-button { min-height: 44px; }
+.cs-credit-signals { display: grid; gap: 9px; }
+.cs-credit-signals > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; min-height: 64px; padding: 11px 13px; border: 1px solid rgba(255, 255, 255, .07); border-left: 3px solid #68c9ff; border-radius: 10px; background: rgba(255, 255, 255, .025); }
+.cs-credit-signals > div.critical { border-left-color: #ff6b7a; }
+.cs-credit-signals > div.error { border-left-color: #ff9d72; }
+.cs-credit-signals > div.warning { border-left-color: #ffcf70; }
+.cs-credit-signals span { align-self: end; color: #9baabc; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.cs-credit-signals strong { grid-row: 1 / 3; grid-column: 2; align-self: center; color: #edf4f8; font-size: 27px; font-variant-numeric: tabular-nums; }
+.cs-credit-signals small { color: #65778b; font-size: 10px; }
+.cs-credit-ledger { position: relative; z-index: 1; display: grid; grid-template-columns: 1.4fr .8fr .8fr .8fr; border-top: 1px solid rgba(117, 240, 221, .13); background: rgba(4, 9, 16, .56); }
+.cs-credit-ledger > span { min-width: 0; padding: 15px 20px; border-right: 1px solid rgba(255, 255, 255, .055); }
+.cs-credit-ledger > span:last-child { border-right: 0; }
+.cs-credit-ledger small, .cs-credit-ledger strong { display: block; }
+.cs-credit-ledger small { margin-bottom: 4px; color: #687b8f; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.cs-credit-ledger strong { overflow: hidden; color: #c9d5df; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+.cs-overview-priorities { padding: 20px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 18px; background: rgba(17, 24, 38, .82); box-shadow: 0 20px 45px rgba(0, 0, 0, .15), inset 0 1px rgba(255, 255, 255, .055); }
+.cs-overview-priorities h2 { margin: 4px 0 0; font-size: 20px; }
+.cs-signal-priority-list { display: grid; gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }
+.cs-signal-priority-list > li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px; border: 1px solid rgba(255, 255, 255, .07); border-radius: 13px; background: linear-gradient(125deg, rgba(117, 240, 221, .04), rgba(8, 13, 21, .5)); }
+.cs-signal-priority-rank { display: grid; align-content: center; align-self: stretch; border-right: 1px solid rgba(255, 255, 255, .07); }
+.cs-signal-priority-rank span { color: #718397; font: 750 9px/1 ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.cs-signal-priority-rank strong { margin-top: 6px; color: #75f0dd; font: 850 24px/1 ui-monospace, monospace; }
+.cs-signal-priority-content { min-width: 0; }
+.cs-signal-priority-heading { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.cs-signal-priority-heading > strong { overflow: hidden; color: #e7eef3; font: 700 12px/1.4 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.cs-signal-priority-content p { margin: 7px 0; color: #b5c1cc; font-size: 12px; line-height: 1.5; }
+.cs-signal-priority-meta { display: flex; flex-wrap: wrap; gap: 7px 14px; color: #7d8da0; font-size: 10px; text-transform: capitalize; }
+.cs-signal-priority-meta b { color: #cbd7df; }
+.cs-signal-priority-actions { display: flex; gap: 8px; }
+.cs-signal-priority-actions .cs-button { min-height: 44px; padding-inline: 13px; }
+
+.cs-credit-hero button:focus-visible, .cs-overview-priorities button:focus-visible { outline: 3px solid #9ff8eb; outline-offset: 3px; }
+
+@keyframes cs-signal-sweep { to { transform: rotate(360deg); } }
+
+@media (max-width: 1180px) {
+  .cs-credit-grid { grid-template-columns: minmax(260px, .8fr) minmax(340px, 1.2fr); }
+  .cs-credit-signals { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) {
+  .cs-credit-grid { grid-template-columns: 1fr; justify-items: center; padding: 28px 22px; text-align: center; }
+  .cs-sonar-field { width: min(74vw, 300px); }
+  .cs-credit-story { width: 100%; }
+  .cs-credit-grade-line, .cs-credit-movement, .cs-credit-actions { justify-content: center; }
+  .cs-credit-story > p { margin-inline: auto; }
+  .cs-credit-signals { grid-column: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; text-align: left; }
+  .cs-credit-ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cs-credit-ledger > span:nth-child(2) { border-right: 0; }
+  .cs-signal-priority-list > li { grid-template-columns: 54px minmax(0, 1fr); }
+  .cs-signal-priority-actions { grid-column: 2; }
+}
+@media (max-width: 560px) {
+  .cs-credit-hero { border-radius: 18px; }
+  .cs-credit-grid { padding: 24px 16px; }
+  .cs-sonar-field { width: min(82vw, 260px); }
+  .cs-credit-authority { font-size: 8px; }
+  .cs-credit-meter strong { font-size: 52px; }
+  .cs-credit-story h1 { font-size: 30px; }
+  .cs-credit-actions { display: grid; grid-template-columns: 1fr; }
+  .cs-credit-signals { grid-template-columns: 1fr 1fr; }
+  .cs-credit-ledger { grid-template-columns: 1fr; }
+  .cs-credit-ledger > span { border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, .055); }
+  .cs-credit-ledger > span:last-child { border-bottom: 0; }
+  .cs-overview-priorities { padding: 16px; }
+  .cs-overview-priorities .cs-card-head { align-items: flex-start; gap: 10px; }
+  .cs-signal-priority-list > li { grid-template-columns: 1fr; padding: 14px; }
+  .cs-signal-priority-rank { display: flex; align-items: baseline; gap: 7px; border-right: 0; }
+  .cs-signal-priority-rank strong { margin: 0; font-size: 18px; }
+  .cs-signal-priority-actions { grid-column: auto; display: grid; grid-template-columns: 1fr 1fr; }
+  .cs-signal-priority-heading { align-items: flex-start; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-sonar-sweep { animation: none; transform: rotate(32deg); }
+  .cs-score-orbit::after { animation: none; }
+}

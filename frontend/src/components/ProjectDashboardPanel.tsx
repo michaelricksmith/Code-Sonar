@@ -27,13 +27,26 @@ function riskRank(finding: Finding): number {
   return severity * finding.debt_points * finding.confidence;
 }
 
-export function ProjectDashboardPanel() {
+interface ProjectDashboardPanelProps {
+  activeProjectId?: string | null;
+  onProjectContextChange?: (project: ProjectRecord, dashboard: ProjectDashboard) => void;
+  onScanComplete?: (project: ProjectRecord, result: ScanResponse, dashboard: ProjectDashboard) => void;
+  onDriftLoaded?: (drift: DriftResult) => void;
+}
+
+export function ProjectDashboardPanel({
+  activeProjectId = null,
+  onProjectContextChange,
+  onScanComplete,
+  onDriftLoaded,
+}: ProjectDashboardPanelProps) {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [dashboard, setDashboard] = useState<ProjectDashboard | null>(null);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [drift, setDrift] = useState<DriftResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [githubStatus, setGitHubStatus] = useState<GitHubConnectionStatus | null>(null);
   const [githubAppStatus, setGitHubAppStatus] = useState<GitHubAppStatus | null>(null);
@@ -71,15 +84,26 @@ export function ProjectDashboardPanel() {
   }, []);
 
   useEffect(() => {
+    if (activeProjectId && projects.some((project) => project.project_id === activeProjectId)) {
+      setProjectId(activeProjectId);
+    }
+  }, [activeProjectId, projects]);
+
+  useEffect(() => {
     if (!projectId) {
       setDashboard(null);
       return;
     }
     setError(null);
+    setDashboardLoading(true);
     fetchProjectDashboard(projectId)
-      .then(setDashboard)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [projectId]);
+      .then((nextDashboard) => {
+        setDashboard(nextDashboard);
+        onProjectContextChange?.(nextDashboard.project, nextDashboard);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setDashboardLoading(false));
+  }, [projectId, onProjectContextChange]);
 
   const latest = scanResult ?? dashboard?.latest_scan ?? null;
   const topFindings = useMemo(() => {
@@ -134,7 +158,9 @@ export function ProjectDashboardPanel() {
       await refreshProjects(project.project_id);
       const result = await scanProject(project.project_id);
       setScanResult(result);
-      setDashboard(await fetchProjectDashboard(project.project_id));
+      const nextDashboard = await fetchProjectDashboard(project.project_id);
+      setDashboard(nextDashboard);
+      onScanComplete?.(project, result, nextDashboard);
       setGitHubRepositories([]);
       setSelectedGitHubRepo("");
     } catch (e) {
@@ -152,7 +178,9 @@ export function ProjectDashboardPanel() {
     try {
       const result = await scanProject(projectId);
       setScanResult(result);
-      setDashboard(await fetchProjectDashboard(projectId));
+      const nextDashboard = await fetchProjectDashboard(projectId);
+      setDashboard(nextDashboard);
+      onScanComplete?.(nextDashboard.project, result, nextDashboard);
       await refreshProjects(projectId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -165,7 +193,9 @@ export function ProjectDashboardPanel() {
     if (!projectId) return;
     setError(null);
     try {
-      setDrift(await fetchProjectDrift(projectId));
+      const nextDrift = await fetchProjectDrift(projectId);
+      setDrift(nextDrift);
+      onDriftLoaded?.(nextDrift);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -300,6 +330,7 @@ export function ProjectDashboardPanel() {
                 value={projectId}
                 onChange={(e) => {
                   setProjectId(e.target.value);
+                  setDashboard(null);
                   setScanResult(null);
                   setDrift(null);
                 }}
@@ -332,7 +363,11 @@ export function ProjectDashboardPanel() {
             </div>
           </div>
 
-          {dashboard && (
+          {dashboardLoading ? (
+            <div className="mt-5 rounded-md border border-slate-800 bg-slate-900/50 p-4 text-sm text-slate-400" role="status">
+              Loading the selected repository baseline…
+            </div>
+          ) : dashboard && (
             <div className="mt-5 space-y-5">
               <div className="flex flex-wrap gap-2 text-xs text-slate-400">
                 <span className="rounded bg-slate-900 px-2 py-1">{dashboard.project.full_name}</span>

@@ -11,6 +11,10 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Unified local and managed GitHub repository selection into one active frontend
+  context shared by Overview, Findings, Risk Map, History, Ask Sonar, and
+  Remediations. Persisted project baselines retain the backend's deterministic
+  score and expose explicit empty states when live-only hotspot data is absent.
 - Added explicit per-analyzer execution status, scoring-version provenance in
   scan/history payloads, backward-compatible legacy history loading, and a
   versioned blinded-label benchmark scaffold.

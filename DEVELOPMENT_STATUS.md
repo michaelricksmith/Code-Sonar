@@ -18,6 +18,12 @@
 
 ## Current verified state (2026-08-31)
 
+- The frontend now has one active repository and scan baseline across the
+  credit report, findings, risk, history, Ask Sonar, and remediation surfaces.
+  Managed project selection and scans update that shared context; the former
+  duplicate integration dashboard has been replaced with navigation back to
+  the repository workspace.
+
 - Intelligence UI and credit-report workflow shipped through merge `d73e9ba`.
 - Hotspot same-file finding order made deterministic with regression coverage in `02207ea`.
 - Frontend dependency security completed in `61f086a`; npm audit reports **0 vulnerabilities**.

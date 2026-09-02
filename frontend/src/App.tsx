@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { fetchAnalyzers, fetchDrift, fetchHealth, runScan } from "./api/analyzers";
@@ -10,6 +10,8 @@ import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
 import { ProjectDashboardPanel } from "./components/ProjectDashboardPanel";
+import { fetchProjectDrift } from "./api/projects";
+import type { ProjectDashboard, ProjectRecord } from "./api/projects";
 import { RepositoryGateway } from "./components/RepositoryGateway";
 import { RiskHotspots } from "./components/RiskHotspots";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
@@ -20,6 +22,7 @@ const DEFAULT_SORT: SortState = { key: "severity", direction: "desc" };
 const SEVERITY_WEIGHT = { info: 1, warning: 2, error: 4, critical: 8 } as const;
 
 type PageId = "overview" | "repositories" | "findings" | "risk" | "history" | "remediations" | "integrations" | "settings";
+type ActiveRepository = { kind: "local"; label: string } | { kind: "project"; project: ProjectRecord };
 
 const NAV = [
   ["Workspace", [["overview", "Overview", "⌂"], ["repositories", "Repositories", "◇"]]],
@@ -51,10 +54,38 @@ function matchesSearch(finding: Finding, search: string): boolean {
     .some((value) => value.toLowerCase().includes(needle));
 }
 
+function dashboardScan(project: ProjectRecord, dashboard: ProjectDashboard): ScanResponse | null {
+  const latest = dashboard.latest_scan;
+  if (!latest) return null;
+  return {
+    repository: project.full_name,
+    scan_id: latest.scan_id,
+    scanned_at: latest.scanned_at,
+    score: latest.score,
+    grade: latest.grade,
+    total_debt_points: latest.total_debt_points,
+    finding_count: latest.finding_count,
+    category_scores: latest.category_scores as ScanResponse["category_scores"],
+    severity_distribution: latest.severity_distribution as ScanResponse["severity_distribution"],
+    findings_by_category: latest.findings_by_category as ScanResponse["findings_by_category"],
+    findings_source_breakdown: latest.findings_source_breakdown as ScanResponse["findings_source_breakdown"],
+    findings: latest.findings,
+    summary: {
+      total_findings: latest.finding_count,
+      total_debt_points: latest.total_debt_points,
+      score: latest.score,
+      grade: latest.grade,
+      by_severity: latest.severity_distribution as ScanResponse["severity_distribution"],
+      by_category: latest.findings_by_category as ScanResponse["findings_by_category"],
+    },
+  };
+}
+
 function App() {
   const [page, setPage] = useState<PageId>("overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [repoPath, setRepoPath] = useState(DEFAULT_REPO);
+  const [activeRepository, setActiveRepository] = useState<ActiveRepository | null>(null);
   const [health, setHealth] = useState("checking…");
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +152,7 @@ function App() {
     try {
       const data = await runScan({ repo_path: repoPath });
       setResult(data);
+      setActiveRepository({ kind: "local", label: data.repository });
       setPage("overview");
       fetchDrift(repoPath).then(setDrift).catch(() => setDrift(null));
     } catch (scanError) {
@@ -134,7 +166,9 @@ function App() {
     setDriftLoading(true);
     setDriftError(null);
     try {
-      setDrift(await fetchDrift(repoPath));
+      setDrift(activeRepository?.kind === "project"
+        ? await fetchProjectDrift(activeRepository.project.project_id)
+        : await fetchDrift(repoPath));
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : String(loadError);
       setDriftError(message.includes("HTTP 400") || message.includes("HTTP 404") ? "Run at least two scans to compute drift." : message);
@@ -162,13 +196,39 @@ function App() {
     setPage("findings");
   }
 
+  const activateProjectContext = useCallback((project: ProjectRecord, dashboard: ProjectDashboard): void => {
+    setActiveRepository({ kind: "project", project });
+    setResult(dashboardScan(project, dashboard));
+    setSelected(null);
+    setFileFilter(null);
+    setDrift(null);
+    setDriftError(null);
+    setAnswer(null);
+  }, []);
+
+  const acceptProjectScan = useCallback((project: ProjectRecord, scanResult: ScanResponse): void => {
+    setActiveRepository({ kind: "project", project });
+    setResult(scanResult);
+    setSelected(null);
+    setFileFilter(null);
+    setDrift(null);
+    setDriftError(null);
+    setAnswer(null);
+    setPage("overview");
+  }, []);
+
+  const activeLabel = activeRepository?.kind === "project"
+    ? activeRepository.project.full_name
+    : activeRepository?.label ?? "No repository selected";
+  const activeProjectId = activeRepository?.kind === "project" ? activeRepository.project.project_id : null;
+
   return (
     <div className={`cs-app ${assistantOpen ? "sonar-open" : ""}`}>
       {mobileNavOpen ? <button className="cs-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} /> : null}
       <aside id="code-sonar-navigation" className={`cs-sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Primary navigation">
         <div>
           <div className="cs-brand"><div className="cs-logo"><span /></div><div><strong>Code Sonar</strong><small>Code health intelligence</small></div></div>
-          <div className="cs-sidebar-repo"><span className="cs-live-dot" /><div><strong>{repoName(repoPath)}</strong><small>{result ? `${result.score} · ${result.grade}` : "No baseline yet"}</small></div></div>
+          <div className="cs-sidebar-repo"><span className={result ? "cs-live-dot" : "cs-live-dot idle"} /><div><strong>{repoName(activeLabel)}</strong><small>{result ? `${result.score} · ${result.grade}` : "No active baseline"}</small></div></div>
           {NAV.map(([group, items]) => (
             <div className="cs-nav-group" key={group}>
               <div className="cs-nav-label">{group}</div>
@@ -190,30 +250,30 @@ function App() {
         <div className="cs-telemetry"><span><i /> LIVE ANALYSIS</span><span>DETERMINISTIC ENGINE</span><span>{result ? `${result.finding_count} SIGNALS` : "AWAITING BASELINE"}</span><span>ML ADVISORY ONLY</span></div>
         <header className="cs-topbar">
           <button className="cs-menu-button" type="button" aria-label="Open navigation" aria-controls="code-sonar-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><span /><span /><span /></button>
-          <div><div className="cs-breadcrumb">Workspace / {repoName(repoPath)}</div><div className="cs-topbar-title">{pageTitle(page)}</div></div>
+          <div><div className="cs-breadcrumb">Workspace / {repoName(activeLabel)}</div><div className="cs-topbar-title">{pageTitle(page)}</div></div>
           <div className="cs-topbar-actions">
             {result ? <div className={`cs-score-chip ${scoreTone(result.score)}`}><span>{result.score}</span><small>{result.grade}</small></div> : null}
             <button className="cs-button ghost" onClick={() => setAssistantOpen(true)}>Ask Sonar</button>
-            <button className="cs-button primary" onClick={scan} disabled={scanning || !repoPath.trim()}>{scanning ? "Scanning…" : "Run scan"}</button>
+            <button className="cs-button primary" onClick={activeRepository?.kind === "project" ? () => setPage("repositories") : scan} disabled={scanning || (activeRepository?.kind !== "project" && !repoPath.trim())}>{scanning ? "Scanning…" : activeRepository?.kind === "project" ? "Manage scan" : "Run scan"}</button>
           </div>
         </header>
 
         <main className="cs-content">
           {error ? <Notice tone="danger" title="Scan failed">{error}</Notice> : null}
 
-          {page === "overview" ? <Overview result={result} repoPath={repoPath} setRepoPath={setRepoPath} scanning={scanning} drift={drift} priorities={priorities} scan={scan} select={setSelected} showFindings={showFindings} openSonar={() => setAssistantOpen(true)} openRepositories={() => setPage("repositories")} /> : null}
+          {page === "overview" ? activeRepository?.kind === "project" && !result ? <ContextEmpty title="Project connected; baseline required" detail="Run the active managed project to unlock its Code Sonar workspace." action={() => setPage("repositories")} actionLabel="Run project scan" /> : <Overview result={result} repoPath={repoPath} setRepoPath={setRepoPath} scanning={scanning} drift={drift} priorities={priorities} scan={scan} select={setSelected} showFindings={showFindings} openSonar={() => setAssistantOpen(true)} openRepositories={() => setPage("repositories")} /> : null}
 
-          {page === "repositories" ? <Page title="Repositories" subtitle="Connect, monitor, and scan repositories from one place."><div className="cs-repository-path-card"><span className="cs-kicker">Local workspace</span><h3>Scan a local repository</h3><p>Use a local checkout for development or the GitHub App below for managed monitoring.</p><div className="cs-path-row"><input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} spellCheck={false} /><button className="cs-button primary" onClick={scan} disabled={scanning || !repoPath.trim()}>{scanning ? "Scanning…" : "Scan repository"}</button></div></div><div className="cs-legacy-surface"><ProjectDashboardPanel /></div></Page> : null}
+          {page === "repositories" ? <Page title="Repositories" subtitle="Choose the repository context used throughout Code Sonar."><ActiveContext label={activeLabel} result={result} /><div className="cs-repository-path-card"><span className="cs-kicker">Local workspace</span><h3>Scan a local repository</h3><p>Use a local checkout for development or the GitHub App below for managed monitoring.</p><div className="cs-path-row"><input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} spellCheck={false} /><button className="cs-button primary" onClick={scan} disabled={scanning || !repoPath.trim()}>{scanning ? "Scanning…" : "Scan repository"}</button></div></div><div className="cs-legacy-surface"><ProjectDashboardPanel activeProjectId={activeProjectId} onProjectContextChange={activateProjectContext} onScanComplete={acceptProjectScan} onDriftLoaded={setDrift} /></div></Page> : null}
 
-          {page === "findings" ? <Page title="Findings" subtitle="Your prioritized technical-debt work queue.">{result ? <div className="cs-inbox-card"><div className="cs-inbox-head"><div><span className="cs-kicker">Issue inbox</span><h3>{filtered.length} findings</h3></div>{fileFilter ? <button className="cs-link-button" onClick={() => setFileFilter(null)}>Clear file filter</button> : null}</div><FilterChips findings={result.findings} analyzers={analyzers} filter={filter} onChange={setFilter} /><div className="cs-table-wrap"><SortableFindingsTable findings={filtered} onSelect={setSelected} sort={sort} onSortChange={setSort} /></div></div> : <NoBaseline scan={scan} scanning={scanning} />}</Page> : null}
+          {page === "findings" ? <Page title="Findings" subtitle="Your prioritized technical-debt work queue.">{result ? <div className="cs-inbox-card"><div className="cs-inbox-head"><div><span className="cs-kicker">Issue inbox</span><h3>{filtered.length} findings</h3></div>{fileFilter ? <button className="cs-link-button" onClick={() => setFileFilter(null)}>Clear file filter</button> : null}</div><FilterChips findings={result.findings} analyzers={analyzers} filter={filter} onChange={setFilter} /><div className="cs-table-wrap"><SortableFindingsTable findings={filtered} onSelect={setSelected} sort={sort} onSortChange={setSort} /></div></div> : <NoBaseline scan={activeRepository?.kind === "project" ? () => setPage("repositories") : scan} scanning={scanning} />}</Page> : null}
 
-          {page === "risk" ? <Page title="Risk Map" subtitle="Where debt and analyzer agreement are concentrated.">{result?.top_hotspots?.length ? <div className="cs-risk-surface"><RiskHotspots hotspots={result.top_hotspots} hotspotSummary={{ total_files: result.top_hotspots.length, files_with_findings: new Set(result.findings.map((finding) => finding.file_path)).size, total_findings: result.finding_count, total_debt: result.total_debt_points }} findings={result.findings} onFilterByFile={showFindings} activeFileFilter={fileFilter} /></div> : <NoBaseline scan={scan} scanning={scanning} />}</Page> : null}
+          {page === "risk" ? <Page title="Risk Map" subtitle="Where debt and analyzer agreement are concentrated.">{result?.top_hotspots?.length ? <div className="cs-risk-surface"><RiskHotspots hotspots={result.top_hotspots} hotspotSummary={{ total_files: result.top_hotspots.length, files_with_findings: new Set(result.findings.map((finding) => finding.file_path)).size, total_findings: result.finding_count, total_debt: result.total_debt_points }} findings={result.findings} onFilterByFile={showFindings} activeFileFilter={fileFilter} /></div> : result ? <ContextEmpty title="Risk map needs a fresh analysis" detail="This persisted baseline does not include hotspot aggregation. Run the active project again to rebuild it from live analyzer output." action={() => setPage("repositories")} actionLabel="Manage active scan" /> : <NoBaseline scan={activeRepository?.kind === "project" ? () => setPage("repositories") : scan} scanning={scanning} />}</Page> : null}
 
           {page === "history" ? <Page title="History" subtitle="See whether the codebase is getting healthier or accumulating debt."><div className="cs-history-card"><div className="cs-history-head"><div><span className="cs-kicker">Scan-to-scan movement</span><h3>Drift analysis</h3><p>New, resolved, improved, and worsened findings against the previous baseline.</p></div><button className="cs-button primary" onClick={compareDrift} disabled={!result || driftLoading}>{driftLoading ? "Comparing…" : "Compare previous scan"}</button></div>{driftError ? <Notice tone="warning" title="Drift unavailable">{driftError}</Notice> : null}{drift ? <DriftView drift={drift} /> : <div className="cs-empty-panel">Run a second scan to unlock change intelligence.</div>}</div></Page> : null}
 
-          {page === "remediations" ? <Page title="Remediations" subtitle="Move from finding to validated fix without giving up score authority.">{result ? <div className="cs-remediation-layout"><section className="cs-flow-card"><span className="cs-kicker">Agent execution loop</span><h3>Review → approve → execute → test → rescan</h3><div className="cs-flow-steps">{[["01","Choose finding","Select a production finding with clear evidence."],["02","Review plan","Sonar generates a bounded remediation plan."],["03","Approve execution","No code changes occur without explicit approval."],["04","Validate outcome","Tests and a deterministic rescan measure the result."]].map(([n,t,c]) => <div key={n}><b>{n}</b><span><strong>{t}</strong><small>{c}</small></span></div>)}</div></section><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">Ready to investigate</span><h3>Highest-impact findings</h3></div></div><PriorityList findings={priorities} select={setSelected} openSonar={() => setAssistantOpen(true)} /></section></div> : <NoBaseline scan={scan} scanning={scanning} />}</Page> : null}
+          {page === "remediations" ? <Page title="Remediations" subtitle="Move from finding to validated fix without giving up score authority.">{result ? <div className="cs-remediation-layout"><section className="cs-flow-card"><span className="cs-kicker">Agent execution loop</span><h3>Review → approve → execute → test → rescan</h3><div className="cs-flow-steps">{[["01","Choose finding","Select a production finding with clear evidence."],["02","Review plan","Sonar generates a bounded remediation plan."],["03","Approve execution","No code changes occur without explicit approval."],["04","Validate outcome","Tests and a deterministic rescan measure the result."]].map(([n,t,c]) => <div key={n}><b>{n}</b><span><strong>{t}</strong><small>{c}</small></span></div>)}</div></section><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">Ready to investigate</span><h3>Highest-impact findings</h3></div></div><PriorityList findings={priorities} select={setSelected} openSonar={() => setAssistantOpen(true)} /></section></div> : <NoBaseline scan={activeRepository?.kind === "project" ? () => setPage("repositories") : scan} scanning={scanning} />}</Page> : null}
 
-          {page === "integrations" ? <Page title="Integrations" subtitle="Connect source control and keep repository intelligence current."><div className="cs-integration-grid"><section className="cs-integration-card featured"><div className="cs-integration-mark">GH</div><div><span className="cs-kicker">Source control</span><h3>GitHub App</h3><p>Managed repository access, default-branch monitoring, and deterministic scans on pushes and merged pull requests.</p><div className="cs-integration-status"><i className={health === "ok" ? "online" : ""} /> Configuration is managed securely by the backend</div></div></section><section className="cs-integration-card"><div className="cs-integration-mark local">//</div><div><span className="cs-kicker">Developer workspace</span><h3>Local repositories</h3><p>Scan a checkout directly during development without changing the repository.</p><button className="cs-button ghost" onClick={() => setPage("repositories")}>Manage repositories</button></div></section></div><div className="cs-legacy-surface"><ProjectDashboardPanel /></div></Page> : null}
+          {page === "integrations" ? <Page title="Integrations" subtitle="Connect source control and keep repository intelligence current."><div className="cs-integration-grid"><section className="cs-integration-card featured"><div className="cs-integration-mark">GH</div><div><span className="cs-kicker">Source control</span><h3>GitHub App</h3><p>Managed repository access, default-branch monitoring, and deterministic scans on pushes and merged pull requests.</p><div className="cs-integration-status"><i className={health === "ok" ? "online" : ""} /> Configuration is managed securely by the backend</div></div></section><section className="cs-integration-card"><div className="cs-integration-mark local">//</div><div><span className="cs-kicker">Developer workspace</span><h3>Local repositories</h3><p>Scan a checkout directly during development without changing the repository.</p><button className="cs-button ghost" onClick={() => setPage("repositories")}>Manage repositories</button></div></section></div><ContextEmpty title="Repository connections live in one place" detail="Open Repositories to connect GitHub, switch the active project, or run a local checkout without creating a second dashboard state." action={() => setPage("repositories")} actionLabel="Open repositories" /></Page> : null}
 
           {page === "settings" ? <Page title="Engine & Rules" subtitle="Advanced deterministic analysis configuration and runtime visibility."><div className="cs-settings-summary"><Metric label="API" value={health} detail="runtime" /><Metric label="Analyzers" value={String(analyzers.length)} detail="deterministic rules" /><Metric label="Score authority" value="Code Sonar" detail="ML remains advisory" /></div><div className="cs-legacy-surface"><AnalyzerMetadataPanel refreshKey={result ? result.finding_count : undefined} /></div></Page> : null}
         </main>
@@ -284,6 +344,8 @@ function Assistant({ open, status, result, question, answer, asking, error, setQ
 }
 
 function Page({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) { return <div className="cs-page"><div className="cs-page-head"><span className="cs-kicker">Code Sonar</span><h1>{title}</h1><p>{subtitle}</p></div>{children}</div>; }
+function ActiveContext({ label, result }: { label: string; result: ScanResponse | null }) { return <div className="cs-active-context"><div><span className="cs-kicker">Active product context</span><strong>{label}</strong><small>{result?.scan_id ? `Scan ${result.scan_id.slice(0, 8)} · ${new Date(result.scanned_at).toLocaleString()}` : "No deterministic baseline selected"}</small></div><div>{result ? <><b>{result.score}</b><span>{result.grade}</span></> : <span>Awaiting scan</span>}</div></div>; }
+function ContextEmpty({ title, detail, action, actionLabel }: { title: string; detail: string; action: () => void; actionLabel: string }) { return <div className="cs-no-baseline compact"><h2>{title}</h2><p>{detail}</p><button className="cs-button ghost" onClick={action}>{actionLabel}</button></div>; }
 function Metric({ label, value, detail, tone = "normal" }: { label: string; value: string; detail: string; tone?: "normal" | "danger" }) { return <div className={`cs-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
 function NoBaseline({ scan, scanning }: { scan: () => void; scanning: boolean }) { return <div className="cs-no-baseline"><div className="cs-logo large"><span /></div><h2>No baseline yet</h2><p>Run a deterministic scan to unlock this view.</p><button className="cs-button primary" onClick={scan} disabled={scanning}>{scanning ? "Scanning…" : "Run first scan"}</button></div>; }
 function Notice({ tone, title, children }: { tone: "danger" | "warning"; title: string; children: ReactNode }) { return <div className={`cs-notice ${tone}`}><strong>{title}</strong><span>{children}</span></div>; }

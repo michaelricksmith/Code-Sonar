@@ -22,10 +22,12 @@ context boundary and its live API behavior.
 - Tenant-isolation checkpoint: bearer credentials resolve to a server-owned
   tenant identity; projects, scan history, Ask Sonar/remediation plans, and
   GitHub installations deny cross-tenant lookup. A caller tenant header cannot
-  override the credential binding. This is an application-layer checkpoint,
+  override the credential binding. Signed webhooks resolve the tenant only from
+  the stored installation owner and preserve it through queued scans; unknown
+  installations cannot select a project. This is an application-layer checkpoint,
   not the final encrypted production data store.
 
-- Backend: **433 passed, 1 skipped** with 86% measured coverage.
+- Backend: **434 passed, 1 skipped** with 86% measured coverage.
 - Hotspot suite: **18 passed** with 100% engine coverage.
 - Frontend TypeScript/Vite 8 production build: passed.
 - Frontend ESLint 9 validation: passed.

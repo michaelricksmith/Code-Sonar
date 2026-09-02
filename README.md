@@ -372,6 +372,10 @@ Code Sonar treats secrets as **first-class security concerns**:
   Ask Sonar grounding and remediation plans, and GitHub installations are
   tenant-scoped. The legacy `CODESONAR_API_TOKEN` remains bound to
   `CODESONAR_TENANT_ID` (default `local`) for single-tenant compatibility.
+- Auth-exempt GitHub webhooks derive their tenant only by resolving the signed
+  payload's installation ID against the server-owned installation registry.
+  That binding follows queued scans and scopes webhook job/audit reads. Unknown
+  installations cannot claim or resolve a tenant project.
 - The server refuses to start without a token. Tokenless operation requires
   both `CODESONAR_LOCAL_DEV=1` and a loopback `CODESONAR_HOST`.
 - `CODESONAR_CORS_ORIGINS` is a comma-separated exact origin allowlist. Its

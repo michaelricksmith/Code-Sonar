@@ -14,7 +14,9 @@ without semantic-versioning.
 - Added server-derived tenant identity from unique configured bearer tokens,
   tenant-scoped projects, scan history, Ask Sonar/remediation-plan access and
   GitHub installations, plus cross-tenant denial regression coverage. Caller
-  tenant headers do not influence authorization.
+  tenant headers do not influence authorization. Verified GitHub webhooks bind
+  to the server-owned installation tenant for project lookup and queued work;
+  unknown installations remain unassigned and cannot resolve projects.
 - Unified local and managed GitHub repository selection into one active frontend
   context shared by Overview, Findings, Risk Map, History, Ask Sonar, and
   Remediations. Persisted project baselines retain the backend's deterministic

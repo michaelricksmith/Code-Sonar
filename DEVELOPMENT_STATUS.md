@@ -41,9 +41,11 @@
   `CODESONAR_API_TENANT_TOKENS`. Server-derived tenant identity scopes project,
   scan/history, Ask Sonar/remediation-plan, and GitHub-installation access;
   cross-tenant lookups return not found and caller tenant headers have no
-  authority. Legacy single-token local operation remains compatible.
+  authority. Verified GitHub webhooks derive ownership only from a stored
+  installation ID and carry it into tenant-scoped jobs; unknown installations
+  cannot resolve projects. Legacy single-token local operation remains compatible.
 - Tailwind/PostCSS production compilation restored in `331b611`.
-- Backend verification: **433 passed, 1 skipped**, with 86% measured coverage.
+- Backend verification: **434 passed, 1 skipped**, with 86% measured coverage.
 - Hotspot verification: **18 passed**, hotspot engine at 100% coverage.
 - Frontend TypeScript and Vite 8 production build: passed.
 - Completed work is committed and pushed to `origin/main` after verification.

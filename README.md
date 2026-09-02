@@ -456,3 +456,8 @@ scan a repository, understand the score, identify priority risks, run
 another scan, and understand what changed.
 
 **Status:** READY for private beta.
+
+
+## Repository onboarding
+
+The first-run experience offers three honest entry points: local checkout scanning through the native `POST /api/scan` `repo_path` contract; managed repository connection through the existing GitHub App/project workflow; and a visibly disabled ZIP option marked as coming soon. The onboarding layer preserves the deterministic 300–850 score as the product authority. Ask Sonar and ML remain evidence-grounded advisory layers.

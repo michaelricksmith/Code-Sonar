@@ -333,3 +333,13 @@ Per the Checkpoint 5 closing menu, three candidates remain:
 ---
 
 *This file is updated at every major checkpoint throughout the sprint.*
+
+
+## 2026-09-02 — Original UI integration branch
+
+- Added the visual repository gateway while preserving the production dashboard and API clients.
+- Local onboarding invokes the native `repo_path` scan contract.
+- GitHub onboarding routes into the existing GitHub App/project workflow.
+- ZIP upload is intentionally disabled and labeled coming soon because the backend does not expose secure archive ingestion.
+- The deterministic 300–850 score, findings, hotspots, drift, history, Ask Sonar, and remediation workflows remain intact.
+- Validation is pending the dedicated tester pass; no test result is claimed here.

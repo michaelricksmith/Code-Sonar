@@ -10,6 +10,7 @@ import { DriftView } from "./components/DriftView";
 import { FindingDetailDrawer } from "./components/FindingDetailDrawer";
 import { FilterChips } from "./components/FilterChips";
 import { ProjectDashboardPanel } from "./components/ProjectDashboardPanel";
+import { RepositoryGateway } from "./components/RepositoryGateway";
 import { RiskHotspots } from "./components/RiskHotspots";
 import { SortableFindingsTable } from "./components/SortableFindingsTable";
 
@@ -188,7 +189,7 @@ function App() {
         <main className="cs-content">
           {error ? <Notice tone="danger" title="Scan failed">{error}</Notice> : null}
 
-          {page === "overview" ? <Overview result={result} repoPath={repoPath} setRepoPath={setRepoPath} scanning={scanning} drift={drift} priorities={priorities} scan={scan} select={setSelected} showFindings={showFindings} openSonar={() => setAssistantOpen(true)} /> : null}
+          {page === "overview" ? <Overview result={result} repoPath={repoPath} setRepoPath={setRepoPath} scanning={scanning} drift={drift} priorities={priorities} scan={scan} select={setSelected} showFindings={showFindings} openSonar={() => setAssistantOpen(true)} openRepositories={() => setPage("repositories")} /> : null}
 
           {page === "repositories" ? <Page title="Repositories" subtitle="Connect, monitor, and scan repositories from one place."><div className="cs-repository-path-card"><span className="cs-kicker">Local workspace</span><h3>Scan a local repository</h3><p>Use a local checkout for development or the GitHub App below for managed monitoring.</p><div className="cs-path-row"><input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} spellCheck={false} /><button className="cs-button primary" onClick={scan} disabled={scanning || !repoPath.trim()}>{scanning ? "Scanning…" : "Scan repository"}</button></div></div><div className="cs-legacy-surface"><ProjectDashboardPanel /></div></Page> : null}
 
@@ -213,8 +214,8 @@ function App() {
   );
 }
 
-function Overview({ result, repoPath, setRepoPath, scanning, drift, priorities, scan, select, showFindings, openSonar }: { result: ScanResponse | null; repoPath: string; setRepoPath: (value: string) => void; scanning: boolean; drift: DriftResult | null; priorities: Finding[]; scan: () => void; select: (finding: Finding) => void; showFindings: (path?: string | null) => void; openSonar: () => void }) {
-  if (!result) return <div className="cs-onboarding"><div className="cs-onboarding-copy"><span className="cs-kicker">Your codebase credit report</span><h1>Know the health of your code before technical debt compounds.</h1><p>Attach a repository to establish a deterministic baseline. Code Sonar will score it, rank the highest-risk files, and explain what to fix first.</p><div className="cs-onboarding-input"><input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} spellCheck={false} /><button className="cs-button primary large" onClick={scan} disabled={scanning || !repoPath.trim()}>{scanning ? "Building baseline…" : "Create baseline"}</button></div><div className="cs-trust-row"><span>Deterministic scoring</span><span>Evidence-backed findings</span><span>No silent AI score changes</span></div></div><div className="cs-preview-score"><div><strong>—</strong><small>CODE HEALTH</small></div><p>Your score will appear here after the first scan.</p></div></div>;
+function Overview({ result, repoPath, setRepoPath, scanning, drift, priorities, scan, select, showFindings, openSonar, openRepositories }: { result: ScanResponse | null; repoPath: string; setRepoPath: (value: string) => void; scanning: boolean; drift: DriftResult | null; priorities: Finding[]; scan: () => void; select: (finding: Finding) => void; showFindings: (path?: string | null) => void; openSonar: () => void; openRepositories: () => void }) {
+  if (!result) return <RepositoryGateway repoPath={repoPath} onRepoPathChange={setRepoPath} onLocalScan={scan} onOpenGitHub={openRepositories} scanning={scanning} />;
 
   const breakdown = result.findings_source_breakdown ?? { source: 0, test: 0, fixture: 0 };
   const delta = drift?.summary.score_delta ?? null;

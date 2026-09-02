@@ -129,3 +129,17 @@ in `DEVELOPMENT_STATUS.md`. Highlights:
 - `.github/workflows/ci.yml` 3-job CI (backend ruff + mypy + pytest, frontend tsc + vite, smoke self-scan)
 - CI #1 fix: `0235901` ruff + mypy strict (26 files, +170/−166, zero product behavior change)
 - GitHub repo: `michaelricksmith/code-sonar` (PRIVATE)
+
+
+## [Unreleased] — Original UI integration
+
+### Added
+
+- Space-inspired, reduced-motion-aware first-run repository gateway.
+- Clear local checkout and GitHub App onboarding paths.
+- Honest disabled state for planned ZIP archive ingestion.
+
+### Preserved
+
+- Deterministic 300–850 scoring authority.
+- Native repository API clients, findings, hotspots, drift, history, Ask Sonar, and remediation workflows.

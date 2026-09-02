@@ -11,6 +11,9 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added explicit per-analyzer execution status, scoring-version provenance in
+  scan/history payloads, backward-compatible legacy history loading, and a
+  versioned blinded-label benchmark scaffold.
 - Phase 2 began with a responsive application shell, accessible mobile navigation, and a redesigned real-data credit-score command center. The command center preserves the deterministic 300–850 score, grade, category normalization, findings, debt, severity, priority, repository, and scan metadata from the native scan response.
 
 
@@ -22,6 +25,9 @@ without semantic-versioning.
 - Added `frontend/postcss.config.cjs` so Tailwind utilities compile into production CSS.
 
 ### Fixed
+
+- Prevented partial analyzer runs from silently producing an authoritative
+  score or perfect A grade; incomplete scans now fail closed without a grade.
 
 - Updated `eslint-plugin-react-hooks` from the incompatible 4.6 line to 5.2.0 and added an ESLint 9 flat configuration so the frontend lint command runs without forced or legacy dependency bypasses.
 - Made `contributing_finding_ids` deterministic regardless of finding input order (`02207ea`).

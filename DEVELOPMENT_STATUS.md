@@ -325,6 +325,16 @@ Per the Checkpoint 5 closing menu, three candidates remain:
 
 **Current:** None (CI/auth blockers are explicitly out of scope per Michael's instruction)
 
+## Scoring-accuracy checkpoint (2026-09-02)
+
+- Analyzer execution completeness is explicit and authoritative scoring fails
+  closed when any registered analyzer fails.
+- Scans and history carry scoring version `1.0`; pre-version records remain
+  readable and are marked `legacy-unversioned`.
+- A versioned, empty benchmark scaffold supports exact-grade, within-one-band,
+  and rank-correlation evaluation once blinded expert labels are collected.
+- No scoring weights, debt points, or grade thresholds changed in this checkpoint.
+
 ---
 
 ## Live Checkpoint 6 self-scan (RESTORED state, matches BASELINE)

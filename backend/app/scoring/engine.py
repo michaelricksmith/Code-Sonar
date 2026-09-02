@@ -15,6 +15,8 @@ from typing import Any
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security.path_classifier import FIXTURE, SOURCE, TEST, classify_path
 
+SCORING_VERSION: str = "1.0"
+
 
 class ScoringResult:
     def __init__(
@@ -39,6 +41,7 @@ class ScoringResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "scoring_version": SCORING_VERSION,
             "score": self.score,
             "grade": self.grade,
             "total_debt_points": self.total_debt_points,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator, Sequence, overload
 
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
@@ -61,8 +63,45 @@ def _finding_is_scannable(finding: Finding, repo_path: Path) -> bool:
     return candidate.is_file() and is_safe_to_read(candidate, repo_path)
 
 
-def _scan_path(repo_path: Path) -> list[Finding]:
-    """Run analyzers and return the canonical, security-filtered finding set."""
+@dataclass(frozen=True)
+class AnalyzerExecutionStatus:
+    analyzer: str
+    status: str
+    finding_count: int
+    error_type: str | None = None
+
+
+@dataclass(frozen=True)
+class ScanExecutionResult(Sequence[Finding]):
+    """Canonical findings plus explicit analyzer-completeness evidence."""
+
+    findings: tuple[Finding, ...]
+    analyzers: tuple[AnalyzerExecutionStatus, ...]
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.analyzers) and all(
+            item.status == "completed" for item in self.analyzers
+        )
+
+    @overload
+    def __getitem__(self, index: int) -> Finding: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> tuple[Finding, ...]: ...
+
+    def __getitem__(self, index: int | slice) -> Finding | tuple[Finding, ...]:
+        return self.findings[index]
+
+    def __len__(self) -> int:
+        return len(self.findings)
+
+    def __iter__(self) -> Iterator[Finding]:
+        return iter(self.findings)
+
+
+def _scan_path(repo_path: Path) -> ScanExecutionResult:
+    """Run analyzers and return findings with explicit execution status."""
     file_count = 0
     total_size = 0
     for path in repo_path.rglob("*"):
@@ -76,20 +115,38 @@ def _scan_path(repo_path: Path) -> list[Finding]:
         assert_within_scan_limits(file_count, total_size)
 
     findings: list[Finding] = []
+    statuses: list[AnalyzerExecutionStatus] = []
     for analyzer in get_registered_analyzers():
         try:
             produced = analyzer.analyze(repo_path)
-        except Exception:
+        except Exception as exc:
+            statuses.append(
+                AnalyzerExecutionStatus(
+                    analyzer=analyzer.name,
+                    status="failed",
+                    finding_count=0,
+                    error_type=type(exc).__name__,
+                )
+            )
             continue
+        accepted = 0
         for finding in produced:
             if not _finding_is_scannable(finding, repo_path):
                 continue
             finding.evidence = truncate_evidence(redact_secrets(finding.evidence or ""))
             findings.append(finding)
-    return findings
+            accepted += 1
+        statuses.append(
+            AnalyzerExecutionStatus(
+                analyzer=analyzer.name,
+                status="completed",
+                finding_count=accepted,
+            )
+        )
+    return ScanExecutionResult(tuple(findings), tuple(statuses))
 
 
-def scan_repository(repo_path: object) -> list[Finding]:
-    """Validate, scan, and return aggregated canonical findings."""
+def scan_repository(repo_path: object) -> ScanExecutionResult:
+    """Validate, scan, and return findings plus analyzer completeness."""
     resolved = validate_repo_path(repo_path)
     return _scan_path(resolved)

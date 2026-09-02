@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.models.finding import Finding
-from app.scoring.engine import ScoringResult
+from app.scoring.engine import SCORING_VERSION, ScoringResult
 from app.security import redact_secrets
 
 SCHEMA_VERSION: str = "1.0"
@@ -157,6 +157,7 @@ class ScanRecord:
         "repository_path",
         "scanned_at",
         "schema_version",
+        "scoring_version",
         "score",
         "grade",
         "total_debt_points",
@@ -184,12 +185,14 @@ class ScanRecord:
         findings_by_category: dict[str, int],
         findings_source_breakdown: dict[str, int],
         findings: list[FindingSnapshot],
+        scoring_version: str = "legacy-unversioned",
     ) -> None:
         self.scan_id = scan_id
         self.repository_id = repository_id
         self.repository_path = repository_path
         self.scanned_at = scanned_at
         self.schema_version = schema_version
+        self.scoring_version = scoring_version
         self.score = score
         self.grade = grade
         self.total_debt_points = total_debt_points
@@ -207,6 +210,7 @@ class ScanRecord:
             "repository_path": self.repository_path,
             "scanned_at": self.scanned_at,
             "schema_version": self.schema_version,
+            "scoring_version": self.scoring_version,
             "score": self.score,
             "grade": self.grade,
             "total_debt_points": self.total_debt_points,
@@ -226,6 +230,8 @@ class ScanRecord:
         record.repository_path = data["repository_path"]
         record.scanned_at = data["scanned_at"]
         record.schema_version = data["schema_version"]
+        # Records written before scoring-version tracking remain readable.
+        record.scoring_version = data.get("scoring_version", "legacy-unversioned")
         record.score = int(data["score"])
         record.grade = data["grade"]
         record.total_debt_points = int(data["total_debt_points"])
@@ -263,6 +269,7 @@ def build_scan_record(
         repository_path=repository_path,
         scanned_at=scanned_at or _utcnow_iso(),
         schema_version=SCHEMA_VERSION,
+        scoring_version=SCORING_VERSION,
         score=scoring.score,
         grade=scoring.grade,
         total_debt_points=scoring.total_debt_points,

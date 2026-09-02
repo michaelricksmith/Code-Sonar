@@ -14,7 +14,7 @@ from app.ml.outcomes import JsonlOutcomeStore, RemediationOutcome
 from app.ml.outcomes.labels import remediation_success_label
 from app.models.finding import Finding
 from app.scoring.engine import calculate_score
-from app.services.repository import scan_repository
+from app.services.repository import ScanExecutionResult, scan_repository
 
 ValidationKind = Literal["build", "tests", "other"]
 
@@ -51,7 +51,7 @@ class ValidationProcessResult:
 
 
 ValidationRunner = Callable[[list[str], Path, float], ValidationProcessResult]
-Scanner = Callable[[Path], list[Finding]]
+Scanner = Callable[[Path], list[Finding] | ScanExecutionResult]
 
 
 def _default_runner(args: list[str], cwd: Path, timeout: float) -> ValidationProcessResult:
@@ -217,7 +217,20 @@ class RemediationValidationService:
         build_passed = self._aggregate_kind(command_tuple, "build")
         tests_passed = self._aggregate_kind(command_tuple, "tests")
 
-        findings = self.scanner(workspace)
+        scan_output = self.scanner(workspace)
+        if isinstance(scan_output, ScanExecutionResult):
+            if not scan_output.complete:
+                failed = ", ".join(
+                    status.analyzer
+                    for status in scan_output.analyzers
+                    if status.status == "failed"
+                )
+                raise RuntimeError(
+                    f"Remediation rescan incomplete; failed analyzers: {failed}"
+                )
+            findings = list(scan_output.findings)
+        else:
+            findings = scan_output
         scoring = calculate_score(findings)
         after = build_scan_record(
             repository_id=before.repository_id,

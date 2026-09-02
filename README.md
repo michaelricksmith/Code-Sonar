@@ -5,6 +5,8 @@
 Copyright © 2026 Michael Smith. Code Sonar—including its source code, product design, specifications, branding, and documentation—is proprietary intellectual property. All rights reserved unless Michael Smith expressly grants otherwise in writing.
 
 > **Credit report for your codebase.**
+- Phase 2 began with a responsive application shell, accessible mobile navigation, and a redesigned real-data credit-score command center. The command center preserves the deterministic 300–850 score, grade, category normalization, findings, debt, severity, priority, repository, and scan metadata from the native scan response.
+
 
 Code Sonar scans a software repository, produces a single credit-score-style
 metric (300–850), and tells you *why* it is what it is — which files

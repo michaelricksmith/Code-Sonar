@@ -53,6 +53,7 @@ function matchesSearch(finding: Finding, search: string): boolean {
 
 function App() {
   const [page, setPage] = useState<PageId>("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [repoPath, setRepoPath] = useState(DEFAULT_REPO);
   const [health, setHealth] = useState("checking…");
   const [scanning, setScanning] = useState(false);
@@ -81,6 +82,15 @@ function App() {
   useEffect(() => {
     fetchAnalyzers().then(setAnalyzers).catch(() => setAnalyzers([]));
   }, [result]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mobileNavOpen]);
 
   const filtered = useMemo(() => {
     if (!result) return [];
@@ -154,7 +164,8 @@ function App() {
 
   return (
     <div className={`cs-app ${assistantOpen ? "sonar-open" : ""}`}>
-      <aside className="cs-sidebar">
+      {mobileNavOpen ? <button className="cs-nav-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} /> : null}
+      <aside id="code-sonar-navigation" className={`cs-sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Primary navigation">
         <div>
           <div className="cs-brand"><div className="cs-logo"><span /></div><div><strong>Code Sonar</strong><small>Code health intelligence</small></div></div>
           <div className="cs-sidebar-repo"><span className="cs-live-dot" /><div><strong>{repoName(repoPath)}</strong><small>{result ? `${result.score} · ${result.grade}` : "No baseline yet"}</small></div></div>
@@ -162,7 +173,7 @@ function App() {
             <div className="cs-nav-group" key={group}>
               <div className="cs-nav-label">{group}</div>
               {items.map(([id, label, icon]) => (
-                <button key={id} className={`cs-nav-item ${page === id ? "active" : ""}`} onClick={() => setPage(id as PageId)}>
+                <button key={id} className={`cs-nav-item ${page === id ? "active" : ""}`} onClick={() => { setPage(id as PageId); setMobileNavOpen(false); }}>
                   <span className="cs-nav-icon">{icon}</span><span>{label}</span>{id === "findings" && result ? <em>{result.finding_count}</em> : null}
                 </button>
               ))}
@@ -178,6 +189,7 @@ function App() {
       <section className="cs-workspace">
         <div className="cs-telemetry"><span><i /> LIVE ANALYSIS</span><span>DETERMINISTIC ENGINE</span><span>{result ? `${result.finding_count} SIGNALS` : "AWAITING BASELINE"}</span><span>ML ADVISORY ONLY</span></div>
         <header className="cs-topbar">
+          <button className="cs-menu-button" type="button" aria-label="Open navigation" aria-controls="code-sonar-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><span /><span /><span /></button>
           <div><div className="cs-breadcrumb">Workspace / {repoName(repoPath)}</div><div className="cs-topbar-title">{pageTitle(page)}</div></div>
           <div className="cs-topbar-actions">
             {result ? <div className={`cs-score-chip ${scoreTone(result.score)}`}><span>{result.score}</span><small>{result.grade}</small></div> : null}
@@ -223,7 +235,43 @@ function Overview({ result, repoPath, setRepoPath, scanning, drift, priorities, 
   const progress = Math.max(0, Math.min(100, ((result.score - 300) / 550) * 100));
   const ringStyle = { "--score-progress": `${progress}%` } as CSSProperties;
 
-  return <div className="cs-overview"><section className="cs-score-hero"><div className={`cs-score-orbit ${scoreTone(result.score)}`} style={ringStyle}><div><strong>{result.score}</strong><span>850</span><small>CODE HEALTH</small></div></div><div className="cs-score-copy"><span className="cs-kicker">Current baseline</span><div className={`cs-grade-line ${scoreTone(result.score)}`}><strong>{result.grade}</strong><span>{gradeLabel(result.grade)}</span></div><p>{scoreSummary(result.score, result.severity_distribution.critical)}</p><div className="cs-score-meta">{delta !== null ? <span className={delta >= 0 ? "positive" : "negative"}>{delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} since previous scan</span> : null}<span>Scanned {new Date(result.scanned_at).toLocaleString()}</span></div></div><div className="cs-hero-actions"><button className="cs-button primary" onClick={openSonar}>Ask Sonar what this means</button><button className="cs-button ghost" onClick={() => showFindings()}>View all findings</button></div></section><section className="cs-metric-strip"><Metric label="Critical risks" value={String(result.severity_distribution.critical)} detail="needs attention" tone={result.severity_distribution.critical ? "danger" : "normal"} /><Metric label="Technical debt" value={String(result.total_debt_points)} detail="debt points" /><Metric label="Findings" value={String(result.finding_count)} detail={`${breakdown.source} source · ${breakdown.test} test`} /><Metric label="Files at risk" value={String(new Set(result.findings.map((finding) => finding.file_path)).size)} detail="with findings" /></section><div className="cs-overview-grid"><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">What to fix first</span><h3>Top priorities</h3></div><button className="cs-link-button" onClick={() => showFindings()}>View all {result.finding_count} →</button></div><PriorityList findings={priorities} select={select} openSonar={openSonar} /></section><section className="cs-category-card"><div className="cs-card-head"><div><span className="cs-kicker">Score drivers</span><h3>Category health</h3></div></div><div className="cs-category-stack">{categories.map(([category, score]) => <div className="cs-category-row" key={category}><div><span>{category}</span><strong>{score}</strong></div><div className="cs-category-bar"><span style={{ width: `${Math.max(0, Math.min(100, ((score - 300) / 550) * 100))}%` }} /></div><small>{result.findings_by_category[category as keyof typeof result.findings_by_category]} findings</small></div>)}</div></section></div></div>;
+  return <div className="cs-overview">
+    <section className="cs-command-center">
+      <div className="cs-command-grid">
+        <div className="cs-score-station">
+          <div className="cs-score-scale"><span>300</span><span>Code Sonar score</span><span>850</span></div>
+          <div className={`cs-score-orbit ${scoreTone(result.score)}`} style={ringStyle}>
+            <div><strong>{result.score}</strong><span>/ 850</span><small>DETERMINISTIC SCORE</small></div>
+          </div>
+          <div className={`cs-grade-badge ${scoreTone(result.score)}`}><strong>{result.grade}</strong><span>{gradeLabel(result.grade)}</span></div>
+        </div>
+        <div className="cs-score-copy">
+          <span className="cs-kicker">Current repository baseline</span>
+          <h1>{repoName(result.repository)} code health</h1>
+          <p>{scoreSummary(result.score, result.severity_distribution.critical)}</p>
+          <div className="cs-score-meta">
+            {delta !== null ? <span className={delta >= 0 ? "positive" : "negative"}>{delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} since previous scan</span> : <span>First recorded baseline</span>}
+            <span>Scanned {new Date(result.scanned_at).toLocaleString()}</span>
+          </div>
+          <div className="cs-hero-actions"><button className="cs-button primary" onClick={openSonar}>Ask Sonar what this means</button><button className="cs-button ghost" onClick={() => showFindings()}>View all findings</button></div>
+        </div>
+        <div className="cs-signal-stack" aria-label="Baseline signal summary">
+          <div><span>Critical</span><strong>{result.severity_distribution.critical}</strong></div>
+          <div><span>Errors</span><strong>{result.severity_distribution.error}</strong></div>
+          <div><span>Warnings</span><strong>{result.severity_distribution.warning}</strong></div>
+          <div><span>Information</span><strong>{result.severity_distribution.info}</strong></div>
+        </div>
+      </div>
+      <div className="cs-scan-ledger">
+        <span><small>Repository</small><strong>{compactPath(result.repository)}</strong></span>
+        <span><small>Scan ID</small><strong>{result.scan_id ? result.scan_id.slice(0, 12) : "Unavailable"}</strong></span>
+        <span><small>Findings analyzed</small><strong>{result.finding_count}</strong></span>
+        <span><small>Debt measured</small><strong>{result.total_debt_points} points</strong></span>
+      </div>
+    </section>
+    <section className="cs-metric-strip"><Metric label="Critical risks" value={String(result.severity_distribution.critical)} detail="needs attention" tone={result.severity_distribution.critical ? "danger" : "normal"} /><Metric label="Technical debt" value={String(result.total_debt_points)} detail="debt points" /><Metric label="Findings" value={String(result.finding_count)} detail={`${breakdown.source} source · ${breakdown.test} test · ${breakdown.fixture} fixture`} /><Metric label="Files at risk" value={String(new Set(result.findings.map((finding) => finding.file_path)).size)} detail="with findings" /></section>
+    <div className="cs-overview-grid"><section className="cs-priority-card"><div className="cs-card-head"><div><span className="cs-kicker">What to fix first</span><h3>Top priorities</h3></div><button className="cs-link-button" onClick={() => showFindings()}>View all {result.finding_count} →</button></div><PriorityList findings={priorities} select={select} openSonar={openSonar} /></section><section className="cs-category-card"><div className="cs-card-head"><div><span className="cs-kicker">Score drivers</span><h3>Category health</h3></div></div><div className="cs-category-stack">{categories.map(([category, score]) => <div className="cs-category-row" key={category}><div><span>{category}</span><strong>{score}</strong></div><div className="cs-category-bar"><span style={{ width: `${Math.max(0, Math.min(100, ((score - 300) / 550) * 100))}%` }} /></div><small>{result.findings_by_category[category as keyof typeof result.findings_by_category]} findings</small></div>)}</div></section></div>
+  </div>;
 }
 
 function PriorityList({ findings, select, openSonar }: { findings: Finding[]; select: (finding: Finding) => void; openSonar: () => void }) {

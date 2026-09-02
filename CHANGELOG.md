@@ -40,6 +40,13 @@ without semantic-versioning.
 
 ### Security and maintenance
 
+- Replaced caller-controlled remediation booleans and paths with a server-owned,
+  signed, expiring, single-use authorization bound to the persisted scan,
+  finding, plan, repository commit, executor, and remediation kind.
+- Remediation worktrees and branches are removed after successful, failed, or
+  stopped execution; expired authorizations cannot create a workspace.
+- Closed legacy direct prepare/execute/validate/run endpoints and removed host
+  repository paths from manual scan and history API responses.
 - Added fail-closed bearer authentication for `/api/**`, preserving GitHub
   webhook HMAC authentication as the only exception.
 - Replaced wildcard CORS with an exact, environment-configured origin allowlist.

@@ -12,8 +12,11 @@ from app.ask_sonar.context import build_grounding_context
 from app.ask_sonar.remediation import build_remediation_plan
 from app.ask_sonar.runtime import get_answer_provider, get_scan
 from app.history import ScanRecord
-from app.remediation.contracts import RemediationRequest
-from app.remediation.runtime import get_remediation_orchestrator
+from app.remediation.runtime import (
+    get_authorization_service,
+    get_remediation_executor,
+    get_remediation_orchestrator,
+)
 
 router = APIRouter(prefix="/api/ask-sonar", tags=["ask-sonar"])
 
@@ -207,20 +210,19 @@ async def approve_and_run_remediation(
             },
         )
 
-    execution_request = RemediationRequest(
-        request_id=approval.request_id,
-        repository_path=record.repository_path,
-        finding_id=plan.finding_id,
-        scan_id=record.scan_id,
-        instruction=plan.instruction,
-        approved=True,
-    )
-
     try:
-        workflow = get_remediation_orchestrator().run(
-            execution_request,
+        executor = get_remediation_executor()
+        authorization = get_authorization_service().issue(
+            request_id=approval.request_id,
+            repository_path=record.repository_path,
+            scan_id=record.scan_id,
+            finding_id=plan.finding_id,
+            plan_id=plan.plan_id,
+            executor=executor.executor_name,
             remediation_kind=approval.remediation_kind,
+            instruction=plan.instruction,
         )
+        workflow = get_remediation_orchestrator().run_authorized(authorization)
     except PermissionError as exc:
         raise HTTPException(
             status_code=403,

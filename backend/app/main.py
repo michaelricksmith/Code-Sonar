@@ -239,7 +239,7 @@ async def scan(request: ScanRequest) -> ScanResponse:
         pass
 
     return _build_scan_response(
-        repository_label=str(repo_path),
+        repository_label=repo_path.name,
         findings=findings,
         scoring_result=scoring_result,
         scanned_at=scanned_at,
@@ -368,7 +368,7 @@ async def list_history(
     records = get_history_store().load_all(repository_id)
     if limit and len(records) > limit:
         records = records[-limit:]
-    return {"count": len(records), "scans": [_record_summary(r) for r in records]}
+    return {"count": len(records), "scans": [_record_public_summary(r) for r in records]}
 
 
 @app.get("/api/history/latest")
@@ -382,7 +382,7 @@ async def history_latest(
     record = get_history_store().latest(compute_repository_id(repo_path_obj))
     if record is None:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
-    return _record_to_dict(record)
+    return _record_public_dict(record)
 
 
 @app.get("/api/history/{scan_id}")
@@ -390,7 +390,7 @@ async def history_get(scan_id: str) -> dict[str, Any]:
     record = get_history_store().get(scan_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"No scan with scan_id={scan_id!r}")
-    return _record_to_dict(record)
+    return _record_public_dict(record)
 
 
 @app.get("/api/drift")

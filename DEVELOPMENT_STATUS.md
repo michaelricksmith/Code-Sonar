@@ -32,6 +32,11 @@
   origins, and caller-controlled repository/remediation paths are contained
   beneath `CODESONAR_SCAN_ROOT` by default. Focused regression coverage protects
   authentication, CORS, containment, and the independent webhook HMAC path.
+- Remediation authorization is now server-owned, signed, expiring, immutable,
+  and single-use. Workspaces bind the approved scan, finding, base commit,
+  executor, and remediation kind and are cleaned on every workflow exit. Legacy
+  caller-controlled execution primitives are closed, and public scan/history/
+  remediation payloads no longer expose host repository paths.
 - Tailwind/PostCSS production compilation restored in `331b611`.
 - Backend verification: **414 passed, 1 skipped**, with 85% measured coverage.
 - Hotspot verification: **18 passed**, hotspot engine at 100% coverage.

@@ -360,6 +360,21 @@ the Fastest-Route-to-Private-Beta brief.
 
 Code Sonar treats secrets as **first-class security concerns**:
 
+### API and repository boundary
+
+- Every `/api/**` route requires `Authorization: Bearer <token>` from
+  `CODESONAR_API_TOKEN`. The GitHub webhook is the sole exception because it
+  retains its dedicated HMAC verification.
+- The server refuses to start without a token. Tokenless operation requires
+  both `CODESONAR_LOCAL_DEV=1` and a loopback `CODESONAR_HOST`.
+- `CODESONAR_CORS_ORIGINS` is a comma-separated exact origin allowlist. Its
+  defaults include only the local frontend on ports 3000 and 5173.
+- Caller-supplied scan, hotspot, history/drift, and remediation source paths
+  must resolve below `CODESONAR_SCAN_ROOT` (default: the platform temporary
+  directory's `code-sonar-scans` folder). The local launch scripts explicitly
+  opt into `CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH=1` for developer convenience;
+  this flag must never be used for a shared or client-facing deployment.
+
 1. **Detection** — the `secrets` analyzer matches AWS access keys, AWS
    secret keys, GitHub PATs, Slack tokens, JWTs, and high-entropy
    strings (≥ 32 chars of `[A-Za-z0-9+/=]` with no whitespace).

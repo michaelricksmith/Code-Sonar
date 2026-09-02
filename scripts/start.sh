@@ -23,6 +23,9 @@ cd "$REPO_ROOT"
 # ---- Config ----------------------------------------------------------------
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 LOG_DIR="$REPO_ROOT/logs"
+export CODESONAR_LOCAL_DEV=1
+export CODESONAR_HOST=127.0.0.1
+export CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH=1
 mkdir -p "$LOG_DIR"
 
 echo

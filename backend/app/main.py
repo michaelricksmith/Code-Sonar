@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.ask_sonar.api import router as ask_sonar_router
@@ -27,6 +26,7 @@ from app.projects import router as projects_router
 from app.remediation.api import router as remediation_router
 from app.scoring.engine import calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
+from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
 from app.services.repository import (
     get_analyzer_metadata,
     get_registered_analyzers,
@@ -39,13 +39,13 @@ app = FastAPI(
     version="0.1.0-beta.1",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(ApiBoundaryMiddleware)
+
+
+@app.on_event("startup")
+async def validate_security_configuration() -> None:
+    """Fail closed before serving when authentication or CORS is unsafe."""
+    validate_runtime_security_config()
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(remediation_router)

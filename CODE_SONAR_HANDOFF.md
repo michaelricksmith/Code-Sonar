@@ -16,6 +16,10 @@
 - npm audit: 0 known vulnerabilities.
 - Tailwind/PostCSS production compilation: working.
 - Recent commits: `02207ea` hotspot determinism, `61f086a` frontend security, `331b611` Tailwind compilation.
+- The current security increment adds fail-closed API bearer authentication,
+  exact-origin CORS, and default scan-root containment. Local launchers opt into
+  loopback-only developer mode; deployments must set `CODESONAR_API_TOKEN`,
+  `CODESONAR_SCAN_ROOT`, `CODESONAR_CORS_ORIGINS`, and `CODESONAR_HOST`.
 - RICK tools verified: Playwright 1.62.1, Trivy 0.74.0, Mermaid CLI 11.16.0, Sumy 0.13.0, Debugpy 1.8.21, VS Code JS Debug 1.117.0, and Streamlit 1.62.0.
 - OpenClaw gateway: restarted after role-specific skill assignment and healthy.
 

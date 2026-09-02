@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
 
 MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024
@@ -13,9 +14,8 @@ MAX_FILE_READ_TIMEOUT: int = 5
 MAX_EVIDENCE_LENGTH: int = 500
 
 SCAN_ROOT_DIR: Path = Path(
-    os.environ.get("CODESONAR_SCAN_ROOT", "/tmp/code-sonar-scans")
+    os.environ.get("CODESONAR_SCAN_ROOT", str(Path(tempfile.gettempdir()) / "code-sonar-scans"))
 )
-_ENFORCE_SCAN_ROOT: bool = os.environ.get("CODESONAR_ENFORCE_SCAN_ROOT", "0") == "1"
 
 EXCLUDED_DIRS: frozenset[str] = frozenset({
     ".git", ".svn", ".hg",
@@ -81,9 +81,18 @@ def validate_repo_path(
             "invalid repository path (not a directory): " + text
         )
 
-    enforce = _ENFORCE_SCAN_ROOT if enforce_root is None else enforce_root
+    # Containment is the safe default. The escape hatch is intentionally named
+    # and limited to explicit local development use.
+    enforce = (
+        os.environ.get("CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH", "0") != "1"
+        if enforce_root is None
+        else enforce_root
+    )
     if enforce:
-        root = (scan_root or SCAN_ROOT_DIR).resolve()
+        configured_root = Path(
+            os.environ.get("CODESONAR_SCAN_ROOT", str(SCAN_ROOT_DIR))
+        )
+        root = (scan_root or configured_root).expanduser().resolve()
         try:
             resolved.relative_to(root)
         except ValueError as exc:

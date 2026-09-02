@@ -9,6 +9,14 @@ import pytest
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 
 
+@pytest.fixture(autouse=True)
+def explicit_test_development_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy unit fixtures local while production defaults fail closed."""
+    monkeypatch.setenv("CODESONAR_LOCAL_DEV", "1")
+    monkeypatch.setenv("CODESONAR_HOST", "127.0.0.1")
+    monkeypatch.setenv("CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH", "1")
+
+
 @pytest.fixture
 def test_repo_fixture() -> Generator[Path, None, None]:
     """Create a temporary test repository with known files.

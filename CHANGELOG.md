@@ -30,6 +30,12 @@ without semantic-versioning.
 
 ### Security and maintenance
 
+- Added fail-closed bearer authentication for `/api/**`, preserving GitHub
+  webhook HMAC authentication as the only exception.
+- Replaced wildcard CORS with an exact, environment-configured origin allowlist.
+- Made the configured scan root mandatory for caller-controlled scan, hotspot,
+  history/drift, and remediation source paths; unsafe legacy path access now
+  requires an explicit local-development flag.
 - Removed unused vulnerable `react-router-dom` and `vitest` dependencies.
 - Upgraded Vite to 8.2.2 and `@vitejs/plugin-react` to 6.1.1 (`61f086a`).
 - Verified `npm audit`: 0 vulnerabilities.

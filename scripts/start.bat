@@ -17,6 +17,10 @@ popd
 
 set "BACKEND_PORT="
 set "FRONTEND_PORT="
+REM Explicitly opt this loopback-only launcher into local development behavior.
+set "CODESONAR_LOCAL_DEV=1"
+set "CODESONAR_HOST=127.0.0.1"
+set "CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH=1"
 
 REM Pick the first truly free backend port in a bounded local-dev range.
 for /L %%P in (8000,1,8099) do (

@@ -82,6 +82,10 @@ jobs:
     name: Self-scan smoke
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    env:
+      CODESONAR_HOST: 127.0.0.1
+      CODESONAR_LOCAL_DEV: "1"
+      CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH: "1"
     defaults:
       run:
         working-directory: backend

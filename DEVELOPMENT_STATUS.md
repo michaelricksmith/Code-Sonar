@@ -21,6 +21,11 @@
 - Intelligence UI and credit-report workflow shipped through merge `d73e9ba`.
 - Hotspot same-file finding order made deterministic with regression coverage in `02207ea`.
 - Frontend dependency security completed in `61f086a`; npm audit reports **0 vulnerabilities**.
+- HTTP trust-boundary hardening is implemented: bearer authentication is
+  fail-closed outside explicit loopback development, CORS uses exact configured
+  origins, and caller-controlled repository/remediation paths are contained
+  beneath `CODESONAR_SCAN_ROOT` by default. Focused regression coverage protects
+  authentication, CORS, containment, and the independent webhook HMAC path.
 - Tailwind/PostCSS production compilation restored in `331b611`.
 - Backend verification: **414 passed, 1 skipped**, with 85% measured coverage.
 - Hotspot verification: **18 passed**, hotspot engine at 100% coverage.

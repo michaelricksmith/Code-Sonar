@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.remediation.contracts import RemediationRequest
+from app.security import validate_repo_path
 
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -91,9 +92,7 @@ class GitWorktreeManager:
         if not request.approved:
             raise PermissionError("Remediation workspace preparation requires explicit approval")
 
-        repo = Path(request.repository_path).expanduser().resolve()
-        if not repo.exists() or not repo.is_dir():
-            raise ValueError("Remediation repository path does not exist or is not a directory")
+        repo = validate_repo_path(request.repository_path)
 
         top_level = self._run(
             ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],

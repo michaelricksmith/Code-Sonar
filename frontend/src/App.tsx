@@ -264,7 +264,7 @@ function Overview({ result, repoPath, setRepoPath, scanning, drift, priorities, 
       </div>
       <div className="cs-scan-ledger">
         <span><small>Repository</small><strong>{compactPath(result.repository)}</strong></span>
-        <span><small>Scan ID</small><strong>{result.scan_id.slice(0, 12)}</strong></span>
+        <span><small>Scan ID</small><strong>{result.scan_id ? result.scan_id.slice(0, 12) : "Unavailable"}</strong></span>
         <span><small>Findings analyzed</small><strong>{result.finding_count}</strong></span>
         <span><small>Debt measured</small><strong>{result.total_debt_points} points</strong></span>
       </div>

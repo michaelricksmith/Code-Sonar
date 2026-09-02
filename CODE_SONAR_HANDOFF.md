@@ -3,6 +3,12 @@
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
 > **Current handoff — 2026-09-02 PDT**
+
+The UI foundation checkpoint now routes local scans and managed GitHub project
+baselines through one active frontend context. Overview, Findings, Risk Map,
+History, Ask Sonar, and Remediations no longer operate independently from the
+project dashboard. Continue with visual refinement only after preserving this
+context boundary and its live API behavior.
 - Phase 2 began with a responsive application shell, accessible mobile navigation, and a redesigned real-data credit-score command center. The command center preserves the deterministic 300–850 score, grade, category normalization, findings, debt, severity, priority, repository, and scan metadata from the native scan response.
 
 > RICK's first development-capability wave is installed and verified locally. Read `docs/RICK_CAPABILITY_ROADMAP.md`, `README.md`, the top of `DEVELOPMENT_STATUS.md`, and `CHANGELOG.md` as the current source of truth. The 2026-08-22 handoff below is retained only as historical context and must not be used to select new work.

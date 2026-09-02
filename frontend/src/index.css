@@ -294,6 +294,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .cs-category-row small { display: block; margin-top: 5px; color: var(--faint); font-size: 8px; }
 
 .cs-path-row { display: flex; gap: 8px; margin-top: 14px; }
+.cs-active-context { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid rgba(91,141,184,.34); border-radius: 12px; background: rgba(91,141,184,.07); }
+.cs-active-context strong, .cs-active-context small { display: block; }
+.cs-active-context strong { margin-top: 4px; font-size: 13px; }
+.cs-active-context small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.cs-active-context > div:last-child { display: flex; align-items: baseline; gap: 7px; color: var(--blue-2); }
+.cs-active-context b { font-size: 24px; }
+.cs-active-context > div:last-child span { font-size: 10px; font-weight: 800; }
 .cs-legacy-surface { min-width: 0; overflow: hidden; border-radius: 13px; }
 .cs-table-wrap { margin-top: 14px; overflow-x: auto; }
 .cs-risk-surface { border-radius: 14px; overflow: hidden; }
@@ -302,6 +309,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .cs-no-baseline { min-height: 420px; display: grid; place-items: center; align-content: center; gap: 8px; border: 1px dashed #2c394a; border-radius: 14px; background: rgba(16,21,29,.72); text-align: center; }
 .cs-no-baseline h2 { margin: 10px 0 0; }
 .cs-no-baseline p { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+.cs-no-baseline.compact { min-height: 240px; padding: 28px; }
+.cs-live-dot.idle { background: var(--faint); box-shadow: none; }
 
 .cs-remediation-layout { display: grid; grid-template-columns: minmax(320px,.75fr) minmax(0,1.25fr); gap: 14px; }
 .cs-flow-steps { display: grid; gap: 11px; margin-top: 18px; }

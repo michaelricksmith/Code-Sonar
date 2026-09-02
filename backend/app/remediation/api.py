@@ -7,10 +7,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.remediation.contracts import RemediationRequest
 from app.remediation.runtime import (
     get_remediation_executor,
-    get_remediation_orchestrator,
     get_validation_service,
     get_workspace_manager,
 )
@@ -61,51 +59,22 @@ async def remediation_status() -> dict[str, Any]:
 
 @router.post("/workspace/prepare")
 async def prepare_remediation_workspace(request: RemediationExecuteRequest) -> dict[str, Any]:
-    """Create an isolated Git branch/worktree for an explicitly approved request."""
-    execution_request = RemediationRequest(**request.model_dump())
-    try:
-        workspace = get_workspace_manager().prepare(execution_request)
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "remediation_approval_required", "message": str(exc)},
-        ) from exc
-    except (ValueError, FileExistsError) as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "remediation_workspace_unavailable", "message": str(exc)},
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "remediation_workspace_failed", "message": str(exc)},
-        ) from exc
-
-    return {
-        "request": execution_request.to_dict(),
-        "workspace": workspace.to_dict(),
-        "execution_performed": False,
-        "active_checkout_modified": False,
-        "host_paths_exposed": False,
-        "deterministic_score_unchanged": True,
-    }
+    """Reject legacy caller-controlled workspace creation."""
+    raise _server_authorization_required()
 
 
 @router.post("/execute")
 async def execute_remediation(request: RemediationExecuteRequest) -> dict[str, Any]:
     """Invoke only the explicitly registered executor for one approved target."""
-    execution_request = RemediationRequest(**request.model_dump())
-    result = get_remediation_executor().execute(execution_request)
-    return {
-        "request": execution_request.to_dict(),
-        "result": result.to_dict(),
-        "deterministic_score_unchanged": True,
-    }
+    raise _server_authorization_required()
 
 
 @router.post("/validate")
 async def validate_remediation(request: RemediationValidateRequest) -> dict[str, Any]:
     """Resolve an opaque workspace, validate it, rescan, and persist outcome evidence."""
+    raise _server_authorization_required()
+    # The implementation below is intentionally unreachable during the
+    # compatibility window and will be removed with the legacy request models.
     workspace = get_workspace_manager().get(request.workspace_id)
     if workspace is None:
         raise HTTPException(
@@ -174,44 +143,15 @@ async def validate_remediation(request: RemediationValidateRequest) -> dict[str,
 
 @router.post("/run")
 async def run_remediation_workflow(request: RemediationRunRequest) -> dict[str, Any]:
-    """Prepare, execute, validate, rescan, and record one approved remediation."""
-    execution_request = RemediationRequest(
-        request_id=request.request_id,
-        repository_path=request.repository_path,
-        finding_id=request.finding_id,
-        scan_id=request.scan_id,
-        instruction=request.instruction,
-        approved=request.approved,
-    )
-    try:
-        result = get_remediation_orchestrator().run(
-            execution_request,
-            remediation_kind=request.remediation_kind,
-        )
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "remediation_approval_required", "message": str(exc)},
-        ) from exc
-    except LookupError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "remediation_source_not_found", "message": str(exc)},
-        ) from exc
-    except FileExistsError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "remediation_conflict", "message": str(exc)},
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "remediation_invalid", "message": str(exc)},
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "remediation_workflow_failed", "message": str(exc)},
-        ) from exc
+    """Reject legacy caller-controlled orchestration."""
+    raise _server_authorization_required()
 
-    return {"workflow": result.to_dict()}
+
+def _server_authorization_required() -> HTTPException:
+    return HTTPException(
+        status_code=410,
+        detail={
+            "code": "remediation_server_authorization_required",
+            "message": "Use the grounded Ask Sonar approval workflow",
+        },
+    )

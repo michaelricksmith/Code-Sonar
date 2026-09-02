@@ -374,6 +374,14 @@ Code Sonar treats secrets as **first-class security concerns**:
   directory's `code-sonar-scans` folder). The local launch scripts explicitly
   opt into `CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH=1` for developer convenience;
   this flag must never be used for a shared or client-facing deployment.
+- Remediation execution is available only through the grounded Ask Sonar
+  approval workflow. Approval creates a server-owned signed capability that
+  expires after five minutes, is bound to the scan/finding/plan/base commit and
+  configured executor, and can be consumed only once. Direct caller-controlled
+  remediation endpoints return `410 Gone`.
+- Prepared remediation worktrees and branches are cleaned after every workflow
+  exit. Public scan, history, and remediation responses do not include server
+  repository paths.
 
 1. **Detection** — the `secrets` analyzer matches AWS access keys, AWS
    secret keys, GitHub PATs, Slack tokens, JWTs, and high-entropy

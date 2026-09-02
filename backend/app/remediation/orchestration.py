@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.remediation.approval import (
+    RemediationAuthorization,
+    RemediationAuthorizationService,
+)
 from app.remediation.contracts import (
     RemediationExecutionResult,
     RemediationExecutionState,
@@ -50,10 +54,12 @@ class RemediationOrchestrator:
         workspace_manager: GitWorktreeManager,
         executor: RemediationExecutor,
         validation_service: RemediationValidationService,
+        authorization_service: RemediationAuthorizationService,
     ) -> None:
         self.workspace_manager = workspace_manager
         self.executor = executor
         self.validation_service = validation_service
+        self.authorization_service = authorization_service
 
     def run(
         self,
@@ -61,42 +67,56 @@ class RemediationOrchestrator:
         *,
         remediation_kind: str = "automated_patch",
     ) -> RemediationWorkflowResult:
-        if not request.approved:
-            raise PermissionError("Remediation orchestration requires explicit approval")
-
-        workspace = self.workspace_manager.prepare(request)
-        isolated_request = RemediationRequest(
-            request_id=request.request_id,
-            repository_path=workspace.workspace_path,
-            finding_id=request.finding_id,
-            scan_id=request.scan_id,
-            instruction=request.instruction,
-            approved=True,
+        raise PermissionError(
+            "Direct remediation requests are disabled; server authorization required"
         )
-        execution = self.executor.execute(isolated_request)
 
-        if execution.state is not RemediationExecutionState.EXECUTED:
+    def run_authorized(
+        self,
+        authorization: RemediationAuthorization,
+    ) -> RemediationWorkflowResult:
+        """Consume one immutable capability and clean its workspace on every exit."""
+        if self.executor.executor_name != authorization.executor:
+            raise PermissionError("Configured executor changed after remediation approval")
+        self.authorization_service.consume(authorization)
+        workspace: PreparedWorkspace | None = None
+        try:
+            workspace = self.workspace_manager.prepare_authorized(authorization)
+            isolated_request = RemediationRequest(
+                request_id=authorization.request_id,
+                repository_path=workspace.workspace_path,
+                finding_id=authorization.finding_id,
+                scan_id=authorization.scan_id,
+                instruction=authorization.instruction,
+                approved=True,
+            )
+            execution = self.executor.execute(isolated_request)
+
+            if execution.state is not RemediationExecutionState.EXECUTED:
+                return RemediationWorkflowResult(
+                    request_id=authorization.request_id,
+                    workspace=workspace,
+                    execution=execution,
+                    validation=None,
+                    completed=False,
+                    stopped_at="execution",
+                )
+
+            validation = self.validation_service.validate(
+                request_id=authorization.request_id,
+                workspace_path=workspace.workspace_path,
+                before_scan_id=authorization.scan_id,
+                finding_id=authorization.finding_id,
+                executor=authorization.executor,
+                remediation_kind=authorization.remediation_kind,
+            )
             return RemediationWorkflowResult(
-                request_id=request.request_id,
+                request_id=authorization.request_id,
                 workspace=workspace,
                 execution=execution,
-                validation=None,
-                completed=False,
-                stopped_at="execution",
+                validation=validation,
+                completed=True,
             )
-
-        validation = self.validation_service.validate(
-            request_id=request.request_id,
-            workspace_path=workspace.workspace_path,
-            before_scan_id=request.scan_id,
-            finding_id=request.finding_id,
-            executor=execution.executor_name,
-            remediation_kind=remediation_kind,
-        )
-        return RemediationWorkflowResult(
-            request_id=request.request_id,
-            workspace=workspace,
-            execution=execution,
-            validation=validation,
-            completed=True,
-        )
+        finally:
+            if workspace is not None:
+                self.workspace_manager.cleanup(workspace.workspace_id)

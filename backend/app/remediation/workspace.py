@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from app.remediation.approval import RemediationAuthorization
 from app.remediation.contracts import RemediationRequest
 from app.security import validate_repo_path
 
@@ -33,6 +35,11 @@ class PreparedWorkspace:
     workspace_path: str
     branch_name: str
     base_commit: str
+    scan_id: str = ""
+    finding_id: str = ""
+    executor: str = ""
+    remediation_kind: str = ""
+    authorization_id: str = ""
 
     def to_dict(self) -> dict[str, str]:
         """Return the public workspace identity without exposing host filesystem paths."""
@@ -156,3 +163,58 @@ class GitWorktreeManager:
         )
         self._prepared[workspace_id] = workspace
         return workspace
+
+    def prepare_authorized(self, authorization: RemediationAuthorization) -> PreparedWorkspace:
+        request = RemediationRequest(
+            request_id=authorization.request_id,
+            repository_path=authorization.repository_path,
+            finding_id=authorization.finding_id,
+            scan_id=authorization.scan_id,
+            instruction=authorization.instruction,
+            approved=True,
+        )
+        workspace = self.prepare(request)
+        if workspace.base_commit != authorization.base_commit:
+            self.cleanup(workspace.workspace_id)
+            raise PermissionError("Prepared workspace does not match the approved base commit")
+        bound = PreparedWorkspace(
+            workspace_id=workspace.workspace_id,
+            request_id=workspace.request_id,
+            repository_root=workspace.repository_root,
+            workspace_path=workspace.workspace_path,
+            branch_name=workspace.branch_name,
+            base_commit=workspace.base_commit,
+            scan_id=authorization.scan_id,
+            finding_id=authorization.finding_id,
+            executor=authorization.executor,
+            remediation_kind=authorization.remediation_kind,
+            authorization_id=authorization.authorization_id,
+        )
+        self._prepared[bound.workspace_id] = bound
+        return bound
+
+    def cleanup(self, workspace_id: str) -> None:
+        """Remove a prepared worktree, its branch, and its in-memory capability."""
+        workspace = self._prepared.pop(workspace_id, None)
+        if workspace is None:
+            return
+        workspace_path = Path(workspace.workspace_path).resolve()
+        workspace_path.relative_to(self.root.resolve())
+        remove_result = self.runner(
+            [
+                "git",
+                "-C",
+                workspace.repository_root,
+                "worktree",
+                "remove",
+                "--force",
+                workspace.workspace_path,
+            ],
+        )
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
+        branch_result = self.runner(
+            ["git", "-C", workspace.repository_root, "branch", "-D", workspace.branch_name],
+        )
+        if remove_result.returncode != 0 or branch_result.returncode != 0:
+            raise RuntimeError("Remediation workspace cleanup did not complete")

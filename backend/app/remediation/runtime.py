@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 
+from app.remediation.approval import RemediationAuthorizationService
 from app.remediation.contracts import DryRunRemediationExecutor, RemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
 from app.remediation.orchestration import RemediationOrchestrator
@@ -14,6 +15,7 @@ from app.remediation.workspace import GitWorktreeManager
 _executor: RemediationExecutor = DryRunRemediationExecutor()
 _workspace_manager = GitWorktreeManager()
 _validation_service = RemediationValidationService(workspace_root=_workspace_manager.root)
+_authorization_service = RemediationAuthorizationService()
 
 
 def set_remediation_executor(executor: RemediationExecutor) -> None:
@@ -49,12 +51,22 @@ def get_validation_service() -> RemediationValidationService:
     return _validation_service
 
 
+def get_authorization_service() -> RemediationAuthorizationService:
+    return _authorization_service
+
+
+def set_authorization_service(service: RemediationAuthorizationService) -> None:
+    global _authorization_service
+    _authorization_service = service
+
+
 def get_remediation_orchestrator() -> RemediationOrchestrator:
     """Build an orchestrator from the current explicitly configured components."""
     return RemediationOrchestrator(
         workspace_manager=_workspace_manager,
         executor=_executor,
         validation_service=_validation_service,
+        authorization_service=_authorization_service,
     )
 
 

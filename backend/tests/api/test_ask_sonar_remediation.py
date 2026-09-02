@@ -12,7 +12,6 @@ from app.ask_sonar.runtime import set_scan_provider
 from app.history import ScanRecord, build_scan_record
 from app.main import app
 from app.models.finding import Finding, FindingCategory, FindingSeverity
-from app.remediation.contracts import RemediationRequest
 from app.scoring.engine import calculate_score
 
 
@@ -59,8 +58,18 @@ def _record() -> ScanRecord:
 
 
 @dataclass
+class FakeAuthorization:
+    request_id: str
+    repository_path: str
+    finding_id: str
+    scan_id: str
+    instruction: str
+    remediation_kind: str
+
+
+@dataclass
 class FakeWorkflow:
-    request: RemediationRequest
+    request: FakeAuthorization
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -73,13 +82,23 @@ class FakeWorkflow:
 
 class CapturingOrchestrator:
     def __init__(self) -> None:
-        self.requests: list[RemediationRequest] = []
-        self.kinds: list[str] = []
+        self.requests: list[FakeAuthorization] = []
 
-    def run(self, request: RemediationRequest, *, remediation_kind: str) -> FakeWorkflow:
-        self.requests.append(request)
-        self.kinds.append(remediation_kind)
-        return FakeWorkflow(request)
+    def run_authorized(self, authorization: FakeAuthorization) -> FakeWorkflow:
+        self.requests.append(authorization)
+        return FakeWorkflow(authorization)
+
+
+class CapturingAuthorizationService:
+    def issue(self, **kwargs: str) -> FakeAuthorization:
+        return FakeAuthorization(
+            request_id=kwargs["request_id"],
+            repository_path=kwargs["repository_path"],
+            finding_id=kwargs["finding_id"],
+            scan_id=kwargs["scan_id"],
+            instruction=kwargs["instruction"],
+            remediation_kind=kwargs["remediation_kind"],
+        )
 
 
 def test_plan_is_deterministic_and_does_not_predict_score_impact() -> None:
@@ -125,6 +144,10 @@ def test_unapproved_request_never_reaches_orchestration(
     monkeypatch.setattr(
         "app.ask_sonar.api.get_remediation_orchestrator", lambda: orchestrator
     )
+    monkeypatch.setattr(
+        "app.ask_sonar.api.get_authorization_service",
+        lambda: CapturingAuthorizationService(),
+    )
 
     response = client.post(
         "/api/ask-sonar/remediation/approve-and-run",
@@ -150,6 +173,10 @@ def test_tampered_plan_id_is_rejected_before_orchestration(
     orchestrator = CapturingOrchestrator()
     monkeypatch.setattr(
         "app.ask_sonar.api.get_remediation_orchestrator", lambda: orchestrator
+    )
+    monkeypatch.setattr(
+        "app.ask_sonar.api.get_authorization_service",
+        lambda: CapturingAuthorizationService(),
     )
 
     response = client.post(
@@ -178,6 +205,10 @@ def test_approved_plan_uses_server_derived_repository_and_instruction(
     monkeypatch.setattr(
         "app.ask_sonar.api.get_remediation_orchestrator", lambda: orchestrator
     )
+    monkeypatch.setattr(
+        "app.ask_sonar.api.get_authorization_service",
+        lambda: CapturingAuthorizationService(),
+    )
 
     response = client.post(
         "/api/ask-sonar/remediation/approve-and-run",
@@ -197,6 +228,5 @@ def test_approved_plan_uses_server_derived_repository_and_instruction(
     assert request.instruction == plan.instruction
     assert request.finding_id == plan.finding_id
     assert request.scan_id == plan.scan_id
-    assert request.approved is True
-    assert orchestrator.kinds == ["ask_sonar_approved_patch"]
+    assert request.remediation_kind == "ask_sonar_approved_patch"
     assert response.json()["workflow"]["completed"] is True

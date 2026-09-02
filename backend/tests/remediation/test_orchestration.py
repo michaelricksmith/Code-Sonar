@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from app.remediation.approval import RemediationAuthorization
 from app.remediation.contracts import (
     RemediationExecutionResult,
     RemediationExecutionState,
@@ -16,17 +17,34 @@ class FakeWorkspaceManager:
     def __init__(self, workspace_path: str) -> None:
         self.workspace_path = workspace_path
         self.prepare_calls = 0
+        self.cleanup_calls: list[str] = []
 
-    def prepare(self, request: RemediationRequest) -> PreparedWorkspace:
+    def prepare_authorized(self, authorization: RemediationAuthorization) -> PreparedWorkspace:
         self.prepare_calls += 1
         return PreparedWorkspace(
             workspace_id="ws_test",
-            request_id=request.request_id,
-            repository_root=request.repository_path,
+            request_id=authorization.request_id,
+            repository_root=authorization.repository_path,
             workspace_path=self.workspace_path,
             branch_name="code-sonar/remediation/finding-request-deadbeef00",
-            base_commit="abc123",
+            base_commit=authorization.base_commit,
+            scan_id=authorization.scan_id,
+            finding_id=authorization.finding_id,
+            executor=authorization.executor,
+            remediation_kind=authorization.remediation_kind,
+            authorization_id=authorization.authorization_id,
         )
+
+    def cleanup(self, workspace_id: str) -> None:
+        self.cleanup_calls.append(workspace_id)
+
+
+class FakeAuthorizationService:
+    def __init__(self) -> None:
+        self.consumed: list[str] = []
+
+    def consume(self, authorization: RemediationAuthorization) -> None:
+        self.consumed.append(authorization.authorization_id)
 
 
 class FakeExecutor:
@@ -81,6 +99,23 @@ def _request(*, approved: bool = True) -> RemediationRequest:
     )
 
 
+def _authorization() -> RemediationAuthorization:
+    return RemediationAuthorization(
+        authorization_id="auth-1",
+        request_id="request-1",
+        repository_path="/active/repo",
+        scan_id="scan-before",
+        finding_id="finding-1",
+        plan_id="plan-1",
+        base_commit="abc123",
+        executor="fake",
+        remediation_kind="cursor_patch",
+        instruction="Fix the finding safely.",
+        expires_at=9999999999.0,
+        signature="signed",
+    )
+
+
 def test_unapproved_workflow_stops_before_workspace_preparation() -> None:
     manager = FakeWorkspaceManager("/isolated/worktree")
     executor = FakeExecutor(RemediationExecutionState.EXECUTED)
@@ -89,6 +124,7 @@ def test_unapproved_workflow_stops_before_workspace_preparation() -> None:
         workspace_manager=manager,  # type: ignore[arg-type]
         executor=executor,
         validation_service=validator,  # type: ignore[arg-type]
+        authorization_service=FakeAuthorizationService(),  # type: ignore[arg-type]
     )
 
     try:
@@ -111,9 +147,10 @@ def test_execution_failure_prevents_validation() -> None:
         workspace_manager=manager,  # type: ignore[arg-type]
         executor=executor,
         validation_service=validator,  # type: ignore[arg-type]
+        authorization_service=FakeAuthorizationService(),  # type: ignore[arg-type]
     )
 
-    result = orchestrator.run(_request())
+    result = orchestrator.run_authorized(_authorization())
 
     assert result.completed is False
     assert result.stopped_at == "execution"
@@ -123,6 +160,7 @@ def test_execution_failure_prevents_validation() -> None:
     assert result.workspace is not None
     assert result.workspace.to_dict()["workspace_id"] == "ws_test"
     assert "workspace_path" not in result.workspace.to_dict()
+    assert manager.cleanup_calls == ["ws_test"]
 
 
 def test_successful_execution_advances_to_validation_with_isolated_workspace() -> None:
@@ -134,9 +172,10 @@ def test_successful_execution_advances_to_validation_with_isolated_workspace() -
         workspace_manager=manager,  # type: ignore[arg-type]
         executor=executor,
         validation_service=validator,  # type: ignore[arg-type]
+        authorization_service=FakeAuthorizationService(),  # type: ignore[arg-type]
     )
 
-    result = orchestrator.run(_request(), remediation_kind="cursor_patch")
+    result = orchestrator.run_authorized(_authorization())
 
     assert result.completed is True
     assert result.stopped_at is None
@@ -149,3 +188,4 @@ def test_successful_execution_advances_to_validation_with_isolated_workspace() -
     assert validator.calls[0]["finding_id"] == "finding-1"
     assert validator.calls[0]["executor"] == "fake"
     assert validator.calls[0]["remediation_kind"] == "cursor_patch"
+    assert manager.cleanup_calls == ["ws_test"]

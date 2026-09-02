@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.remediation.approval import RemediationAuthorization
 from app.remediation.contracts import RemediationRequest
 from app.remediation.workspace import GitCommandResult, GitWorktreeManager
 
@@ -23,6 +24,10 @@ class FakeGitRunner:
         if "branch" in args and "--list" in args:
             return GitCommandResult(0, stdout=(args[-1] + "\n") if self.existing_branch else "")
         if "worktree" in args and "add" in args:
+            return GitCommandResult(0)
+        if "worktree" in args and "remove" in args:
+            return GitCommandResult(0)
+        if "branch" in args and "-D" in args:
             return GitCommandResult(0)
         return GitCommandResult(1, stderr="unexpected git command")
 
@@ -83,3 +88,36 @@ def test_prepare_rejects_existing_remediation_branch(tmp_path: Path) -> None:
         manager.prepare(_request(repo))
 
     assert not any("worktree" in call and "add" in call for call in runner.calls)
+
+
+def test_authorized_workspace_binds_fields_and_cleanup_removes_state(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runner = FakeGitRunner(repo)
+    manager = GitWorktreeManager(root=tmp_path / "worktrees", runner=runner)
+    authorization = RemediationAuthorization(
+        authorization_id="auth-1",
+        request_id="request-123",
+        repository_path=str(repo),
+        scan_id="scan-1",
+        finding_id="finding:oversized/function",
+        plan_id="plan-1",
+        base_commit="abc123def456",
+        executor="cursor",
+        remediation_kind="approved_patch",
+        instruction="Refactor the oversized function.",
+        expires_at=9999999999.0,
+        signature="signed",
+    )
+
+    prepared = manager.prepare_authorized(authorization)
+    assert prepared.scan_id == "scan-1"
+    assert prepared.finding_id == "finding:oversized/function"
+    assert prepared.executor == "cursor"
+    assert prepared.remediation_kind == "approved_patch"
+    assert prepared.authorization_id == "auth-1"
+
+    manager.cleanup(prepared.workspace_id)
+    assert manager.get(prepared.workspace_id) is None
+    assert any("remove" in call for call in runner.calls)
+    assert any("-D" in call for call in runner.calls)

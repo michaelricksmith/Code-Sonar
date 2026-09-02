@@ -15,6 +15,11 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Remediation security checkpoint: server-minted signed/expiring/single-use
+  authorization; immutable scan/finding/commit/executor binding; guaranteed
+  worktree cleanup; direct remediation primitives closed; host paths removed
+  from public scan/history/remediation responses.
+
 - Backend: **414 passed, 1 skipped**.
 - Hotspot suite: **18 passed** with 100% engine coverage.
 - Frontend TypeScript/Vite 8 production build: passed.

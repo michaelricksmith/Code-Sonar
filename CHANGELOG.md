@@ -11,6 +11,12 @@ without semantic-versioning.
 ## [Unreleased] — 2026-09-02
 
 ### Added
+- Added tenant retention-policy records and authenticated/audited privacy APIs;
+  encrypted, versioned export jobs exclude host paths, secrets, and tenant IDs.
+- Added a recovery-gated, operator-only hard-delete command with PostgreSQL
+  concurrency locking, FK-safe removal, idempotent content-free receipts, and a
+  deployment crypto-erasure hook. Backup retention/deletion lag is policy
+  metadata, not a claim of managed backup or erasure completion.
 - Added a tenant-aware SQLAlchemy persistence unit of work and Alembic baseline
   for projects, scans/findings, GitHub installations/webhooks/jobs, and
   remediation outcomes. Project scan persistence is atomic, webhook claims and

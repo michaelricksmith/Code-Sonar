@@ -67,9 +67,15 @@ to Everyone, Builtin Users, or Authenticated Users.
 The PostgreSQL CI service exercises replay and worker-claim behavior. Local
 SQLite is not evidence of multiworker production correctness.
 
+## Operational privacy extension
+
+Tenant retention records, authenticated/audited export jobs, recovery-gated
+deletion, content-free receipts, and a crypto-erasure hook are described in
+`docs/OPERATIONAL_PRIVACY.md`.
+
 ## Explicitly unfinished
 
 This checkpoint does not provide a production KMS adapter, automated key
-rotation, retention/deletion/export jobs, PostgreSQL row-level-security policy,
-managed backup/PITR configuration, or restore drills. Those remain release
+rotation, automated retention execution, managed export object storage,
+PostgreSQL row-level-security policy, managed backup/PITR configuration, or restore drills. Those remain release
 gates and must not be inferred from the presence of the SQL schema.

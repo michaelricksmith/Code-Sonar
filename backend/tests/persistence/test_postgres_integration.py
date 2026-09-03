@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 
 from app.github_app import WebhookAuditRecord
 from app.persistence.crypto import LocalDevelopmentEncryptionProvider
+from app.persistence.privacy import RetentionPolicy
 from app.persistence.runtime import PersistenceUnitOfWork
 from app.persistence.schema import metadata
 from app.projects import ProjectRecord
@@ -58,6 +61,24 @@ def test_postgres_atomic_webhook_replay_claim() -> None:
         )
         assert persistence.webhook_jobs.claim_queued(job.job_id, worker_id="worker-a") is True
         assert persistence.webhook_jobs.claim_queued(job.job_id, worker_id="worker-b") is False
+
+        persistence.privacy.set_retention_policy(RetentionPolicy(deletion_recovery_days=0))
+        state = persistence.privacy.request_deletion()
+        eligible = datetime.fromisoformat(state.hard_delete_eligible_at or "")
+
+        def delete_once() -> str:
+            inner = bind_tenant("postgres-test")
+            try:
+                return persistence.privacy.hard_delete(
+                    request_token="postgres-concurrent-delete",
+                    now=eligible + timedelta(seconds=1),
+                ).receipt_id
+            finally:
+                reset_tenant(inner)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            receipts = list(pool.map(lambda _: delete_once(), range(2)))
+        assert receipts[0] == receipts[1]
     finally:
         reset_tenant(token)
         metadata.drop_all(engine)

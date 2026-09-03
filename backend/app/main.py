@@ -21,6 +21,7 @@ from app.history import (
 )
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
+from app.persistence.privacy_api import router as privacy_router
 from app.projects import get_project_store
 from app.projects import router as projects_router
 from app.remediation.api import router as remediation_router
@@ -49,11 +50,14 @@ async def validate_security_configuration() -> None:
     from app.persistence import configure_persistence_from_env
 
     configure_persistence_from_env()
+
+
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(remediation_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)
+app.include_router(privacy_router)
 
 _history_store: JsonlHistoryStore | InMemoryHistoryStore = JsonlHistoryStore()
 

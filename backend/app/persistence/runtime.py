@@ -16,6 +16,7 @@ from app.persistence.config import (
     validate_persistence_config,
 )
 from app.persistence.crypto import EncryptionProvider, LocalDevelopmentEncryptionProvider
+from app.persistence.privacy import CryptoErasureHook, SqlPrivacyRepository
 from app.persistence.repositories import (
     SqlGitHubInstallationStore,
     SqlHistoryStore,
@@ -35,6 +36,7 @@ class PersistenceUnitOfWork:
 
     engine: Engine
     encryption: EncryptionProvider
+    crypto_erasure: CryptoErasureHook | None = None
 
     def __post_init__(self) -> None:
         self.history = SqlHistoryStore(self.engine)
@@ -43,6 +45,7 @@ class PersistenceUnitOfWork:
         self.webhook_audit = SqlWebhookAuditStore(self.engine)
         self.webhook_jobs = SqlWebhookScanJobStore(self.engine)
         self.outcomes = SqlOutcomeStore(self.engine)
+        self.privacy = SqlPrivacyRepository(self.engine, self.encryption, self.crypto_erasure)
 
     def record_project_scan(self, project_id: str, record: ScanRecord) -> None:
         """Persist scan/findings and advance project baseline in one transaction."""
@@ -109,7 +112,7 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
             revision = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one_or_none()
-        if revision != "20260902_0001":
+        if revision != "20260902_0002":
             raise RuntimeError("Database schema is not at required Alembic revision")
     persistence = PersistenceUnitOfWork(engine, encryption)
 

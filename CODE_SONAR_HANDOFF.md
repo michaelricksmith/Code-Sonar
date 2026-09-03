@@ -19,6 +19,15 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Operational privacy checkpoint: tenant-scoped retention policy, authenticated
+  and audited encrypted export job contract, recovery-gated soft/hard deletion,
+  content-free idempotent receipt, and crypto-erasure integration seam. The MVP
+  export executor runs inline behind asynchronous states. Managed KMS/object
+  storage/backup/PITR/restore drills remain open gates.
+- Operational privacy validation: **459 passed, 2 skipped**, Ruff and strict
+  mypy passed, Alembic reached `20260902_0002`, frontend lint/build passed, npm
+  audit found 0 vulnerabilities, and the live self-scan exercised 8 analyzers.
+
 - Transactional persistence foundation: SQLAlchemy unit of work, Alembic
   tenant-aware schema, PostgreSQL shared-deployment gate, atomic project scans,
   atomic webhook claims/leases, encrypted checkout paths, guarded data root,

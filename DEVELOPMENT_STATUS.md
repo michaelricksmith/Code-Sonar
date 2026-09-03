@@ -3,6 +3,12 @@
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
 > **Authoritative current snapshot — 2026-09-02 PDT**
+- A read-only onboarding preflight now exposes stable, redacted pass/fail codes
+  through an authenticated API and non-zero-exit CLI. It blocks on production
+  auth/tenant, CORS, PostgreSQL/Alembic, encryption, data-root, GitHub,
+  scoring/calibration, privacy, and remediation gates. Ask Sonar is optional.
+  Calibration deliberately remains not validated until approved independent
+  expert labels exist; this is not a deployment or certification claim.
 - Phase 2 began with a responsive application shell, accessible mobile navigation, and a redesigned real-data credit-score command center. The command center preserves the deterministic 300–850 score, grade, category normalization, findings, debt, severity, priority, repository, and scan metadata from the native scan response.
 
 > Product status: private beta; active development. The RICK development environment now includes the verified first capability wave described in `docs/RICK_CAPABILITY_ROADMAP.md`. The historical Checkpoint 6 record below is retained for provenance and is no longer the current repository state.

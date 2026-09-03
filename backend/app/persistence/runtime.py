@@ -73,6 +73,16 @@ def set_external_encryption_provider(provider: EncryptionProvider | None) -> Non
     _external_encryption_provider = provider
 
 
+def production_encryption_provider_available(provider_name: str) -> bool:
+    """Report whether startup can resolve the named production-safe provider."""
+    return bool(
+        provider_name
+        and _external_encryption_provider is not None
+        and _external_encryption_provider.production_safe
+        and provider_name == _external_encryption_provider.provider_name
+    )
+
+
 def get_persistence() -> PersistenceUnitOfWork | None:
     return _persistence
 

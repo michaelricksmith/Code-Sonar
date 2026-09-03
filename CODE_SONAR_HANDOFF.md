@@ -4,6 +4,13 @@
 
 > **Current handoff — 2026-09-02 PDT**
 
+The onboarding checkpoint adds `backend/scripts/readiness.py` and authenticated
+`GET /api/ops/readiness`. Only stable codes and safe summaries leave the
+process; values, paths, tenant IDs, and probe errors are not returned. Default
+calibration is intentionally blocking because approved expert labels are not
+complete. Use the new runbook and data-flow summary; do not treat the software
+gate as deployment evidence or compliance certification.
+
 The UI foundation checkpoint now routes local scans and managed GitHub project
 baselines through one active frontend context. Overview, Findings, Risk Map,
 History, Ask Sonar, and Remediations no longer operate independently from the

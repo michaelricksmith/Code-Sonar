@@ -24,6 +24,8 @@ from app.security import (
     validate_repo_path,
 )
 
+ANALYZER_CONTRACT_VERSION = "1.0"
+
 
 def get_registered_analyzers() -> list[Analyzer]:
     """Return analyzers in deterministic execution order."""
@@ -44,6 +46,7 @@ def get_analyzer_metadata() -> list[dict[str, object]]:
         {
             "name": analyzer.name,
             "analyzer_id": analyzer.name,
+            "version": ANALYZER_CONTRACT_VERSION,
             "category": "general",
             "threshold": getattr(analyzer, "threshold", None),
         }

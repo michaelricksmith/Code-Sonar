@@ -366,6 +366,9 @@ PostgreSQL and a deployment-injected production encryption provider are
 configured; SQLite and the bundled AES-GCM provider are local-development only.
 See [Transactional persistence](docs/TRANSACTIONAL_PERSISTENCE.md) for migration,
 legacy import, filesystem, and remaining-readiness boundaries.
+See [Operational privacy](docs/OPERATIONAL_PRIVACY.md) for tenant retention
+records, encrypted export jobs, the deletion recovery/operator workflow, and
+the explicit managed-KMS/object-storage/backup limitations.
 
 ### API and repository boundary
 

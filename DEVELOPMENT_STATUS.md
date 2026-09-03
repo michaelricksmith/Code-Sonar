@@ -18,6 +18,17 @@
 
 ## Current verified state (2026-08-31)
 
+- Operational privacy foundation now records per-tenant retention and backup
+  lag intent, exposes authenticated/audited encrypted export jobs, and supports
+  a short recovery state followed by an explicit operator hard delete. Deletion
+  is FK-safe and idempotent and invokes a crypto-erasure hook; the surviving
+  receipt contains no tenant ID or customer content.
+- This does **not** provide managed KMS, cloud object storage, automated
+  retention, PITR, deletion from provider backups, or restore drills.
+- Release verification: **459 passed, 2 skipped** locally at 84% measured
+  coverage; frontend lint/build and live eight-analyzer self-scan passed. CI
+  runs the PostgreSQL concurrency case skipped without a local service.
+
 - Transactional persistence foundation is implemented behind existing store
   contracts. PostgreSQL is mandatory outside local development; SQLite remains
   a test/single-process option only. The Alembic schema has tenant-aware keys,

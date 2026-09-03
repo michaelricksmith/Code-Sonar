@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     ForeignKeyConstraint,
     Index,
@@ -140,4 +141,70 @@ migration_ledger = Table(
     Column("imported_at", String(64), nullable=False),
     ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
     UniqueConstraint("tenant_id", "source_sha256"),
+)
+
+tenant_retention_policies = Table(
+    "tenant_retention_policies",
+    metadata,
+    Column("tenant_id", String(128), primary_key=True),
+    Column("scan_retention_days", Integer, nullable=False),
+    Column("audit_retention_days", Integer, nullable=False),
+    Column("export_retention_days", Integer, nullable=False),
+    Column("backup_retention_days", Integer, nullable=False),
+    Column("deletion_recovery_days", Integer, nullable=False),
+    Column("backup_deletion_lag_days", Integer, nullable=False),
+    Column("updated_at", String(64), nullable=False),
+    ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
+)
+
+tenant_lifecycle = Table(
+    "tenant_lifecycle",
+    metadata,
+    Column("tenant_id", String(128), primary_key=True),
+    Column("state", String(32), nullable=False),
+    Column("delete_requested_at", String(64)),
+    Column("hard_delete_eligible_at", String(64)),
+    Column("updated_at", String(64), nullable=False),
+    ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
+)
+
+privacy_jobs = Table(
+    "privacy_jobs",
+    metadata,
+    Column("tenant_id", String(128), primary_key=True),
+    Column("job_id", String(128), primary_key=True),
+    Column("kind", String(32), nullable=False),
+    Column("state", String(32), nullable=False),
+    Column("requested_at", String(64), nullable=False),
+    Column("completed_at", String(64)),
+    Column("archive_ciphertext", Text),
+    Column("archive_sha256", String(64)),
+    Column("archive_version", String(32)),
+    Column("expires_at", String(64)),
+    Column("error_code", String(64)),
+    ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
+)
+
+privacy_audit_events = Table(
+    "privacy_audit_events",
+    metadata,
+    Column("tenant_id", String(128), primary_key=True),
+    Column("event_id", String(128), primary_key=True),
+    Column("action", String(64), nullable=False),
+    Column("resource_id", String(128)),
+    Column("occurred_at", String(64), nullable=False),
+    Column("success", Boolean, nullable=False),
+    ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
+)
+
+# Receipts deliberately have no tenant FK or tenant identifier: they survive crypto-erasure
+# as non-content proof that an operator completed a request.
+deletion_receipts = Table(
+    "deletion_receipts",
+    metadata,
+    Column("receipt_id", String(128), primary_key=True),
+    Column("request_fingerprint", String(64), nullable=False, unique=True),
+    Column("completed_at", String(64), nullable=False),
+    Column("schema_version", String(32), nullable=False),
+    Column("crypto_erasure_status", String(32), nullable=False),
 )

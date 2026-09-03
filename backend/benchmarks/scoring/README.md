@@ -19,3 +19,20 @@ weighted kappa, expert-ordinal Spearman correlation, per-analyzer precision,
 severity agreement, fixed-seed bootstrap confidence intervals, and breakdowns
 by declared stratum. Benchmark releases must be frozen in a new version
 directory before scoring calibration changes are proposed.
+
+The blinded pilot workflow is specified in `REVIEWER_RUBRIC.md`. Start from
+`pilot-manifest.template.json`; `pilot.py validate` validates metadata and
+`pilot.py generate` creates independent packets. Both explicitly report that
+accuracy is not validated. `pilot.py evaluate` refuses metrics until every case
+has two finalized independent labels and finalized adjudication. No command
+fetches repositories, invents labels, or changes scoring.
+
+After two reviewers finalize a case, `pilot.py adjudicate LABEL_A LABEL_B
+--output labels/csb-NNN-adjudication.json` creates a draft form embedding both
+opinions. Complete its resolution fields, mark it finalized, and reference it as
+`adjudicated_label_file` in the case manifest.
+
+`corpus-candidates.json` is the operator-only provenance manifest. It pins
+eight public candidates to exact commits and license files and leaves four
+controlled-fixture slots explicitly unpopulated. Never include this
+identity-bearing file in blinded reviewer packets.

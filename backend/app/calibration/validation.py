@@ -21,6 +21,7 @@ from app.calibration.contracts import (
 
 _CASE_ID = re.compile(r"^csb-[0-9]{3}$")
 _SHA = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_REVIEWER_ID = re.compile(r"^reviewer-[a-z0-9][a-z0-9-]{1,30}$")
 
 
 class EvidenceValidationError(ValueError):
@@ -44,6 +45,12 @@ def verify_artifact_hash(artifact: Mapping[str, Any]) -> None:
     unhashed = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
     if not hmac.compare_digest(claimed, artifact_sha256(unhashed)):
         raise EvidenceValidationError("artifact_sha256 mismatch")
+
+
+def validate_reviewer_id(reviewer_id: str) -> None:
+    """Require a stable pseudonym rather than a name or email address."""
+    if not _REVIEWER_ID.fullmatch(reviewer_id):
+        raise EvidenceValidationError("reviewer_id must be a non-identifying reviewer pseudonym")
 
 
 def _walk_forbidden(value: Any, path: str = "$") -> None:
@@ -99,6 +106,19 @@ def validate_artifact(
     if kind in {"expert_label", "adjudicated_label"}:
         if artifact["grade"] not in GRADES or not 1 <= artifact["ordinal_health"] <= 10:
             raise EvidenceValidationError("invalid grade or ordinal_health")
+    if kind in {"expert_label", "finding_review"}:
+        validate_reviewer_id(str(artifact.get("reviewer_id", "")))
+        confidence = artifact.get("confidence")
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise EvidenceValidationError("confidence must be between 0 and 1")
+    if kind == "adjudicated_label":
+        reviewer_ids = artifact.get("reviewer_ids")
+        if (
+            not isinstance(reviewer_ids, list)
+            or len(set(reviewer_ids)) < 2
+            or any(not _REVIEWER_ID.fullmatch(str(item)) for item in reviewer_ids)
+        ):
+            raise EvidenceValidationError("adjudication requires at least two reviewer pseudonyms")
     if kind == "finding_review":
         if artifact["verdict"] not in FINDING_VERDICTS:
             raise EvidenceValidationError("invalid finding verdict")

@@ -522,6 +522,9 @@ The first-run experience offers three honest entry points: local checkout scanni
 
 ## Scoring authority and calibration
 
+The versioned blinded reviewer workflow and rubric live in
+`backend/benchmarks/scoring/`. Metadata validation never counts as accuracy.
+
 Authoritative scan responses now identify `scoring_version` and report the
 completion status of every registered analyzer. If any analyzer fails, Code
 Sonar returns an incomplete-scan error and does not issue a score or grade.

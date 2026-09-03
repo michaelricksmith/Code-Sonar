@@ -3,6 +3,8 @@
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
 > **Authoritative current snapshot — 2026-09-02 PDT**
+- Calibration review tooling is complete, but approved repositories and real
+  independent expert labels remain required; grade accuracy is unvalidated.
 - A read-only onboarding preflight now exposes stable, redacted pass/fail codes
   through an authenticated API and non-zero-exit CLI. It blocks on production
   auth/tenant, CORS, PostgreSQL/Alembic, encryption, data-root, GitHub,

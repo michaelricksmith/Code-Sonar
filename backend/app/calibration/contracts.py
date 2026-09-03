@@ -9,10 +9,14 @@ from __future__ import annotations
 from typing import Final
 
 CONTRACT_VERSION: Final = "calibration-evidence-v1"
+REVIEW_PACKET_VERSION: Final = "calibration-review-packet-v1"
 ARTIFACT_TYPES: Final = frozenset(
     {"repository_metadata", "frozen_scan", "expert_label", "adjudicated_label", "finding_review"}
 )
 GRADES: Final = frozenset({"A", "B", "C", "D", "F"})
+CATEGORIES: Final = frozenset(
+    {"complexity", "security", "testing", "maintainability", "duplication", "dependencies"}
+)
 SEVERITIES: Final = frozenset({"info", "warning", "error", "critical"})
 FINDING_VERDICTS: Final = frozenset({"true_positive", "false_positive", "uncertain"})
 

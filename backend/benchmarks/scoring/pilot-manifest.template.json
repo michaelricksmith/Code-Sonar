@@ -1,0 +1,17 @@
+{
+  "benchmark_version": "pilot-1",
+  "contract_version": "calibration-evidence-v1",
+  "scoring_version": "1.0",
+  "cases": [
+    {
+      "metadata": {
+        "artifact_type": "repository_metadata",
+        "case_id": "csb-001",
+        "commit_sha": "0000000000000000000000000000000000000000",
+        "contract_version": "calibration-evidence-v1",
+        "strata": {"profile": "replace-me", "shape": "replace-me", "size": "replace-me"}
+      },
+      "scan_file": "findings/csb-001.json"
+    }
+  ]
+}

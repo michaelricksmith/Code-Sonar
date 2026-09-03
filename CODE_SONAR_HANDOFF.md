@@ -4,6 +4,11 @@
 
 > **Current handoff — 2026-09-02 PDT**
 
+`scoring/calibration-reviewer-pilot` adds blinded packet generation and a precise
+review/adjudication protocol. Never commit reviewer identity mappings, repository
+identity, source, or customer data. Evaluation requires two finalized independent
+labels and disagreement-preserving adjudication for every case.
+
 The onboarding checkpoint adds `backend/scripts/readiness.py` and authenticated
 `GET /api/ops/readiness`. Only stable codes and safe summaries leave the
 process; values, paths, tenant IDs, and probe errors are not returned. Default

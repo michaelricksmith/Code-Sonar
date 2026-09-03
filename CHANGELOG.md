@@ -6,6 +6,15 @@ All notable changes to Code Sonar are documented in this file. The
 format is loosely based on [Keep a Changelog](https://keepachangelog.com/)
 without semantic-versioning.
 
+## 2026-09-02 — Blinded calibration pilot workflow
+
+- Added versioned score-blinded review packets, deterministic stratified finding
+  sampling, reviewer/adjudication rubric, and fail-closed pilot orchestration.
+- No repositories, labels, scoring weights, thresholds, or score versions changed.
+- Added an operator-only candidate manifest with eight license-verified public
+  repositories pinned to commits and four explicitly unpopulated controlled
+  slots; repository identity never enters reviewer packets.
+
 ---
 
 ## [Unreleased] — 2026-09-02

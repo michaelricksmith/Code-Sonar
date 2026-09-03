@@ -10,6 +10,14 @@ without semantic-versioning.
 
 ## [Unreleased] — 2026-09-02
 
+### Onboarding readiness
+
+- Added a redacted production preflight CLI and authenticated API with stable
+  blocker codes and a non-blocking Ask Sonar provider check.
+- Versioned the analyzer execution contract alongside scoring authority.
+- Added operator onboarding and client data-flow/privacy documentation without
+  claiming certification or external deployment.
+
 ### Added
 - Added tenant retention-policy records and authenticated/audited privacy APIs;
   encrypted, versioned export jobs exclude host paths, secrets, and tenant IDs.

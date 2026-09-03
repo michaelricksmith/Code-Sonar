@@ -20,6 +20,12 @@ your machine.
 > See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
 > acceptance gate.
 
+Production onboarding has a redacted preflight at `GET /api/ops/readiness` and
+`backend/scripts/readiness.py`. It fails closed on missing security,
+persistence, integration, scoring-calibration, privacy, and remediation gates.
+See [`docs/CLIENT_ONBOARDING_RUNBOOK.md`](docs/CLIENT_ONBOARDING_RUNBOOK.md) and
+[`docs/CLIENT_DATA_FLOW_AND_PRIVACY.md`](docs/CLIENT_DATA_FLOW_AND_PRIVACY.md).
+
 ---
 
 ## Table of contents

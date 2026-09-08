@@ -1,4 +1,4 @@
-# Code Sonar — Development Status
+> **2026-09-08 remediation proof checkpoint:** Branch `remediation/cursor-e2e-proof` adds one concrete real-Git integration test spanning the controlled remediation workflow. It verifies tests, real rescan, finding resolution, positive deterministic score movement, negative debt movement, active-checkout isolation, outcome labeling, and cleanup. The external Cursor process boundary is deterministic in CI; installed-Cursor evidence on the authorized Windows host remains an explicit release gate.\n\n# Code Sonar — Development Status
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 

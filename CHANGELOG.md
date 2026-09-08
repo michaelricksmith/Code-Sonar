@@ -1,4 +1,4 @@
-# Code Sonar — Changelog
+## 2026-09-08 — Cursor remediation proof\n\n- Added a concrete real-Git integration test spanning authorization, isolated worktree creation, Cursor executor boundary, validation tests, Code Sonar rescan, deterministic score/debt comparison, outcome persistence, active-checkout isolation, and cleanup.\n- Added a fail-closed operator evidence gate for the required installed-Cursor run on the authorized Windows development host.\n- No production Cursor-success claim is made until that host evidence passes.\n\n---\n\n# Code Sonar — Changelog
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 

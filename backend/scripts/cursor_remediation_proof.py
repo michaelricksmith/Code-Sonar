@@ -34,6 +34,20 @@ def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _cursor_agent_prefix() -> tuple[str, ...]:
+    """Return a directly executable Cursor Agent command for this platform."""
+    if os.name != "nt":
+        return ("agent",)
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if not local_app_data:
+        raise RuntimeError("LOCALAPPDATA is unavailable; Cursor Agent shim cannot be resolved")
+    shim = Path(local_app_data) / "cursor-agent" / "agent.cmd"
+    if not shim.is_file():
+        raise RuntimeError(f"Cursor Agent Windows shim was not found: {shim}")
+    return ("cmd.exe", "/d", "/c", str(shim))
+
+
 def _scan(repository: Path):
     result = scan_repository(repository)
     if not isinstance(result, ScanExecutionResult) or not result.complete:
@@ -71,7 +85,10 @@ def main() -> int:
     if code_sonar_status:
         raise RuntimeError("Code Sonar proof checkout must be clean")
 
-    cursor_version = _run(["agent", "--version"], code_sonar_root).stdout.strip()
+    agent_prefix = _cursor_agent_prefix()
+    cursor_version = _run(
+        [*agent_prefix, "--version"], code_sonar_root
+    ).stdout.strip()
     if not cursor_version:
         raise RuntimeError("Cursor Agent CLI version could not be verified")
 
@@ -128,7 +145,7 @@ def main() -> int:
     workspace_manager = GitWorktreeManager(root=worktree_root)
     executor = CursorRemediationExecutor(
         (
-            "agent",
+            *agent_prefix,
             "-p",
             "--force",
             "--trust",

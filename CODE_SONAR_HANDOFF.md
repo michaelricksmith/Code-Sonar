@@ -1,4 +1,4 @@
-# Code Sonar — End-of-Day Handoff
+## 2026-09-08 — Cursor remediation proof\n\nBranch `remediation/cursor-e2e-proof` adds a concrete real-Git integration test and operator evidence gate for finding → isolated worktree → Cursor executor → tests → rescan → score improvement → cleanup. CI substitutes only the external Cursor binary boundary. Do not claim the complete Cursor proof until the guarded workflow is executed on Michael Smith's authorized Windows host and sanitized evidence is committed under `docs/evidence/`. See `docs/cursor-remediation-proof.md`.\n\n# Code Sonar — End-of-Day Handoff
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 

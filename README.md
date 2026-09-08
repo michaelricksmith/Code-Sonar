@@ -1,4 +1,4 @@
-# Code Sonar
+> **Cursor remediation proof in progress (2026-09-08):** A concrete real-Git integration test now covers authorization, isolated worktree execution, tests, rescan, deterministic score improvement, active-checkout isolation, outcome capture, and cleanup. CI simulates only the external Cursor binary boundary. An installed-Cursor run on the authorized Windows host is still required before claiming the complete proof. See [docs/cursor-remediation-proof.md](docs/cursor-remediation-proof.md).\n\n# Code Sonar
 
 **Created, built, and owned by Michael Smith (GitHub: [michaelricksmith](https://github.com/michaelricksmith)).**
 

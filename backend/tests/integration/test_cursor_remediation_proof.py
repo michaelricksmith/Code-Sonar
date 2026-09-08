@@ -85,7 +85,7 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
         finding
         for finding in before_findings
         if finding.analyzer == "comment_markers"
-        and finding.file_path == "src/app.py"
+        and Path(finding.file_path).as_posix() == "src/app.py"
     )
     history = InMemoryHistoryStore()
     history.append(

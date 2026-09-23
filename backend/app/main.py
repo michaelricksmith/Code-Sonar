@@ -1,10 +1,13 @@
 """FastAPI application entry point."""
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.ask_sonar.api import router as ask_sonar_router
@@ -107,8 +110,19 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Directory holding the built dashboard SPA (`npm run build` in frontend/).
+# Resolved against the process working directory so it works both from a repo
+# checkout and from an installed package. When absent (local dev), the API
+# behaves exactly as before and the Vite dev server serves the UI.
+FRONTEND_DIST = Path(os.environ.get("CODESONAR_FRONTEND_DIST", "frontend/dist")).resolve()
+
+
 @app.get("/")
-async def root() -> dict[str, str]:
+async def root() -> Any:
+    """Serve the dashboard SPA when built; otherwise the plain API greeting."""
+    index = FRONTEND_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index)
     return {"message": "Code Sonar API", "version": "0.1.0"}
 
 
@@ -462,3 +476,12 @@ async def drift(
                 )
 
     return compute_drift(baseline, current).to_dict()
+
+
+if (FRONTEND_DIST / "index.html").is_file():
+    # Serve the dashboard SPA (and its assets) from the same origin as the API,
+    # so the UI's relative "/api" calls work with no CORS configuration.
+    # Registered last so every /api/* route, /health, and /docs takes
+    # precedence; html=True falls back to index.html for client-side
+    # routes like /app.
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")

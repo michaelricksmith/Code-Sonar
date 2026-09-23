@@ -1,0 +1,65 @@
+# Render Blueprint — Code Sonar public beta (one-click deploy).
+#
+# Dashboard flow for the operator (Michael):
+#   Render → New → Blueprint → select michaelricksmith/Code-Sonar → Apply.
+#
+# Architecture (free tier): ONE Python web service. The FastAPI backend also
+# serves the built dashboard SPA from the same origin (see backend/app/main.py),
+# because the UI calls the API via relative "/api" URLs and Render static-site
+# rewrites cannot proxy to another service. Same-origin also keeps the
+# HttpOnly Secure SameSite=Lax session cookie working with no CORS hacks.
+#
+# No database: sessions are signed cookies; scan history is ephemeral by
+# design (jobs do not survive a restart — disclosed in README "Current limits").
+#
+# After the FIRST deploy Render shows the public URL (e.g.
+# https://code-sonar.onrender.com). Then:
+#   1. Set SONAR_PUBLIC_URL and CODESONAR_CORS_ORIGINS to that URL (no trailing
+#      slash) in the service's Environment tab and redeploy.
+#   2. Register the GitHub OAuth App and Google OAuth client with redirect URIs
+#      <SONAR_PUBLIC_URL>/api/auth/github/callback and
+#      <SONAR_PUBLIC_URL>/api/auth/google/callback, then fill in the four
+#      OAuth env vars below and redeploy.
+# Until step 1, the API runs; sign-in buttons report "not configured" honestly.
+
+services:
+  - type: web
+    name: code-sonar
+    runtime: python
+    plan: free
+    buildCommand: "pip install ./backend && npm ci --prefix frontend && npm run build --prefix frontend"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      # Browser-cookie auth mode for the hosted dashboard: the UI signs in via
+      # GitHub/Google OAuth session cookies, not Bearer API tokens.
+      - key: CODESONAR_LOCAL_DEV
+        value: "1"
+      # Hosted AI provider selection. Leave empty until you add a provider key
+      # below; Ask Sonar reports "not configured" honestly until then. Users
+      # can also supply their own key per-request in the app (never stored).
+      - key: ASK_SONAR_PROVIDER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SONAR_SESSION_SECRET
+        sync: false
+      # Public URL of THIS service, e.g. https://code-sonar.onrender.com
+      # (no trailing slash). Unknown until the first deploy — fill in after,
+      # then redeploy. Required for OAuth redirect URIs and session cookies.
+      - key: SONAR_PUBLIC_URL
+        sync: false
+      # Must match SONAR_PUBLIC_URL (comma-separated if more than one).
+      # Same reason: unknown until the first deploy.
+      - key: CODESONAR_CORS_ORIGINS
+        sync: false

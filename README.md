@@ -556,6 +556,26 @@ client**, then set each provider's authorized redirect URI to
 supply their own AI provider key in the app (sent per-request, never
 stored).
 
+### Deploy to Render (free tier)
+
+The repo ships a `render.yaml` Blueprint: **Render → New → Blueprint →
+select `michaelricksmith/Code-Sonar` → Apply**. It provisions one free Python
+web service; the backend also serves the built dashboard SPA from the same
+origin (no separate static site, no CORS hacks needed).
+
+After the first deploy Render shows the public URL. Then, in the service's
+**Environment** tab:
+
+1. Set `SONAR_PUBLIC_URL` and `CODESONAR_CORS_ORIGINS` to that URL (no
+   trailing slash) and redeploy.
+2. Register the GitHub OAuth App and Google OAuth client with the redirect
+   URIs above, fill in the four OAuth env vars plus `SONAR_SESSION_SECRET`,
+   and redeploy.
+
+Until step 1 the API runs but sign-in reports "not configured". The free
+service sleeps after 15 minutes idle (30–60 s cold start); scan jobs do not
+survive restarts.
+
 ## Current limits (honest)
 
 - Deep analysis is Python-focused; other languages get structural checks.

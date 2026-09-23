@@ -12,6 +12,7 @@
 - Startup validation now also passes when `SONAR_SESSION_SECRET` is explicitly
   set (fail-closed otherwise). The Blueprint marks `SONAR_SESSION_SECRET` as
   required on the first deploy.
+- `validate_persistence_config` no longer demands PostgreSQL when no database is configured at all: the hosted beta's no-database posture (signed-cookie sessions, ephemeral history) now starts with a loud warning instead of refusing to boot. SQLite/non-PostgreSQL URLs in shared mode are still rejected.
 - New regression tests: `backend/tests/security/test_session_cookie_auth.py`
   (valid/tampered/expired/unknown-user cookies, Bearer coexistence, anonymous
   OAuth handshake reachability, fail-closed startup, unchanged local-dev

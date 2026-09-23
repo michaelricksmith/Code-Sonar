@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,6 +97,21 @@ def validate_persistence_config(config: PersistenceConfig) -> None:
             )
             if worker_count != 1:
                 raise RuntimeError("SQLite persistence requires a single local worker")
+        validate_data_root(config.data_root)
+        return
+    if config.database_url is None:
+        # No SQL persistence configured: the app runs with ephemeral
+        # file/in-memory stores (scan history does not survive restarts).
+        # This is a supported production posture for the hosted beta — warn
+        # loudly instead of demanding a database the operator never asked for.
+        print(
+            "WARNING: CODESONAR_DATABASE_URL is not set; running without SQL "
+            "persistence. Scan history, projects, and related records are "
+            "ephemeral and will not survive a restart. Set "
+            "CODESONAR_DATABASE_URL to a PostgreSQL URL for durable storage.",
+            file=sys.stderr,
+            flush=True,
+        )
         validate_data_root(config.data_root)
         return
     if not config.is_postgresql:

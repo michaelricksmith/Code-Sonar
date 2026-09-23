@@ -125,6 +125,21 @@ def test_sql_repositories_deny_cross_tenant(
         reset_tenant(second)
 
 
+def test_shared_mode_allows_no_database_ephemeral(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No DATABASE_URL in shared mode: ephemeral posture with a loud warning.
+
+    The hosted beta runs without a database by design (signed-cookie sessions,
+    ephemeral scan history); startup must not demand PostgreSQL when the
+    operator configured no database at all.
+    """
+    monkeypatch.setenv("CODESONAR_LOCAL_DEV", "0")
+    monkeypatch.delenv("CODESONAR_DATABASE_URL", raising=False)
+    validate_persistence_config(PersistenceConfig(None, tmp_path))
+    assert "CODESONAR_DATABASE_URL is not set" in capsys.readouterr().err
+
+
 def test_shared_mode_rejects_sqlite_and_local_encryption(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

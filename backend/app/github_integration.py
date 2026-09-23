@@ -58,7 +58,10 @@ class GitHubIntegration:
         self.auth_mode = configured_mode.strip().lower()
         self.installation_id = installation_id
         self.checkout_root = checkout_root or (Path.home() / ".code-sonar" / "repositories")
-        self.client = client or httpx.Client(timeout=20.0)
+        # trust_env=False: this VM's proxy env contains bracketed IPv6 NO_PROXY
+        # entries (e.g. [::1]) that httpx cannot parse at client construction;
+        # GitHub API calls go direct, matching the fail-closed default here.
+        self.client = client or httpx.Client(timeout=20.0, trust_env=False)
 
     @property
     def configured(self) -> bool:

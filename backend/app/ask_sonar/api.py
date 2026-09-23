@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.ask_sonar.answering import validate_grounded_answer
+from app.ask_sonar.answering import AnswerProviderProtocol, validate_grounded_answer
 from app.ask_sonar.context import build_grounding_context
 from app.ask_sonar.remediation import build_remediation_plan
-from app.ask_sonar.runtime import get_answer_provider, get_scan
+from app.ask_sonar.runtime import (
+    build_transient_byok_provider,
+    get_answer_provider,
+    get_provider_registry,
+    get_scan,
+)
 from app.history import ScanRecord
 from app.remediation.runtime import (
     get_authorization_service,
@@ -95,16 +100,52 @@ async def grounding_context(
     )
 
 
+@router.get("/providers")
+async def ask_sonar_providers() -> dict[str, Any]:
+    """List available Ask Sonar providers without contacting any of them."""
+    return {"providers": get_provider_registry()}
+
+
+def _resolve_provider(
+    x_ai_provider: str | None, x_ai_api_key: str | None
+) -> AnswerProviderProtocol | None:
+    """Resolve the answer provider: transient BYOK wins over the env default.
+
+    BYOK keys are used for the single request only and are never persisted
+    or logged.
+    """
+    if x_ai_provider is None and x_ai_api_key is None:
+        return get_answer_provider()
+    try:
+        return build_transient_byok_provider(x_ai_provider or "", x_ai_api_key or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/ask")
-async def ask_sonar(request: AskSonarRequest) -> dict[str, Any]:
-    """Answer only from the sanitized grounding bundle for the requested scan."""
-    provider = get_answer_provider()
+async def ask_sonar(
+    request: AskSonarRequest,
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_api_key: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Answer only from the sanitized grounding bundle for the requested scan.
+
+    Optional X-AI-Provider ("openai" | "anthropic") + X-AI-API-Key headers
+    select a transient bring-your-own-key provider for this request only.
+    """
+    provider = _resolve_provider(x_ai_provider, x_ai_api_key)
     if provider is None:
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "ask_sonar_provider_unavailable",
-                "message": "No approved Ask Sonar answer provider is configured",
+                "message": (
+                    "No Ask Sonar answer provider is configured. Set "
+                    "ASK_SONAR_PROVIDER=ollama for the self-hosted option, "
+                    "ASK_SONAR_PROVIDER=openai with OPENAI_API_KEY, "
+                    "ASK_SONAR_PROVIDER=anthropic with ANTHROPIC_API_KEY, "
+                    "or pass X-AI-Provider and X-AI-API-Key headers."
+                ),
             },
         )
 

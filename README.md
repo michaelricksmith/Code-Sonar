@@ -13,12 +13,13 @@ metric (300–850), and tells you *why* it is what it is — which files
 carry the most risk, what the dominant failure modes are, and what
 changed since your last scan.
 
-It is **deterministic, explainable, and self-hosted**. No data leaves
-your machine.
+It is **deterministic and explainable**: the 300–850 score is computed by
+local analyzers with no LLM and no randomness. The app can run fully
+self-hosted; hosted features (GitHub/Google sign-in and hosted AI
+explanations for Ask Sonar) send only what those features need to their
+providers. We read your code to score it — we never train on it.
 
-> **Status:** v0.1.0-beta.1 (private-beta prerelease, internal only).
-> See [`PRIVATE_BETA_CHECKLIST.md`](PRIVATE_BETA_CHECKLIST.md) for the
-> acceptance gate.
+> **Status:** v0.2.0-beta (public beta).
 
 Production onboarding has a redacted preflight at `GET /api/ops/readiness` and
 `backend/scripts/readiness.py`. It fails closed on missing security,
@@ -237,11 +238,11 @@ The grade bands are:
 
 | Score | Grade | Interpretation |
 |---|---|---|
-| 850–950 | A | Healthy — minor debt, well-tested |
-| 750–849 | B | Some debt, manageable |
-| 650–749 | C | Notable debt, address soon |
-| 550–649 | D | Significant debt, plan remediation |
-| 300–549 | F | Severe debt, prioritize fixes |
+| 800–850 | A | Healthy — minor issues, well-kept code |
+| 740–799 | B | Good shape — a few things to tidy up |
+| 670–739 | C | Fair — several issues worth fixing soon |
+| 580–669 | D | Needs attention — plan your fixes |
+| 300–579 | F | Critical — prioritize fixes now |
 
 **The score is computed in three layers:**
 
@@ -518,7 +519,51 @@ another scan, and understand what changed.
 
 ## Repository onboarding
 
-The first-run experience offers three honest entry points: local checkout scanning through the native `POST /api/scan` `repo_path` contract; managed repository connection through the existing GitHub App/project workflow; and a visibly disabled ZIP option marked as coming soon. The onboarding layer preserves the deterministic 300–850 score as the product authority. Ask Sonar and ML remain evidence-grounded advisory layers.
+The first-run experience is built for people who are not engineers:
+
+1. **Sign in** with GitHub or Google (OAuth — no password).
+2. **Pick a repo** from your GitHub repositories, or paste a repo URL.
+3. **First scan** runs with an animated progress screen, then reveals your
+   score with a plain-language explanation of what it means.
+4. **Fix the top issue** — every issue has a guided, step-by-step fix flow,
+   plus an optional "Fix this for me" approval-gated remediation.
+
+The onboarding layer preserves the deterministic 300–850 score as the
+product authority. Ask Sonar and ML remain evidence-grounded advisory
+layers. The native `POST /api/scan` `repo_path` contract still works for
+local checkouts and self-hosted use.
+
+## Hosted setup (operators)
+
+Sign-in and hosted AI features are configured entirely through environment
+variables — no secrets are ever committed to the repo:
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth App credentials |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client credentials |
+| `SONAR_PUBLIC_URL` | Public base URL, e.g. `https://sonar.example.com` (used for OAuth redirect URIs) |
+| `SONAR_SESSION_SECRET` | Signs session cookies (falls back to a random per-process secret with a warning — set it in production) |
+| `ASK_SONAR_PROVIDER` | `ollama` (self-host default), `openai`, or `anthropic` |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Hosted provider keys (server default) |
+| `ASK_SONAR_BASE_URL` / `ASK_SONAR_MODEL` | Override hosted endpoint/model |
+| `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
+
+To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth
+client**, then set each provider's authorized redirect URI to
+`<SONAR_PUBLIC_URL>/api/auth/github/callback` and
+`<SONAR_PUBLIC_URL>/api/auth/google/callback` respectively. Users can also
+supply their own AI provider key in the app (sent per-request, never
+stored).
+
+## Current limits (honest)
+
+- Deep analysis is Python-focused; other languages get structural checks.
+- Scan jobs run in-process (threaded) — there is no persistent background
+  queue yet, so jobs don't survive a restart.
+- The complete Cursor-remediation proof still requires the installed-Cursor
+  host run noted at the top of this README; CI covers everything up to the
+  external Cursor binary boundary.
 
 ## Scoring authority and calibration
 

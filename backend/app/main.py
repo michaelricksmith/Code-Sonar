@@ -21,11 +21,13 @@ from app.history import (
 )
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
+from app.oauth import router as oauth_router
 from app.persistence.privacy_api import router as privacy_router
 from app.projects import get_project_store
 from app.projects import router as projects_router
 from app.readiness_api import router as readiness_router
 from app.remediation.api import router as remediation_router
+from app.scan_jobs import router as scan_job_router
 from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
@@ -55,6 +57,8 @@ async def validate_security_configuration() -> None:
 
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
+app.include_router(oauth_router)
+app.include_router(scan_job_router)
 app.include_router(remediation_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)

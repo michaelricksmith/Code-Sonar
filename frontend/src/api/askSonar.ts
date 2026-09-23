@@ -66,8 +66,15 @@ export interface RemediationPlanResponse {
   deterministic_score_unchanged: true;
 }
 
-export interface RemediationValidationResult {
-  before_scan_id: string;
+export interface AiProvider {
+  name: string;
+  label: string;
+  configured: boolean;
+  /** "env" (server-configured) | "byok" (bring your own key) | other source label */
+  source: string;
+}
+
+export interface RemediationValidationResult {  before_scan_id: string;
   after_scan_id: string;
   finding_resolved: boolean;
   regression_detected: boolean;
@@ -125,15 +132,28 @@ export async function fetchAskSonarStatus(): Promise<AskSonarStatus> {
   return (await res.json()) as AskSonarStatus;
 }
 
-export async function askSonar(input: {
-  scanId: string;
-  question: string;
-  topFindingsLimit?: number;
-  similarLimit?: number;
-}): Promise<GroundedAnswerResponse> {
+export async function fetchAiProviders(): Promise<AiProvider[]> {
+  const res = await fetch(`${API_BASE}/providers`);
+  if (!res.ok) throw await decodeError(res, "Failed to read AI providers");
+  const data = await res.json();
+  return (data.providers ?? data ?? []) as AiProvider[];
+}
+
+export async function askSonar(
+  input: {
+    scanId: string;
+    question: string;
+    topFindingsLimit?: number;
+    similarLimit?: number;
+  },
+  opts: { provider?: string; apiKey?: string } = {},
+): Promise<GroundedAnswerResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.provider) headers["X-AI-Provider"] = opts.provider;
+  if (opts.apiKey) headers["X-AI-API-Key"] = opts.apiKey;
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       scan_id: input.scanId,
       question: input.question,

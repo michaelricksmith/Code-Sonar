@@ -398,7 +398,9 @@ class GitHubAppAuth:
             if private_key is not None
             else os.getenv("CODE_SONAR_GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
         )
-        self.client = client or httpx.Client(timeout=20.0)
+        # trust_env=False: see app/github_integration.py — bracketed IPv6
+        # NO_PROXY entries on this VM break httpx proxy parsing at import.
+        self.client = client or httpx.Client(timeout=20.0, trust_env=False)
 
     @property
     def configured(self) -> bool:

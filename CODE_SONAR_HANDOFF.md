@@ -2,7 +2,21 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Current handoff — 2026-09-02 PDT**
+> **Current handoff — 2026-09-23 PDT**
+
+Public-beta launch state. What's new since 2026-09-08: GitHub/Google OAuth
+(`backend/app/oauth.py`), async scan jobs (`backend/app/scan_jobs.py` —
+clones into `<scan-root>/workspaces/<job_id>/` so path-containment
+validation accepts it; fixed 2026-09-23 after a live E2E found the old
+`~/.code-sonar/workspaces` path failed validation), hosted Ask Sonar
+providers with BYOK (`backend/app/ask_sonar/providers/`), full light-theme
+frontend rebuild (`frontend/src/`, copy map in `frontend/src/copy/`,
+landing + onboarding wizard + guided remediation). License stays
+proprietary "All rights reserved". Next: deploy with OAuth credentials
+registered (GitHub OAuth App + Google OAuth client; see README "Hosted
+setup"), then flip the GitHub repo to public.
+
+> Previous handoff — 2026-09-02 PDT
 
 `scoring/calibration-reviewer-pilot` adds blinded packet generation and a precise
 review/adjudication protocol. Never commit reviewer identity mappings, repository

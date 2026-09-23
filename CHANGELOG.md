@@ -1,9 +1,30 @@
+## 2026-09-23 \u2014 Hosted auth without the dev flag
+
+- The API boundary middleware now accepts a valid signed `sonar_session`
+  cookie as a first-class production authentication path, equivalent to a
+  Bearer token. The OAuth handshake endpoints (`/api/auth/{github,google}/login`
+  and `/callback`) stay publicly reachable so sign-in can start; every other
+  `/api/` route fails closed (401) without a valid Bearer token or session
+  cookie.
+- `CODESONAR_LOCAL_DEV=1` is no longer required for hosted operation and has
+  been removed from `render.yaml`. It keeps its local-dev behavior: with no
+  credentials configured, local requests still pass through unauthenticated.
+- Startup validation now also passes when `SONAR_SESSION_SECRET` is explicitly
+  set (fail-closed otherwise). The Blueprint marks `SONAR_SESSION_SECRET` as
+  required on the first deploy.
+- New regression tests: `backend/tests/security/test_session_cookie_auth.py`
+  (valid/tampered/expired/unknown-user cookies, Bearer coexistence, anonymous
+  OAuth handshake reachability, fail-closed startup, unchanged local-dev
+  bypass).
+
+---
+
 ## 2026-09-23 \u2014 One-click Render deploy (free tier)
 
 - Added `render.yaml` Blueprint: one free Python web service (`pip install ./backend`, frontend `npm ci && npm run build`, `uvicorn app.main:app`). No database; sessions are signed cookies.
 - The backend now serves the built dashboard SPA from the same origin when `frontend/dist` exists (guarded: local dev without a build behaves exactly as before). This keeps the UI's relative `/api` calls and the SameSite=Lax session cookie working with no CORS configuration \u2014 a separate Render static site cannot proxy `/api` to the backend.
 - Render deploy is a two-step URL dance (documented in README): deploy once, then set `SONAR_PUBLIC_URL` / `CODESONAR_CORS_ORIGINS` to the public URL and redeploy before registering the GitHub/Google OAuth apps.
-- `CODESONAR_LOCAL_DEV=1` is set in the Blueprint so the hosted dashboard's OAuth session-cookie flow is accepted by the API boundary middleware (the UI does not use Bearer tokens).
+- ~~Superseded 2026-09-23 (see entry above): `CODESONAR_LOCAL_DEV=1` was set in the Blueprint so the hosted dashboard's OAuth session-cookie flow was accepted by the API boundary middleware.~~
 
 ---
 

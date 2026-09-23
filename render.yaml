@@ -20,7 +20,11 @@
 #      <SONAR_PUBLIC_URL>/api/auth/github/callback and
 #      <SONAR_PUBLIC_URL>/api/auth/google/callback, then fill in the four
 #      OAuth env vars below and redeploy.
-# Until step 1, the API runs; sign-in buttons report "not configured" honestly.
+# Until step 1, the API runs but sign-in reports "not configured" honestly.
+#
+# REQUIRED for startup: SONAR_SESSION_SECRET (any long random string). The
+# server fails closed and refuses to start without it, an API token, or local
+# dev mode. Set it on the FIRST deploy — do not leave it empty.
 
 services:
   - type: web
@@ -31,10 +35,6 @@ services:
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
-      # Browser-cookie auth mode for the hosted dashboard: the UI signs in via
-      # GitHub/Google OAuth session cookies, not Bearer API tokens.
-      - key: CODESONAR_LOCAL_DEV
-        value: "1"
       # Hosted AI provider selection. Leave empty until you add a provider key
       # below; Ask Sonar reports "not configured" honestly until then. Users
       # can also supply their own key per-request in the app (never stored).
@@ -52,6 +52,8 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
+      # REQUIRED for startup (see header comment): any long random string.
+      # The service fails closed and will not start until this is set.
       - key: SONAR_SESSION_SECRET
         sync: false
       # Public URL of THIS service, e.g. https://code-sonar.onrender.com

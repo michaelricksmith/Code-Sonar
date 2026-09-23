@@ -11,9 +11,21 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
+from app.oauth import current_user, session_secret_configured
 from app.security.tenant import LOCAL_TENANT_ID, bind_tenant, reset_tenant
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+# OAuth handshake endpoints must be reachable without authentication so a
+# signed-out user can START sign-in. Everything else under /api/ requires a
+# valid Bearer token or a valid signed session cookie.
+PUBLIC_AUTH_PATHS = frozenset(
+    {
+        "/api/auth/github/login",
+        "/api/auth/google/login",
+        "/api/auth/github/callback",
+        "/api/auth/google/callback",
+    }
+)
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -42,10 +54,15 @@ def configured_origins() -> tuple[str, ...]:
 def validate_runtime_security_config() -> None:
     host = os.environ.get("CODESONAR_HOST", "127.0.0.1").strip().lower()
     credentials = configured_tenant_credentials()
-    if not credentials and (not local_dev_enabled() or host not in LOCAL_HOSTS):
+    if (
+        not credentials
+        and not session_secret_configured()
+        and (not local_dev_enabled() or host not in LOCAL_HOSTS)
+    ):
         raise RuntimeError(
-            "CODESONAR_API_TOKEN is required unless CODESONAR_LOCAL_DEV=1 "
-            "and CODESONAR_HOST is loopback"
+            "CODESONAR_API_TOKEN is required unless SONAR_SESSION_SECRET is set "
+            "(OAuth session-cookie auth) or CODESONAR_LOCAL_DEV=1 and "
+            "CODESONAR_HOST is loopback"
         )
     configured_origins()
 
@@ -97,7 +114,13 @@ def _authenticate_tenant(authorization: str) -> str | None:
 
 
 class ApiBoundaryMiddleware(BaseHTTPMiddleware):
-    """Enforce bearer authentication and an exact CORS origin allowlist."""
+    """Enforce authentication and an exact CORS origin allowlist.
+
+    Authentication is satisfied by EITHER a valid Bearer token (server-owned
+    tenant credential) OR a valid signed ``sonar_session`` cookie (OAuth
+    sign-in). No dev flag is required for hosted operation; the OAuth
+    handshake paths stay public so sign-in can start.
+    """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         origin = request.headers.get("origin")
@@ -109,14 +132,19 @@ class ApiBoundaryMiddleware(BaseHTTPMiddleware):
             request.method != "OPTIONS"
             and request.url.path.startswith("/api/")
             and request.url.path != WEBHOOK_PATH
+            and request.url.path not in PUBLIC_AUTH_PATHS
         ):
             credentials = configured_tenant_credentials()
             tenant_id = _authenticate_tenant(request.headers.get("authorization", ""))
-            if credentials and tenant_id is None:
-                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-            if not credentials and not local_dev_enabled():
-                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+            session_user = current_user(request) if tenant_id is None else None
+            if tenant_id is None and session_user is None:
+                # Local dev without any configured credential keeps its
+                # unauthenticated ergonomics; every other deployment fails closed.
+                if credentials or not local_dev_enabled():
+                    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
+            # Session-cookie users share the local tenant, matching the
+            # single-tenant dashboard posture.
             tenant_token = bind_tenant(tenant_id or LOCAL_TENANT_ID)
         else:
             tenant_token = bind_tenant(LOCAL_TENANT_ID)

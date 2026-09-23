@@ -393,8 +393,11 @@ the explicit managed-KMS/object-storage/backup limitations.
   payload's installation ID against the server-owned installation registry.
   That binding follows queued scans and scopes webhook job/audit reads. Unknown
   installations cannot claim or resolve a tenant project.
-- The server refuses to start without a token. Tokenless operation requires
-  both `CODESONAR_LOCAL_DEV=1` and a loopback `CODESONAR_HOST`.
+- The server refuses to start without authentication configured. Valid
+  production postures: `CODESONAR_API_TOKEN` (or `CODESONAR_API_TENANT_TOKENS`)
+  for Bearer-token clients, or `SONAR_SESSION_SECRET` for OAuth
+  session-cookie sign-in. Tokenless, secretless operation requires both
+  `CODESONAR_LOCAL_DEV=1` and a loopback `CODESONAR_HOST`.
 - `CODESONAR_CORS_ORIGINS` is a comma-separated exact origin allowlist. Its
   defaults include only the local frontend on ports 3000 and 5173.
 - Caller-supplied scan, hotspot, history/drift, and remediation source paths
@@ -569,12 +572,12 @@ After the first deploy Render shows the public URL. Then, in the service's
 1. Set `SONAR_PUBLIC_URL` and `CODESONAR_CORS_ORIGINS` to that URL (no
    trailing slash) and redeploy.
 2. Register the GitHub OAuth App and Google OAuth client with the redirect
-   URIs above, fill in the four OAuth env vars plus `SONAR_SESSION_SECRET`,
-   and redeploy.
+   URIs above, fill in the four OAuth env vars, and redeploy.
 
-Until step 1 the API runs but sign-in reports "not configured". The free
-service sleeps after 15 minutes idle (30–60 s cold start); scan jobs do not
-survive restarts.
+Set `SONAR_SESSION_SECRET` (any long random string) on the **first** deploy —
+the server fails closed and will not start without it. Until step 2, sign-in
+reports "not configured". The free service sleeps after 15 minutes idle
+(30–60 s cold start); scan jobs do not survive restarts.
 
 ## Current limits (honest)
 

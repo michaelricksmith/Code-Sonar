@@ -123,6 +123,15 @@ def _session_secret() -> str:
     return secrets.token_hex(32)
 
 
+def session_secret_configured() -> bool:
+    """True when the operator explicitly set SONAR_SESSION_SECRET.
+
+    An explicitly configured session secret means OAuth session-cookie auth is
+    available as a production authentication path (no dev flag required).
+    """
+    return bool(os.environ.get("SONAR_SESSION_SECRET", "").strip())
+
+
 def oauth_config() -> OAuthConfig:
     return OAuthConfig(
         github_client_id=os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip(),

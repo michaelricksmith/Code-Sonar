@@ -117,13 +117,30 @@ async def health() -> dict[str, str]:
 FRONTEND_DIST = Path(os.environ.get("CODESONAR_FRONTEND_DIST", "frontend/dist")).resolve()
 
 
+def _spa_index() -> FileResponse | None:
+    """The built dashboard's index.html, or None when it hasn't been built."""
+    index = FRONTEND_DIST / "index.html"
+    return FileResponse(index) if index.is_file() else None
+
+
 @app.get("/")
 async def root() -> Any:
     """Serve the dashboard SPA when built; otherwise the plain API greeting."""
-    index = FRONTEND_DIST / "index.html"
-    if index.is_file():
-        return FileResponse(index)
-    return {"message": "Code Sonar API", "version": "0.1.0"}
+    return _spa_index() or {"message": "Code Sonar API", "version": "0.1.0"}
+
+
+@app.get("/app")
+@app.get("/app/{_rest:path}")
+async def app_root() -> Any:
+    """Dashboard SPA entry point — OAuth callbacks 302 here.
+
+    The React router is hash-based (#/app/...), so /app is the only
+    server-side client route that must exist.
+    """
+    index = _spa_index()
+    if index is None:
+        raise HTTPException(status_code=404, detail="Dashboard not built")
+    return index
 
 
 @app.get("/api/analyzers")
@@ -479,9 +496,8 @@ async def drift(
 
 
 if (FRONTEND_DIST / "index.html").is_file():
-    # Serve the dashboard SPA (and its assets) from the same origin as the API,
+    # Serve the dashboard SPA's static assets from the same origin as the API,
     # so the UI's relative "/api" calls work with no CORS configuration.
-    # Registered last so every /api/* route, /health, and /docs takes
-    # precedence; html=True falls back to index.html for client-side
-    # routes like /app.
+    # Registered last so every explicit route (/api/*, /health, /docs, /,
+    # /app) takes precedence.
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")

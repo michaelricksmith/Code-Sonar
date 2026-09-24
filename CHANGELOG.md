@@ -1,3 +1,21 @@
+## 2026-09-24 \u2014 Remediation re-materializes its source on demand
+
+- Fixed "Remediation source repository is unavailable" for hosted scans: scan
+  workers clone into a per-job workspace that is deleted after scanning, so the
+  persisted `repository_path` never existed at approval time. Scan records now
+  persist `repository_slug` and `branch`; `POST /api/ask-sonar/remediation/approve-and-run`
+  resolves the source via the new `app/remediation/source.py` before issuing the
+  authorization \u2014 reusing the checkout when present, otherwise shallow-cloning
+  the recorded repository (with the approver's GitHub OAuth token for private
+  repos) inside the scan root, then cleaning up after the workflow completes.
+- Records persisted before slug tracking keep the original 409 behavior.
+- New tests: `backend/tests/remediation/test_source.py` (reuse, re-clone,
+  cleanup, token redaction, slug parsing, record round-trip) and endpoint
+  coverage for the legacy-record 409 in
+  `backend/tests/api/test_ask_sonar_remediation.py`.
+
+---
+
 ## 2026-09-23 \u2014 Hosted auth without the dev flag
 
 - The API boundary middleware now accepts a valid signed `sonar_session`

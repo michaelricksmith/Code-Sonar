@@ -110,6 +110,21 @@ def _with_token(clone_url: str, token: str) -> str:
     return urlunparse(parsed._replace(netloc=netloc))
 
 
+def _repository_slug(clone_url: str) -> str | None:
+    """Return the ``owner/name`` slug for GitHub clone URLs, else None.
+
+    The slug is persisted on the scan record so remediation can re-clone
+    the repository on demand after the per-job workspace is deleted.
+    """
+    parsed = urlparse(clone_url)
+    if (parsed.hostname or "").lower() != "github.com":
+        return None
+    parts = parsed.path.strip("/").removesuffix(".git").split("/")
+    if len(parts) == 2 and all(part.strip() for part in parts):
+        return f"{parts[0]}/{parts[1]}"
+    return None
+
+
 @dataclass
 class ScanJob:
     job_id: str
@@ -158,7 +173,13 @@ def _update_job(job_id: str, **fields: Any) -> None:
             setattr(job, key, value)
 
 
-def _run_job(job_id: str, clone_url: str, branch: str | None, repo_label: str) -> None:
+def _run_job(
+    job_id: str,
+    clone_url: str,
+    branch: str | None,
+    repo_label: str,
+    repository_slug: str | None,
+) -> None:
     """Worker thread: clone, then run the unchanged existing scan pipeline."""
     # Deferred imports avoid a circular import with app.main at module load.
     from datetime import datetime, timezone
@@ -202,6 +223,8 @@ def _run_job(job_id: str, clone_url: str, branch: str | None, repo_label: str) -
                 findings=findings,
                 scoring=scoring_result,
                 scanned_at=scanned_at,
+                repository_slug=repository_slug,
+                branch=branch,
             )
             get_history_store().append(record)
             persisted_scan_id = record.scan_id
@@ -256,7 +279,13 @@ async def create_scan_job(request: Request, body: ScanJobRequest) -> dict[str, s
     repo_label = body.repo.strip().removesuffix(".git").split("github.com/")[-1]
     thread = threading.Thread(
         target=_run_job,
-        args=(job_id, _with_token(clone_url, token), body.branch, repo_label),
+        args=(
+            job_id,
+            _with_token(clone_url, token),
+            body.branch,
+            repo_label,
+            _repository_slug(clone_url),
+        ),
         name=f"scan-job-{job_id}",
         daemon=True,
     )

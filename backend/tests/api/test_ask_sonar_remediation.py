@@ -27,7 +27,7 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _record() -> ScanRecord:
+def _record(repository_path: str = "/tmp/example-repo") -> ScanRecord:
     finding = Finding(
         id="finding-1",
         rule_id="oversized-functions:rule",
@@ -49,7 +49,7 @@ def _record() -> ScanRecord:
     findings = [finding]
     return build_scan_record(
         repository_id="repo-1",
-        repository_path="/tmp/example-repo",
+        repository_path=repository_path,
         findings=findings,
         scoring=calculate_score(findings),
         scan_id="scan-1",
@@ -196,9 +196,9 @@ def test_tampered_plan_id_is_rejected_before_orchestration(
 
 
 def test_approved_plan_uses_server_derived_repository_and_instruction(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    record = _record()
+    record = _record(repository_path=str(tmp_path))
     plan = build_remediation_plan(record, "finding-1")
     set_scan_provider(lambda scan_id: record if scan_id == record.scan_id else None)
     orchestrator = CapturingOrchestrator()
@@ -224,9 +224,46 @@ def test_approved_plan_uses_server_derived_repository_and_instruction(
     assert response.status_code == 200
     assert len(orchestrator.requests) == 1
     request = orchestrator.requests[0]
-    assert request.repository_path == record.repository_path
+    assert request.repository_path == str(tmp_path.resolve())
     assert request.instruction == plan.instruction
     assert request.finding_id == plan.finding_id
     assert request.scan_id == plan.scan_id
     assert request.remediation_kind == "ask_sonar_approved_patch"
     assert response.json()["workflow"]["completed"] is True
+
+
+def test_legacy_record_without_slug_keeps_unavailable_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Records persisted before slug tracking keep the original 409 behavior."""
+    record = _record(repository_path="/tmp/definitely-not-a-real-checkout")
+    assert record.repository_slug is None
+    plan = build_remediation_plan(record, "finding-1")
+    set_scan_provider(lambda scan_id: record if scan_id == record.scan_id else None)
+    orchestrator = CapturingOrchestrator()
+    monkeypatch.setattr(
+        "app.ask_sonar.api.get_remediation_orchestrator", lambda: orchestrator
+    )
+    monkeypatch.setattr(
+        "app.ask_sonar.api.get_authorization_service",
+        lambda: CapturingAuthorizationService(),
+    )
+
+    response = client.post(
+        "/api/ask-sonar/remediation/approve-and-run",
+        json={
+            "request_id": "request-1",
+            "scan_id": "scan-1",
+            "finding_id": "finding-1",
+            "plan_id": plan.plan_id,
+            "approved": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ask_sonar_remediation_unavailable"
+    assert (
+        response.json()["detail"]["message"]
+        == "Remediation source repository is unavailable"
+    )
+    assert orchestrator.requests == []

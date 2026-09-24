@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.ask_sonar.answering import AnswerProviderProtocol, validate_grounded_answer
@@ -22,6 +22,8 @@ from app.remediation.runtime import (
     get_remediation_executor,
     get_remediation_orchestrator,
 )
+from app.remediation.source import resolve_remediation_source
+from app.scan_jobs import _github_token_for_request
 from app.security.tenant import current_tenant_id
 
 router = APIRouter(prefix="/api/ask-sonar", tags=["ask-sonar"])
@@ -222,9 +224,15 @@ async def remediation_plan(scan_id: str, finding_id: str) -> dict[str, Any]:
 
 @router.post("/remediation/approve-and-run")
 async def approve_and_run_remediation(
+    request: Request,
     approval: AskSonarRemediationApproval,
 ) -> dict[str, Any]:
-    """Verify an approved grounded plan and hand it to remediation orchestration."""
+    """Verify an approved grounded plan and hand it to remediation orchestration.
+
+    Hosted scan workspaces are deleted after scanning, so the source checkout
+    is re-materialized on demand before the authorization is issued and
+    cleaned up after the workflow completes.
+    """
     if not approval.approved:
         raise HTTPException(
             status_code=403,
@@ -252,11 +260,15 @@ async def approve_and_run_remediation(
             },
         )
 
+    source = None
     try:
+        source = resolve_remediation_source(
+            record, github_token=_github_token_for_request(request)
+        )
         executor = get_remediation_executor()
         authorization = get_authorization_service().issue(
             request_id=approval.request_id,
-            repository_path=record.repository_path,
+            repository_path=source.path,
             scan_id=record.scan_id,
             finding_id=plan.finding_id,
             plan_id=plan.plan_id,
@@ -285,6 +297,9 @@ async def approve_and_run_remediation(
             status_code=502,
             detail={"code": "ask_sonar_remediation_failed", "message": str(exc)},
         ) from exc
+    finally:
+        if source is not None:
+            source.dispose()
 
     return {
         "plan": plan.to_dict(),

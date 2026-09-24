@@ -25,9 +25,11 @@ from urllib.parse import urlparse, urlunparse
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.security import SCAN_ROOT_DIR
+
 router = APIRouter(prefix="/api/scan-job", tags=["scan-job"])
 
-from app.security import SCAN_ROOT_DIR
+
 
 # Cloned workspaces live INSIDE the configured scan root so the existing
 # path-containment validation (validate_repo_path) accepts them without any

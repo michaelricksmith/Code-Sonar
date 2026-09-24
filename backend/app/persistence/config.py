@@ -28,11 +28,34 @@ class PersistenceConfig:
 
     @property
     def is_postgresql(self) -> bool:
-        return bool(self.database_url and self.database_url.startswith("postgresql"))
+        # Render issues postgres:// URLs; both spellings are PostgreSQL.
+        return bool(
+            self.database_url
+            and (
+                self.database_url.startswith("postgresql://")
+                or self.database_url.startswith("postgres://")
+            )
+        )
 
     @property
     def is_sqlite(self) -> bool:
         return bool(self.database_url and self.database_url.startswith("sqlite"))
+
+
+def psycopg3_database_url(raw_url: str) -> str:
+    """Rewrite a postgres(s) URL to SQLAlchemy's psycopg (v3) dialect.
+
+    The backend ships ``psycopg`` v3 only; SQLAlchemy's default
+    ``postgresql://`` dialect imports psycopg2, which is not installed.
+    Already-qualified URLs (``postgresql+...://``) pass through untouched.
+    """
+    if raw_url.startswith("postgresql+"):
+        return raw_url
+    if raw_url.startswith("postgres://"):
+        return "postgresql+psycopg://" + raw_url[len("postgres://") :]
+    if raw_url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + raw_url[len("postgresql://") :]
+    return raw_url
 
 
 def persistence_config_from_env() -> PersistenceConfig:

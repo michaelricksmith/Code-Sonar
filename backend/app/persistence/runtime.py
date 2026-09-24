@@ -12,6 +12,7 @@ from sqlalchemy import Engine, create_engine, text, update
 from app.history import ScanRecord
 from app.persistence.config import (
     persistence_config_from_env,
+    psycopg3_database_url,
     secure_data_file,
     validate_persistence_config,
 )
@@ -122,7 +123,7 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
     else:
         raise RuntimeError("Configured production encryption provider is unavailable")
 
-    engine = create_engine(config.database_url, pool_pre_ping=True)
+    engine = create_engine(psycopg3_database_url(config.database_url), pool_pre_ping=True)
     # Local SQLite gets programmatic schema creation for developer convenience.
     # Shared PostgreSQL must be migrated explicitly with Alembic.
     if config.is_sqlite:

@@ -5,12 +5,15 @@ import os
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from app.persistence.config import psycopg3_database_url
 from app.persistence.schema import metadata
 
 config = context.config
 database_url = os.environ.get("CODESONAR_DATABASE_URL", "").strip()
 if not database_url:
     raise RuntimeError("CODESONAR_DATABASE_URL is required for migrations")
+# The backend ships psycopg v3 only; normalize before SQLAlchemy sees the URL.
+database_url = psycopg3_database_url(database_url)
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 

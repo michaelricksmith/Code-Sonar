@@ -1,3 +1,12 @@
+## 2026-09-24 — Sign out is reachable on mobile
+
+- The sidebar (the only place with a Sign out button) is hidden below 960px,
+  so on phones there was no way to sign out at all. Authenticated screens now
+  show a compact sticky top bar on small screens with the brand and a
+  Sign out button wired to the same `POST /api/auth/logout` flow as desktop.
+
+---
+
 ## 2026-09-24 — Ask Sonar provider retries transient failures instead of failing the question
 
 - The OpenAI-compatible provider transport now retries transient upstream

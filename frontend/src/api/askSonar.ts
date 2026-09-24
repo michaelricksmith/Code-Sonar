@@ -127,13 +127,13 @@ async function decodeError(res: Response, fallback: string): Promise<Error> {
 }
 
 export async function fetchAskSonarStatus(): Promise<AskSonarStatus> {
-  const res = await fetch(`${API_BASE}/status`);
+  const res = await fetch(`${API_BASE}/status`, { credentials: "same-origin" });
   if (!res.ok) throw await decodeError(res, "Failed to read Ask Sonar status");
   return (await res.json()) as AskSonarStatus;
 }
 
 export async function fetchAiProviders(): Promise<AiProvider[]> {
-  const res = await fetch(`${API_BASE}/providers`);
+  const res = await fetch(`${API_BASE}/providers`, { credentials: "same-origin" });
   if (!res.ok) throw await decodeError(res, "Failed to read AI providers");
   const data = await res.json();
   return (data.providers ?? data ?? []) as AiProvider[];
@@ -153,6 +153,7 @@ export async function askSonar(
   if (opts.apiKey) headers["X-AI-API-Key"] = opts.apiKey;
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
+    credentials: "same-origin",
     headers,
     body: JSON.stringify({
       scan_id: input.scanId,
@@ -172,6 +173,7 @@ export async function fetchRemediationPlan(
 ): Promise<RemediationPlanResponse> {
   const res = await fetch(
     `${API_BASE}/remediation-plan/${encodeURIComponent(scanId)}/${encodeURIComponent(findingId)}`,
+    { credentials: "same-origin" },
   );
   if (!res.ok) throw await decodeError(res, "Failed to build remediation plan");
   return (await res.json()) as RemediationPlanResponse;
@@ -185,6 +187,7 @@ export async function approveAndRunRemediation(input: {
 }): Promise<ApproveRemediationResponse> {
   const res = await fetch(`${API_BASE}/remediation/approve-and-run`, {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       request_id: input.requestId,

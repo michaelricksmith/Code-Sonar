@@ -173,11 +173,13 @@ async def ask_sonar(
             },
         ) from exc
     except Exception as exc:
+        # Include the provider's own error text (upstream HTTP status, never
+        # the API key) so a failed answer is diagnosable from the UI.
         raise HTTPException(
             status_code=502,
             detail={
                 "code": "ask_sonar_provider_failed",
-                "message": "The configured Ask Sonar provider failed",
+                "message": f"The configured Ask Sonar provider failed: {exc}",
             },
         ) from exc
 

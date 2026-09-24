@@ -42,6 +42,12 @@ def _default_transport(
     try:
         with request.urlopen(req, timeout=timeout) as response:
             return cast(bytes, response.read())
+    except error.HTTPError as exc:
+        # Surface the upstream status (401 = bad key, 429 = no credit/quota,
+        # 404 = bad model/base URL) without ever including the key itself.
+        raise RuntimeError(
+            f"OpenAI-compatible request failed (HTTP {exc.code})"
+        ) from exc
     except (error.URLError, TimeoutError) as exc:
         raise RuntimeError("OpenAI-compatible request failed") from exc
 

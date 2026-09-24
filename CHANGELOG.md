@@ -1,9 +1,12 @@
-## 2026-09-24 — Sign out is reachable on mobile
+## 2026-09-24 — Sign out is reachable on mobile and visible on desktop
 
 - The sidebar (the only place with a Sign out button) is hidden below 960px,
   so on phones there was no way to sign out at all. Authenticated screens now
   show a compact sticky top bar on small screens with the brand and a
   Sign out button wired to the same `POST /api/auth/logout` flow as desktop.
+- On desktop the Sign out control was faint 12px text that read as a placeholder
+  rather than a button; it is now a real outlined button in the sidebar footer
+  (and the mobile top bar).
 
 ---
 

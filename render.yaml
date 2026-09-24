@@ -3,14 +3,22 @@
 # Dashboard flow for the operator (Michael):
 #   Render → New → Blueprint → select michaelricksmith/Code-Sonar → Apply.
 #
-# Architecture (free tier): ONE Python web service. The FastAPI backend also
-# serves the built dashboard SPA from the same origin (see backend/app/main.py),
-# because the UI calls the API via relative "/api" URLs and Render static-site
-# rewrites cannot proxy to another service. Same-origin also keeps the
-# HttpOnly Secure SameSite=Lax session cookie working with no CORS hacks.
+# Architecture: ONE Python web service + ONE managed Postgres. The FastAPI
+# backend also serves the built dashboard SPA from the same origin (see
+# backend/app/main.py), because the UI calls the API via relative "/api" URLs
+# and Render static-site rewrites cannot proxy to another service. Same-origin
+# also keeps the HttpOnly Secure SameSite=Lax session cookie working with no
+# CORS hacks.
 #
-# No database: sessions are signed cookies; scan history is ephemeral by
-# design (jobs do not survive a restart — disclosed in README "Current limits").
+# Scan history, projects, and related records live in Postgres
+# (CODESONAR_DATABASE_URL), so they survive restarts and redeploys. The free
+# Postgres plan expires 30 days after creation — upgrade to a paid plan for
+# production permanence. Field-level secrets are encrypted with the
+# env-aes-gcm provider, keyed by CODESONAR_ENCRYPTION_KEY (generate once with
+# `openssl rand -base64 32`; losing it renders encrypted fields unrecoverable).
+#
+# Hosted remediation runs the cursor-agent CLI inside isolated worktrees.
+# Requires CURSOR_API_KEY (the operator's Cursor account; usage bills there).
 #
 # After the FIRST deploy Render shows the public URL (e.g.
 # https://code-sonar.onrender.com). Then:
@@ -31,10 +39,38 @@ services:
     name: code-sonar
     runtime: python
     plan: free
-    buildCommand: "pip install ./backend && npm ci --prefix frontend && npm run build --prefix frontend"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    buildCommand: "pip install ./backend && npm ci --prefix frontend && npm run build --prefix frontend && curl -fsSL https://cursor.com/install | bash"
+    preDeployCommand: "python -m alembic -c backend/alembic.ini upgrade head"
+    startCommand: "export PATH=\"$HOME/.local/bin:$PATH\" && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
+      # Durable scan storage. Internal connection string is injected from the
+      # managed Postgres declared below (private network, no egress).
+      - key: CODESONAR_DATABASE_URL
+        fromDatabase:
+          name: code-sonar-db
+          property: connectionString
+      # Field-level encryption provider for SQL persistence (see
+      # backend/app/persistence/crypto.py). The key is generated once with
+      # `openssl rand -base64 32` and stored as a secret below.
+      - key: CODESONAR_ENCRYPTION_PROVIDER
+        value: env-aes-gcm
+      - key: CODESONAR_ENCRYPTION_KEY
+        sync: false
+      # Hosted remediation executor. "cursor" shells out to the cursor-agent
+      # CLI (installed in buildCommand) inside an isolated worktree; anything
+      # else (including empty) fails closed to the dry-run executor.
+      - key: CODE_SONAR_REMEDIATION_EXECUTOR
+        value: cursor
+      # Headless cursor-agent invocation: --print for non-interactive mode,
+      # --force to auto-approve edits, --trust to skip the workspace prompt.
+      # {workspace} and {instruction} are substituted per approved request.
+      - key: CODE_SONAR_CURSOR_COMMAND_JSON
+        value: '["cursor-agent", "--print", "--force", "--trust", "--workspace", "{workspace}", "{instruction}"]'
+      # Cursor account API key for the CLI above. Fill in from
+      # https://cursor.com → Settings → API Keys. Usage bills to that account.
+      - key: CURSOR_API_KEY
+        sync: false
       # Hosted AI provider selection. Leave empty until you add a provider key
       # below; Ask Sonar reports "not configured" honestly until then. Users
       # can also supply their own key per-request in the app (never stored).
@@ -65,3 +101,10 @@ services:
       # Same reason: unknown until the first deploy.
       - key: CODESONAR_CORS_ORIGINS
         sync: false
+
+databases:
+  - name: code-sonar-db
+    plan: free
+    region: oregon
+    # NOTE: the free plan expires 30 days after creation. Upgrade to a paid
+    # plan in the Render dashboard before expiry for production permanence.

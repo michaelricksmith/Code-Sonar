@@ -40,8 +40,10 @@ services:
     runtime: python
     plan: free
     buildCommand: "pip install ./backend && npm ci --prefix frontend && npm run build --prefix frontend && curl -fsSL https://cursor.com/install | bash"
-    preDeployCommand: "python -m alembic -c backend/alembic.ini upgrade head"
-    startCommand: "export PATH=\"$HOME/.local/bin:$PATH\" && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # Run migrations inline at start: idempotent, and guaranteed to execute in
+    # the service environment (unlike preDeployCommand, which is only picked up
+    # on blueprint sync).
+    startCommand: "python -m alembic -c backend/alembic.ini upgrade head && export PATH=\"$HOME/.local/bin:$PATH\" && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
       # Durable scan storage. Internal connection string is injected from the

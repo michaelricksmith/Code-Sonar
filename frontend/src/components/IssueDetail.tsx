@@ -167,6 +167,13 @@ export function IssueDetail({
   const validation = workflowResponse?.workflow.validation ?? null;
   const afterScore = validation ? currentScore + validation.score_delta : null;
   const plan = planResponse?.plan ?? null;
+  const workflowCompleted = workflowResponse?.workflow.completed ?? false;
+  const execution = workflowResponse?.workflow.execution ?? null;
+  const changedFiles = execution?.changed_files ?? [];
+  const fixApplied = workflowCompleted && changedFiles.length > 0;
+  const isDryRun = execution?.executor_name === "dry_run";
+  const executionNote =
+    execution?.message ?? execution?.summary ?? null;
 
   const stepsDone = 1 + (plan ? 1 : 0) + (workflowResponse ? 1 : 0);
   const stepsTotal = 4;
@@ -285,16 +292,18 @@ export function IssueDetail({
               </div>
             </div>
 
-            <div className={`gstep ${workflowResponse ? "done" : plan ? "current" : ""}`}>
-              <div className="snum">{workflowResponse ? "✓" : "3"}</div>
+            <div className={`gstep ${fixApplied ? "done" : workflowResponse ? "" : plan ? "current" : ""}`}>
+              <div className="snum">{fixApplied ? "✓" : "3"}</div>
               <div>
                 <h4>Let Sonar apply the fix</h4>
                 <p>
-                  {workflowResponse
+                  {fixApplied
                     ? "Sonar applied the fix in a safe copy of your code and verified it."
-                    : "Approve once and Sonar applies the fix, runs your tests, and re-scores — before anything touches your real files."}
+                    : workflowResponse
+                      ? "Sonar ran but didn't apply any changes — see the result panel for details."
+                      : "Approve once and Sonar applies the fix, runs your tests, and re-scores — before anything touches your real files."}
                 </p>
-                {workflowResponse && <span className="done-tag">Done ✓</span>}
+                {fixApplied && <span className="done-tag">Done ✓</span>}
               </div>
             </div>
 
@@ -343,10 +352,17 @@ export function IssueDetail({
               </>
             ) : (
               <>
-                <h2>{validation?.finding_resolved ? "Fixed ✓" : "Run finished"}</h2>
+                <h2>{validation?.finding_resolved ? "Fixed ✓" : workflowCompleted ? "Run finished" : "Couldn't apply the fix"}</h2>
                 <div className="tracker" aria-label="Fix progress">
                   {["Plan", "Fix", "Test", "Rescan"].map((label, i) => {
-                    const cls = i < 2 || validation ? "finished" : i === 2 && running ? "doing" : "";
+                    const cls =
+                      i === 0 || validation
+                        ? "finished"
+                        : i === 1 && fixApplied
+                          ? "finished"
+                          : i === 2 && running
+                            ? "doing"
+                            : "";
                     return (
                       <div key={label} className={`track-step ${cls}`}>
                         <div className="tdot">{cls === "finished" ? "✓" : i + 1}</div>
@@ -355,6 +371,17 @@ export function IssueDetail({
                     );
                   })}
                 </div>
+                {!workflowCompleted && (
+                  <div className="notice" style={{ position: "relative", marginTop: 16 }}>
+                    <b>Sonar didn't change any files.</b>{" "}
+                    {isDryRun
+                      ? "This host is running in dry-run mode, so the fix was validated but not applied. The plan above is ready whenever a live executor is configured."
+                      : (executionNote ?? "The fix run stopped before applying changes.")}
+                    {changedFiles.length > 0 && (
+                      <> Files touched before it stopped: <b>{changedFiles.join(", ")}</b>.</>
+                    )}
+                  </div>
+                )}
                 {validation && (
                   <div className="result-banner">
                     <h3>{validation.finding_resolved ? `Fixed. Your score went from ${currentScore} → ${afterScore}.` : "The issue is still present."}</h3>

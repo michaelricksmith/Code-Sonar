@@ -1,3 +1,17 @@
+## 2026-09-24 — Ask Sonar provider retries transient failures instead of failing the question
+
+- The OpenAI-compatible provider transport now retries transient upstream
+  failures (HTTP 408/429/500/502/503/504 and connection errors) up to three
+  attempts with exponential backoff (1s, 2s) before surfacing an error, so a
+  momentarily overloaded model endpoint no longer fails the user's question on
+  the first hiccup. Auth/config errors (400/401/403/404) still fail fast with
+  the upstream status in the message, since retrying an identical request
+  cannot succeed.
+- New tests: retry-then-succeed on 503, backoff timing, fail-fast on 401/404,
+  and connection-error retry in `backend/tests/ask_sonar/test_hosted_providers.py`.
+
+---
+
 ## 2026-09-24 \u2014 Ask Sonar no longer defaults to a phantom Ollama provider
 
 - Fixed "Unsupported X-AI-Provider" on hosted: the provider registry always

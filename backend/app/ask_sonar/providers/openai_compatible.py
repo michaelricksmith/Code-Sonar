@@ -10,6 +10,7 @@ memory for the single call and are never persisted or logged.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, cast
 from urllib import error, request
@@ -18,6 +19,12 @@ from app.ask_sonar.answering import GroundedAnswer
 
 # (url, payload, timeout_seconds, headers) -> raw response body
 HttpTransport = Callable[[str, bytes, float, Mapping[str, str]], bytes]
+
+# Upstream statuses worth retrying: rate limits and transient server failures.
+# Auth/config errors (400/401/403/404) are never retried — another attempt
+# with the same request cannot succeed.
+_TRANSIENT_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 3
 
 SYSTEM_INSTRUCTION = (
     "You are Ask Sonar, a grounded assistant for Code Sonar. Explain everything "
@@ -30,7 +37,7 @@ SYSTEM_INSTRUCTION = (
 )
 
 
-def _default_transport(
+def _single_post(
     url: str, payload: bytes, timeout: float, headers: Mapping[str, str]
 ) -> bytes:
     req = request.Request(
@@ -39,17 +46,36 @@ def _default_transport(
         headers=dict(headers),
         method="POST",
     )
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            return cast(bytes, response.read())
-    except error.HTTPError as exc:
-        # Surface the upstream status (401 = bad key, 429 = no credit/quota,
-        # 404 = bad model/base URL) without ever including the key itself.
-        raise RuntimeError(
-            f"OpenAI-compatible request failed (HTTP {exc.code})"
-        ) from exc
-    except (error.URLError, TimeoutError) as exc:
-        raise RuntimeError("OpenAI-compatible request failed") from exc
+    with request.urlopen(req, timeout=timeout) as response:
+        return cast(bytes, response.read())
+
+
+def _default_transport(
+    url: str, payload: bytes, timeout: float, headers: Mapping[str, str]
+) -> bytes:
+    last_error: BaseException | None = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return _single_post(url, payload, timeout, headers)
+        except error.HTTPError as exc:
+            # Surface the upstream status (401 = bad key, 429 = no credit/quota,
+            # 404 = bad model/base URL) without ever including the key itself.
+            # Transient failures get retried with backoff; auth/config errors
+            # fail fast since another identical attempt cannot succeed.
+            if exc.code in _TRANSIENT_STATUS_CODES and attempt < _MAX_ATTEMPTS:
+                last_error = exc
+                time.sleep(2 ** (attempt - 1))
+                continue
+            raise RuntimeError(
+                f"OpenAI-compatible request failed (HTTP {exc.code})"
+            ) from exc
+        except (error.URLError, TimeoutError) as exc:
+            if attempt < _MAX_ATTEMPTS:
+                last_error = exc
+                time.sleep(2 ** (attempt - 1))
+                continue
+            raise RuntimeError("OpenAI-compatible request failed") from exc
+    raise RuntimeError("OpenAI-compatible request failed") from last_error
 
 
 @dataclass(slots=True)

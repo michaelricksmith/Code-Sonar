@@ -174,6 +174,14 @@ class TestTransientByokBuilder:
         with pytest.raises(ValueError):
             build_transient_byok_provider("openai", "")
 
+    def test_ollama_builds_without_key(self) -> None:
+        provider = build_transient_byok_provider("ollama", "")
+        assert provider.provider_name == "ollama"
+
+    def test_ollama_header_case_insensitive(self) -> None:
+        provider = build_transient_byok_provider("Ollama", "")
+        assert provider.provider_name == "ollama"
+
     def test_openai_and_anthropic_build(self) -> None:
         openai_provider = build_transient_byok_provider("openai", "sk-x")
         assert openai_provider.provider_name == "openai"
@@ -184,17 +192,31 @@ class TestTransientByokBuilder:
 
 class TestProviderRegistry:
     def test_registry_lists_all_providers(self, client, monkeypatch) -> None:
+        monkeypatch.delenv("ASK_SONAR_PROVIDER", raising=False)
         response = client.get("/api/ask-sonar/providers")
         assert response.status_code == 200
         providers = {p["name"]: p for p in response.json()["providers"]}
+        # Ollama is not assumed reachable: without ASK_SONAR_PROVIDER=ollama
+        # it must not be advertised as "AI ready".
         assert providers["ollama"] == {
             "name": "ollama",
             "label": "Ollama (self-hosted)",
-            "configured": True,
-            "source": "ollama",
+            "configured": False,
+            "source": "unconfigured",
         }
         assert providers["openai"]["configured"] is False
         assert providers["openai"]["source"] == "unconfigured"
+
+    def test_registry_marks_ollama_configured_from_env(
+        self, client, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ASK_SONAR_PROVIDER", "ollama")
+        providers = {
+            p["name"]: p
+            for p in client.get("/api/ask-sonar/providers").json()["providers"]
+        }
+        assert providers["ollama"]["configured"] is True
+        assert providers["ollama"]["source"] == "ollama"
 
     def test_registry_reflects_env_keys(self, client, monkeypatch) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
@@ -262,6 +284,43 @@ class TestByokHeaders:
             headers={"X-AI-Provider": "gemini", "X-AI-API-Key": "k"},
         )
         assert response.status_code == 400
+
+    def test_ask_with_ollama_header_needs_no_key(self, client, monkeypatch) -> None:
+        """Regression: the frontend used to send X-AI-Provider: ollama with no
+        key and the backend rejected it with 400. Ollama is self-hosted, so
+        the header alone must build a working transient provider."""
+        real_builder = ask_api.build_transient_byok_provider
+
+        def fake_transport(url: str, payload: bytes, timeout: float) -> bytes:
+            return json.dumps(
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "answer": "Plain-language answer.",
+                                "used_sources": ["deterministic"],
+                            }
+                        )
+                    }
+                }
+            ).encode("utf-8")
+
+        def fake_builder(name: str, key: str):
+            provider = real_builder(name, key)
+            provider.transport = fake_transport  # type: ignore[attr-defined]
+            return provider
+
+        monkeypatch.setattr(ask_api, "build_transient_byok_provider", fake_builder)
+        set_scan_provider(lambda scan_id: _record())
+        response = client.post(
+            "/api/ask-sonar/ask",
+            json={"scan_id": "scan-1", "question": "Why is my score a B?"},
+            headers={"X-AI-Provider": "ollama"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["answer"]["answer"] == "Plain-language answer."
+        assert data["answer"]["provider_name"] == "ollama"
 
     def test_ask_unconfigured_names_what_is_missing(self, client) -> None:
         set_scan_provider(lambda scan_id: _record())

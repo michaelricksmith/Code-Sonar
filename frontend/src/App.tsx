@@ -207,7 +207,6 @@ export default function App() {
   }, []);
 
   const aiReady = providers?.some((p) => p.configured) ?? false;
-  const configuredProvider = providers?.find((p) => p.configured)?.name ?? "";
 
   if (!authChecked) {
     return (
@@ -285,7 +284,7 @@ export default function App() {
             scanId={result.scan_id}
             currentScore={result.score}
             aiReady={aiReady}
-            aiProvider={aiProvider || configuredProvider || undefined}
+            aiProvider={aiProvider || undefined}
             aiApiKey={aiKey || undefined}
             onBack={() => navigate("/app/issues")}
             onAskSonar={openSonar}

@@ -70,7 +70,10 @@ export function AskSonarDrawer({
 
   const configured = providers?.find((p) => p.configured) ?? null;
   const byokOptions = (providers ?? []).filter((p) => !p.configured);
-  const effectiveProvider = providerName || configured?.name || "";
+  // Headers are only sent when the user explicitly picked a provider via BYOK.
+  // Otherwise the server answers with its configured provider (or reports
+  // honestly that none is configured) instead of rejecting a phantom default.
+  const byokOpts = providerName ? { provider: providerName, apiKey: apiKey || undefined } : {};
 
   useEffect(() => {
     if (!open) return;
@@ -107,7 +110,7 @@ export function AskSonarDrawer({
     try {
       const res = await askSonar(
         { scanId, question: q },
-        effectiveProvider ? { provider: effectiveProvider, apiKey: apiKey || undefined } : {},
+        byokOpts,
       );
       setMessages((m) => [
         ...m,

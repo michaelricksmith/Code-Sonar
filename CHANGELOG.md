@@ -1,3 +1,22 @@
+## 2026-09-24 \u2014 Ask Sonar no longer defaults to a phantom Ollama provider
+
+- Fixed "Unsupported X-AI-Provider" on hosted: the provider registry always
+  reported Ollama as configured, so the UI defaulted every question to
+  `X-AI-Provider: ollama` \u2014 a header the backend rejected with 400, on a host
+  with no Ollama running. The registry now reports Ollama as configured only
+  when `ASK_SONAR_PROVIDER=ollama` is set, and the frontend only sends
+  provider/key headers when the user explicitly picks a provider via BYOK.
+  Otherwise the server answers with its configured provider (or an honest
+  "no provider configured" message), and the BYOK form is shown.
+- `build_transient_byok_provider` now accepts `ollama` (self-hosted, no API
+  key required) alongside `openai` and `anthropic`, so an explicit Ollama
+  choice works wherever Ollama is actually reachable.
+- New tests: Ollama transient builder (keyless, case-insensitive), registry
+  Ollama configured/unconfigured from env, and an API-level regression test
+  for the `X-AI-Provider: ollama` header with no key.
+
+---
+
 ## 2026-09-24 \u2014 Remediation re-materializes its source on demand
 
 - Fixed "Remediation source repository is unavailable" for hosted scans: scan

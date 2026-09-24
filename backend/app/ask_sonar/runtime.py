@@ -155,12 +155,15 @@ def build_transient_byok_provider(
     """Build a single-request provider from BYOK headers.
 
     The key is used for this request only: it is held in memory on the
-    provider instance and is never persisted or logged.
+    provider instance and is never persisted or logged. Ollama is
+    self-hosted and needs no API key.
     """
     normalized = (provider_name or "").strip().lower()
+    if normalized == "ollama":
+        return _ollama_provider_from_env()
     if normalized not in ("openai", "anthropic"):
         raise ValueError(
-            "Unsupported X-AI-Provider: use 'openai' or 'anthropic'"
+            "Unsupported X-AI-Provider: use 'ollama', 'openai' or 'anthropic'"
         )
     if not api_key:
         raise ValueError("X-AI-API-Key is required when X-AI-Provider is set")
@@ -170,15 +173,23 @@ def build_transient_byok_provider(
 
 
 def get_provider_registry() -> list[dict[str, object]]:
-    """Describe available Ask Sonar providers without contacting any of them."""
+    """Describe available Ask Sonar providers without contacting any of them.
+
+    Ollama is reported as configured only when the operator selected it via
+    ASK_SONAR_PROVIDER=ollama. It is never assumed reachable: claiming a
+    phantom provider as "AI ready" sends the frontend down a header path the
+    backend then rejects.
+    """
+    env_provider = os.getenv("ASK_SONAR_PROVIDER", "").strip().lower()
+    ollama_configured = env_provider == "ollama"
     openai_configured = bool(os.getenv("OPENAI_API_KEY", "").strip())
     anthropic_configured = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
     return [
         {
             "name": "ollama",
             "label": "Ollama (self-hosted)",
-            "configured": True,
-            "source": "ollama",
+            "configured": ollama_configured,
+            "source": "ollama" if ollama_configured else "unconfigured",
         },
         {
             "name": "openai",

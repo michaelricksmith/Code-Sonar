@@ -132,8 +132,10 @@ async def ask_sonar(
 ) -> dict[str, Any]:
     """Answer only from the sanitized grounding bundle for the requested scan.
 
-    Optional X-AI-Provider ("openai" | "anthropic") + X-AI-API-Key headers
-    select a transient bring-your-own-key provider for this request only.
+    Optional X-AI-Provider ("ollama" | "openai" | "anthropic") + X-AI-API-Key
+    headers select a transient bring-your-own-key provider for this request
+    only. Ollama needs no API key. Without the headers, the server's
+    configured provider answers.
     """
     provider = _resolve_provider(x_ai_provider, x_ai_api_key)
     if provider is None:

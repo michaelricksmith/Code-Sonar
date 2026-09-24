@@ -97,6 +97,7 @@ export interface RemediationWorkflow {
     state: string;
     changed_files: string[];
     message: string | null;
+    summary: string | null;
   } | null;
   validation: RemediationValidationResult | null;
 }

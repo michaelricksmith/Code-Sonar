@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import MagicMock
+from urllib.error import HTTPError, URLError
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 import app.ask_sonar.api as ask_api
 from app.ask_sonar.answering import GroundedAnswer
 from app.ask_sonar.providers import AnthropicProvider, OpenAICompatibleProvider
+from app.ask_sonar.providers import openai_compatible as openai_compat
 from app.ask_sonar.runtime import (
     build_transient_byok_provider,
     set_answer_provider,
@@ -130,6 +133,84 @@ class TestOpenAICompatibleProvider:
         provider = OpenAICompatibleProvider(api_key="k", transport=transport)
         with pytest.raises(ValueError):
             provider.answer("q", {"allowed_sources": ["deterministic"]})
+
+
+class TestDefaultTransportRetry:
+    @staticmethod
+    def _http_error(code: int) -> HTTPError:
+        return HTTPError(
+            "https://provider.example/v1/chat/completions", code, "error", {}, None
+        )
+
+    @staticmethod
+    def _ok_response(body: bytes = b"ok") -> MagicMock:
+        response = MagicMock()
+        response.read.return_value = body
+        response.__enter__.return_value = response
+        return response
+
+    def test_transient_503_retried_then_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"count": 0}
+
+        def fake_urlopen(request, timeout=None):  # noqa: ANN001, ANN202
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise self._http_error(503)
+            return self._ok_response()
+
+        monkeypatch.setattr(openai_compat.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(openai_compat.time, "sleep", lambda seconds: None)
+        body = openai_compat._default_transport("https://x", b"{}", 5.0, {})
+        assert body == b"ok"
+        assert calls["count"] == 3
+
+    def test_backoff_waits_between_attempts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            openai_compat.request,
+            "urlopen",
+            MagicMock(side_effect=self._http_error(503)),
+        )
+        sleeps: list[float] = []
+        monkeypatch.setattr(openai_compat.time, "sleep", sleeps.append)
+        with pytest.raises(RuntimeError, match=r"HTTP 503"):
+            openai_compat._default_transport("https://x", b"{}", 5.0, {})
+        assert sleeps == [1, 2]
+
+    def test_auth_401_fails_fast_without_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        urlopen = MagicMock(side_effect=self._http_error(401))
+        monkeypatch.setattr(openai_compat.request, "urlopen", urlopen)
+        monkeypatch.setattr(
+            openai_compat.time, "sleep", MagicMock(side_effect=AssertionError)
+        )
+        with pytest.raises(RuntimeError, match=r"HTTP 401"):
+            openai_compat._default_transport("https://x", b"{}", 5.0, {})
+        assert urlopen.call_count == 1
+
+    def test_not_found_404_fails_fast_without_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        urlopen = MagicMock(side_effect=self._http_error(404))
+        monkeypatch.setattr(openai_compat.request, "urlopen", urlopen)
+        with pytest.raises(RuntimeError, match=r"HTTP 404"):
+            openai_compat._default_transport("https://x", b"{}", 5.0, {})
+        assert urlopen.call_count == 1
+
+    def test_connection_error_retried_then_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        urlopen = MagicMock(
+            side_effect=[URLError("boom"), self._ok_response()],
+        )
+        monkeypatch.setattr(openai_compat.request, "urlopen", urlopen)
+        monkeypatch.setattr(openai_compat.time, "sleep", lambda seconds: None)
+        assert openai_compat._default_transport("https://x", b"{}", 5.0, {}) == b"ok"
+        assert urlopen.call_count == 2
 
 
 class TestAnthropicProvider:

@@ -157,6 +157,8 @@ class ScanRecord:
         "tenant_id",
         "repository_id",
         "repository_path",
+        "repository_slug",
+        "branch",
         "scanned_at",
         "schema_version",
         "scoring_version",
@@ -187,6 +189,8 @@ class ScanRecord:
         findings_by_category: dict[str, int],
         findings_source_breakdown: dict[str, int],
         findings: list[FindingSnapshot],
+        repository_slug: str | None = None,
+        branch: str | None = None,
         scoring_version: str = "legacy-unversioned",
         tenant_id: str = LOCAL_TENANT_ID,
     ) -> None:
@@ -194,6 +198,8 @@ class ScanRecord:
         self.tenant_id = tenant_id
         self.repository_id = repository_id
         self.repository_path = repository_path
+        self.repository_slug = repository_slug
+        self.branch = branch
         self.scanned_at = scanned_at
         self.schema_version = schema_version
         self.scoring_version = scoring_version
@@ -213,6 +219,8 @@ class ScanRecord:
             "tenant_id": self.tenant_id,
             "repository_id": self.repository_id,
             "repository_path": self.repository_path,
+            "repository_slug": self.repository_slug,
+            "branch": self.branch,
             "scanned_at": self.scanned_at,
             "schema_version": self.schema_version,
             "scoring_version": self.scoring_version,
@@ -234,6 +242,9 @@ class ScanRecord:
         record.tenant_id = data.get("tenant_id", LOCAL_TENANT_ID)
         record.repository_id = data["repository_id"]
         record.repository_path = data["repository_path"]
+        # Records persisted before slug/branch tracking remain readable.
+        record.repository_slug = data.get("repository_slug")
+        record.branch = data.get("branch")
         record.scanned_at = data["scanned_at"]
         record.schema_version = data["schema_version"]
         # Records written before scoring-version tracking remain readable.
@@ -262,18 +273,26 @@ def build_scan_record(
     *,
     scan_id: str | None = None,
     scanned_at: str | None = None,
+    repository_slug: str | None = None,
+    branch: str | None = None,
 ) -> ScanRecord:
     """Build a ``ScanRecord`` from a finished scan.
 
     The ``scan_id`` defaults to a UUID4 hex string when not provided.
     Callers that want a deterministic id (e.g. test fixtures) must
     pass it explicitly.
+
+    ``repository_slug`` (e.g. ``"owner/name"``) and ``branch`` let hosted
+    scans re-materialize their source checkout on demand when the original
+    per-job workspace has been deleted.
     """
     return ScanRecord(
         scan_id=scan_id or uuid.uuid4().hex,
         tenant_id=current_tenant_id(),
         repository_id=repository_id,
         repository_path=repository_path,
+        repository_slug=repository_slug,
+        branch=branch,
         scanned_at=scanned_at or _utcnow_iso(),
         schema_version=SCHEMA_VERSION,
         scoring_version=SCORING_VERSION,

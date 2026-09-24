@@ -34,6 +34,13 @@ export function Shell({
 }: ShellProps) {
   return (
     <div className="shell">
+      <div className="mobile-topbar">
+        <a className="brand" href="#/app">
+          <span className="brand-mark" />
+          Code&nbsp;Sonar
+        </a>
+        <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
+      </div>
       <aside className="sidebar" aria-label="Primary navigation">
         <div>
           <a className="brand" href="#/app">

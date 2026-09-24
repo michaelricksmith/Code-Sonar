@@ -15,7 +15,11 @@ from app.persistence.config import (
     secure_data_file,
     validate_persistence_config,
 )
-from app.persistence.crypto import EncryptionProvider, LocalDevelopmentEncryptionProvider
+from app.persistence.crypto import (
+    EncryptionProvider,
+    EnvKeyEncryptionProvider,
+    LocalDevelopmentEncryptionProvider,
+)
 from app.persistence.privacy import CryptoErasureHook, SqlPrivacyRepository
 from app.persistence.repositories import (
     SqlGitHubInstallationStore,
@@ -97,6 +101,14 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
         return None
 
     provider_name = os.environ.get("CODESONAR_ENCRYPTION_PROVIDER", "local").strip()
+    # The env-key provider is self-contained: materialize it here so shared
+    # deployments can select it with CODESONAR_ENCRYPTION_PROVIDER=env-aes-gcm
+    # without any other deployment-owned wiring.
+    if (
+        provider_name == EnvKeyEncryptionProvider.provider_name
+        and _external_encryption_provider is None
+    ):
+        set_external_encryption_provider(EnvKeyEncryptionProvider.from_env())
     if provider_name == "local":
         if not local_dev_enabled():
             raise RuntimeError("Local encryption provider is forbidden in shared mode")

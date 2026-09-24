@@ -76,9 +76,17 @@ def validate_data_root(root: Path, *, create: bool = True, shared: bool = False)
     if os.name != "nt":
         mode = stat.S_IMODE(resolved.stat().st_mode)
         if mode & 0o077:
-            if shared:
+            # Try to fix permissions first; only raise if chmod fails or
+            # if shared mode requires explicit operator action.
+            try:
+                resolved.chmod(0o700)
+                mode = stat.S_IMODE(resolved.stat().st_mode)
+            except OSError:
+                pass
+            if mode & 0o077 and shared:
                 raise RuntimeError("CODESONAR_DATA_ROOT permissions must be 0700 or stricter")
-            resolved.chmod(0o700)
+            if mode & 0o077:
+                resolved.chmod(0o700)
     elif shared:
         completed = subprocess.run(
             ["icacls", str(resolved)], capture_output=True, text=True, check=False, timeout=10

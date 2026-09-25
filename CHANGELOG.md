@@ -1,3 +1,19 @@
+## 2026-09-25 (late) — Groq key live on production
+
+- `GROQ_API_KEY` is now set in the Render dashboard (key verified working
+  in Groq's playground).
+- Deploy `dep-dar0cph42hec73ch645g` is `live` on commit `961c97f`;
+  `/health` returns `{"status":"ok"}`; all Groq env vars confirmed set
+  (`CODE_SONAR_REMEDIATION_EXECUTOR=groq`,
+  `ASK_SONAR_PROVIDER=openai`,
+  `ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1`,
+  `ASK_SONAR_MODEL=llama-3.3-70b-versatile`).
+- Not yet verified: end-to-end on the live service — an Ask Sonar answer
+  via Groq, and an Approve & fix run through validation/rescan/score.
+  That's the next test.
+
+---
+
 ## 2026-09-25 — Remediation UI surfaces execution outcome and offers retry
 
 - The fix panel now shows what the executor actually did when validation

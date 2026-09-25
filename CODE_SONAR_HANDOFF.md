@@ -2,7 +2,7 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Current handoff — 2026-09-25 PDT**
+> **Current handoff — 2026-09-25 PDT (late)**
 
 Remediation now has three executors: `deterministic` (default, free
 structural fixes — currently the only safe live path), `groq` (new
@@ -11,16 +11,20 @@ OpenAI-compatible API, no local binary so it runs on Render's free tier;
 production env set to `CODE_SONAR_REMEDIATION_EXECUTOR=groq` with
 `ASK_SONAR_PROVIDER=openai`,
 `ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1`,
-`ASK_SONAR_MODEL=llama-3.3-70b-versatile` — activation pending the owner
-setting `GROQ_API_KEY` in the Render dashboard), and `cursor` (legacy
-CLI path; installed-Cursor host proof still outstanding). Ask Sonar's
+`ASK_SONAR_MODEL=llama-3.3-70b-versatile`, and `GROQ_API_KEY` now set in
+the Render dashboard — deploy `dep-dar0cph42hec73ch645g` live on commit
+`961c97f`, `/health` ok), and `cursor` (legacy CLI path;
+installed-Cursor host proof still outstanding). Ask Sonar's
 OpenAI-compatible provider now also accepts `GROQ_API_KEY`. The
-deterministic splitter from 2026-09-24 is intentionally NOT the live
+remediation UI now surfaces execution outcomes (state/summary/error)
+and offers retry when validation is missing — live on production.
+The deterministic splitter from 2026-09-24 is intentionally NOT the live
 fix path — its block-splitting is unproven on real files and must be
-hardened or gated before production use. Prior deployments 2026-09-25
+hardened or gated before production use. **Still unverified:** Groq
+end-to-end on the live service (Ask Sonar answer + Approve & fix →
+validation/rescan/score movement). Prior deployments 2026-09-25
 of 106efe5/4c268d3/4b565f2 hit transient Render `update_failed` /
-`build_failed` states; a fresh deploy was triggered — verify it reaches
-`live` before demoing.
+`build_failed` states; resolved — latest deploy is `live`.
 
 > Previous handoff — 2026-09-23 PDT
 

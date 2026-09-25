@@ -2,7 +2,7 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Authoritative current snapshot — 2026-09-25 PDT**
+> **Authoritative current snapshot — 2026-09-25 PDT (late)**
 - **Public beta (v0.2.0-beta).** Real GitHub + Google OAuth sign-in, async
   scan jobs (clone → scan → score with human-readable progress), hosted Ask
   Sonar providers (OpenAI-compatible incl. Groq via `GROQ_API_KEY`,
@@ -12,15 +12,22 @@
   score, grade bands A≥800/B≥740/C≥670/D≥580/F, 8 analyzers.
 - **Remediation executors:** `deterministic` (default, free structural
   fixes e.g. oversized-file splits), `groq` (AI fixes via Groq API, no
-  local binary — configured on production, activation pending owner-set
-  `GROQ_API_KEY`), `cursor` (Cursor Agent CLI, still requires the
-  installed-Cursor host run for the complete proof).
+  local binary — **live on production as of 2026-09-25 late PDT**:
+  `GROQ_API_KEY` set in Render, deploy `dep-dar0cph42hec73ch645g`
+  live on commit `961c97f`, `/health` ok), `cursor` (Cursor Agent CLI,
+  still requires the installed-Cursor host run for the complete proof).
+- **Remediation UI (live):** the fix panel now surfaces the executor's
+  actual outcome (state, summary, error, files touched) and offers
+  "Try the fix again" when validation didn't run — no more premature
+  "Done ✓" on incomplete runs.
 - Verified: 507 pytest passed / 1 skipped, tsc clean, eslint 0 warnings,
   vite build exit 0, live E2E scan (score 833, grade A, 8/8 analyzers) and
   live scan-job clone→scan (score 850, grade A).
 - Honest limits: Python-focused deep analysis; scan jobs are in-process
-  (no persistent queue); complete Cursor-remediation proof still requires
-  the installed-Cursor host run.
+  (no persistent queue); **Groq end-to-end (Ask Sonar answer + Approve &
+  fix → validation/rescan/score) not yet exercised against the live
+  service**; complete Cursor-remediation proof still requires the
+  installed-Cursor host run.
 
 > Previous snapshot — 2026-09-02 PDT
 - Calibration review tooling is complete, but approved repositories and real

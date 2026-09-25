@@ -140,25 +140,36 @@ export function AskSonarDrawer({
           ) : configured ? (
             <><span className="pdot" />AI ready · {configured.label}{configured.source === "env" ? " (configured)" : ""} · grounded in {repoLabel ?? "your repo"}</>
           ) : (
-            <><span className="pdot off" />No hosted AI configured — add a key below for plain-language answers.</>
+            <><span className="pdot off" />Coming Soon — Sonar Chat is in early access.</>
           )}
         </div>
 
         <div className="chat" ref={chatRef}>
           {messages.length === 0 && (
             <div className="chat-welcome">
-              <h3>Ask about your score, risks, or next fix.</h3>
+              <h3>{configured ? "Ask about your score, risks, or next fix." : "Sonar Chat is coming soon."}</h3>
               <p>
-                Sonar answers from your actual scan — {findings.length} {findings.length === 1 ? copy.finding : copy.findings} on the board.
-                It can explain and plan fixes, but it can&rsquo;t silently change your score.
+                {configured ? (
+                  <>
+                    Sonar answers from your actual scan — {findings.length} {findings.length === 1 ? copy.finding : copy.findings} on the board.
+                    It can explain and plan fixes, but it can&rsquo;t silently change your score.
+                  </>
+                ) : (
+                  <>
+                    We&rsquo;re putting the finishing touches on Sonar Chat. Add your own AI key below to try it in early access —
+                    Sonar will answer from your actual scan ({findings.length} {findings.length === 1 ? copy.finding : copy.findings} on the board).
+                  </>
+                )}
               </p>
-              <div className="suggest-row" style={{ marginTop: 12 }}>
-                {SUGGESTED.map((s) => (
-                  <button key={s} className="suggest" onClick={() => void send(s)} disabled={asking || !scanId}>
-                    {s}
-                  </button>
-                ))}
-              </div>
+              {configured && (
+                <div className="suggest-row" style={{ marginTop: 12 }}>
+                  {SUGGESTED.map((s) => (
+                    <button key={s} className="suggest" onClick={() => void send(s)} disabled={asking || !scanId}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {messages.map((m, i) => (
@@ -196,8 +207,8 @@ export function AskSonarDrawer({
 
         {!configured && (
           <div className="byok">
-            <details>
-              <summary>Use your own AI key (BYOK)</summary>
+            <details open>
+              <summary>Try early access with your own AI key</summary>
               <div className="byok-body">
                 <select value={providerName} onChange={(e) => onProviderChange(e.target.value)} aria-label="AI provider">
                   <option value="">Choose a provider…</option>
@@ -218,7 +229,7 @@ export function AskSonarDrawer({
                   onChange={(e) => onApiKeyChange(e.target.value)}
                   autoComplete="off"
                 />
-                <span>Your key is sent with each question and never stored.</span>
+                <span>Your key is sent with each question and never stored. Sonar Chat is free during early access — you only pay your AI provider.</span>
               </div>
             </details>
           </div>
@@ -227,16 +238,22 @@ export function AskSonarDrawer({
         <div className="compose">
           <input
             className="input"
-            placeholder={scanId ? "Ask about your code…" : "Run a scan to ask Sonar…"}
+            placeholder={
+              !configured && !providerName
+                ? "Add your AI key above to try Sonar Chat…"
+                : scanId
+                  ? "Ask about your code…"
+                  : "Run a scan to ask Sonar…"
+            }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void send(input);
             }}
-            disabled={!scanId}
+            disabled={!scanId || (!configured && !providerName)}
             aria-label="Ask Sonar a question"
           />
-          <button className="btn btn-primary" onClick={() => void send(input)} disabled={asking || !input.trim() || !scanId}>
+          <button className="btn btn-primary" onClick={() => void send(input)} disabled={asking || !input.trim() || !scanId || (!configured && !providerName)}>
             {asking ? "…" : "Ask"}
           </button>
         </div>

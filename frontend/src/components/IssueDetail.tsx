@@ -165,10 +165,12 @@ export function IssueDetail({
       : null;
 
   const validation = workflowResponse?.workflow.validation ?? null;
+  const execution = workflowResponse?.workflow.execution ?? null;
+  const workflowCompleted = workflowResponse?.workflow.completed ?? false;
   const afterScore = validation ? currentScore + validation.score_delta : null;
   const plan = planResponse?.plan ?? null;
 
-  const stepsDone = 1 + (plan ? 1 : 0) + (workflowResponse ? 1 : 0);
+  const stepsDone = 1 + (plan ? 1 : 0) + (validation ? 2 : 0);
   const stepsTotal = 4;
 
   return (
@@ -285,28 +287,33 @@ export function IssueDetail({
               </div>
             </div>
 
-            <div className={`gstep ${workflowResponse ? "done" : plan ? "current" : ""}`}>
-              <div className="snum">{workflowResponse ? "✓" : "3"}</div>
+            <div className={`gstep ${validation ? "done" : workflowResponse ? "" : plan ? "current" : ""}`}>
+              <div className="snum">{validation ? "✓" : "3"}</div>
               <div>
                 <h4>Let Sonar apply the fix</h4>
                 <p>
-                  {workflowResponse
+                  {validation
                     ? "Sonar applied the fix in a safe copy of your code and verified it."
-                    : "Approve once and Sonar applies the fix, runs your tests, and re-scores — before anything touches your real files."}
+                    : workflowResponse
+                      ? "Sonar ran the fix step, but testing and re-scoring didn't complete — see the result below."
+                      : "Approve once and Sonar applies the fix, runs your tests, and re-scores — before anything touches your real files."}
                 </p>
-                {workflowResponse && <span className="done-tag">Done ✓</span>}
+                {validation && <span className="done-tag">Done ✓</span>}
               </div>
             </div>
 
-            <div className="gstep">
-              <div className="snum">4</div>
+            <div className={`gstep ${validation ? "done" : ""}`}>
+              <div className="snum">{validation ? "✓" : "4"}</div>
               <div>
                 <h4>See your new score</h4>
                 <p>
                   {validation
                     ? `Re-scan complete. Your score moved from ${currentScore} → ${afterScore}.`
-                    : "Once the fix lands, Sonar re-scores automatically and shows the new number here."}
+                    : workflowResponse
+                      ? "The re-scan didn't run this time. Use “Try the fix again” below to complete the remaining steps."
+                      : "Once the fix lands, Sonar re-scores automatically and shows the new number here."}
                 </p>
+                {validation && <span className="done-tag">Done ✓</span>}
               </div>
             </div>
           </div>
@@ -343,7 +350,7 @@ export function IssueDetail({
               </>
             ) : (
               <>
-                <h2>{validation?.finding_resolved ? "Fixed ✓" : "Run finished"}</h2>
+                <h2>{validation?.finding_resolved ? "Fixed ✓" : workflowCompleted ? "Run finished" : "Fix didn't complete"}</h2>
                 <div className="tracker" aria-label="Fix progress">
                   {["Plan", "Fix", "Test", "Rescan"].map((label, i) => {
                     const cls = i < 2 || validation ? "finished" : i === 2 && running ? "doing" : "";
@@ -366,7 +373,34 @@ export function IssueDetail({
                     {validation.finding_resolved && <div className="score-move">{currentScore} → {afterScore}</div>}
                   </div>
                 )}
-                <div style={{ marginTop: 16, position: "relative" }}>
+                {!validation && execution && (
+                  <div className="result-banner" style={{ marginTop: 12 }}>
+                    <h3>
+                      {execution.state === "FAILED"
+                        ? "The fix ran into a problem."
+                        : execution.state === "DRY_RUN"
+                          ? "No changes were made."
+                          : "The fix step didn't produce a result."}
+                    </h3>
+                    <p>{execution.summary || execution.error || "Sonar stopped before testing and re-scoring."}</p>
+                    {execution.error && execution.summary && (
+                      <p className="code-note" style={{ marginTop: 8 }}>{execution.error}</p>
+                    )}
+                    {execution.changed_files.length > 0 && (
+                      <p style={{ marginTop: 8 }}>Files touched: <span className="mono">{execution.changed_files.join(", ")}</span></p>
+                    )}
+                  </div>
+                )}
+                <div style={{ marginTop: 16, position: "relative", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {!validation && (
+                    <button
+                      className="btn btn-fix btn-sm"
+                      onClick={() => void approveAndRun()}
+                      disabled={running || !plan}
+                    >
+                      {running ? "Sonar is fixing it…" : "↻ Try the fix again"}
+                    </button>
+                  )}
                   <button className="btn btn-ghost btn-sm" style={{ background: "transparent", color: "#fff", borderColor: "#3A4450" }} onClick={() => { setPlanResponse(null); setWorkflowResponse(null); setPlanReviewed(false); }}>
                     Start over with a fresh plan
                   </button>

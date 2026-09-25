@@ -138,7 +138,10 @@ def configure_answer_provider_from_env() -> None:
     elif provider_name == "openai":
         set_answer_provider(
             _openai_provider_from_env(
-                api_key=os.getenv("OPENAI_API_KEY", "").strip()
+                api_key=(
+                    os.getenv("OPENAI_API_KEY", "").strip()
+                    or os.getenv("GROQ_API_KEY", "").strip()
+                )
             )
         )
     elif provider_name == "anthropic":
@@ -182,7 +185,10 @@ def get_provider_registry() -> list[dict[str, object]]:
     """
     env_provider = os.getenv("ASK_SONAR_PROVIDER", "").strip().lower()
     ollama_configured = env_provider == "ollama"
-    openai_configured = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    openai_configured = bool(
+        os.getenv("OPENAI_API_KEY", "").strip()
+        or os.getenv("GROQ_API_KEY", "").strip()
+    )
     anthropic_configured = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
     return [
         {

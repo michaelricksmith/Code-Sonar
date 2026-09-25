@@ -140,7 +140,7 @@ export function AskSonarDrawer({
           ) : configured ? (
             <><span className="pdot" />AI ready · {configured.label}{configured.source === "env" ? " (configured)" : ""} · grounded in {repoLabel ?? "your repo"}</>
           ) : (
-            <><span className="pdot off" />Coming Soon — Sonar Chat is in early access.</>
+            <><span className="pdot off" />Coming Soon</>
           )}
         </div>
 
@@ -156,8 +156,8 @@ export function AskSonarDrawer({
                   </>
                 ) : (
                   <>
-                    We&rsquo;re putting the finishing touches on Sonar Chat. Add your own AI key below to try it in early access —
-                    Sonar will answer from your actual scan ({findings.length} {findings.length === 1 ? copy.finding : copy.findings} on the board).
+                    We&rsquo;re putting the finishing touches on Sonar Chat.
+                    Your deterministic scan results above are ready now — no AI needed.
                   </>
                 )}
               </p>
@@ -205,42 +205,12 @@ export function AskSonarDrawer({
           )}
         </div>
 
-        {!configured && (
-          <div className="byok">
-            <details open>
-              <summary>Try early access with your own AI key</summary>
-              <div className="byok-body">
-                <select value={providerName} onChange={(e) => onProviderChange(e.target.value)} aria-label="AI provider">
-                  <option value="">Choose a provider…</option>
-                  {byokOptions.map((p) => (
-                    <option key={p.name} value={p.name}>{p.label}</option>
-                  ))}
-                  {byokOptions.length === 0 && (
-                    <>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                    </>
-                  )}
-                </select>
-                <input
-                  type="password"
-                  placeholder="Paste your API key — used only for this chat"
-                  value={apiKey}
-                  onChange={(e) => onApiKeyChange(e.target.value)}
-                  autoComplete="off"
-                />
-                <span>Your key is sent with each question and never stored. Sonar Chat is free during early access — you only pay your AI provider.</span>
-              </div>
-            </details>
-          </div>
-        )}
-
         <div className="compose">
           <input
             className="input"
             placeholder={
-              !configured && !providerName
-                ? "Add your AI key above to try Sonar Chat…"
+              !configured
+                ? "Sonar Chat is coming soon…"
                 : scanId
                   ? "Ask about your code…"
                   : "Run a scan to ask Sonar…"
@@ -250,10 +220,10 @@ export function AskSonarDrawer({
             onKeyDown={(e) => {
               if (e.key === "Enter") void send(input);
             }}
-            disabled={!scanId || (!configured && !providerName)}
+            disabled={!scanId || !configured}
             aria-label="Ask Sonar a question"
           />
-          <button className="btn btn-primary" onClick={() => void send(input)} disabled={asking || !input.trim() || !scanId || (!configured && !providerName)}>
+          <button className="btn btn-primary" onClick={() => void send(input)} disabled={asking || !input.trim() || !scanId || !configured}>
             {asking ? "…" : "Ask"}
           </button>
         </div>

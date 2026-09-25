@@ -548,8 +548,10 @@ variables — no secrets are ever committed to the repo:
 | `SONAR_PUBLIC_URL` | Public base URL, e.g. `https://sonar.example.com` (used for OAuth redirect URIs) |
 | `SONAR_SESSION_SECRET` | Signs session cookies (falls back to a random per-process secret with a warning — set it in production) |
 | `ASK_SONAR_PROVIDER` | `ollama` (self-host default), `openai`, or `anthropic` |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Hosted provider keys (server default) |
-| `ASK_SONAR_BASE_URL` / `ASK_SONAR_MODEL` | Override hosted endpoint/model |
+| `OPENAI_API_KEY` / `GROQ_API_KEY` / `ANTHROPIC_API_KEY` | Hosted provider keys (server default) |
+| `ASK_SONAR_BASE_URL` / `ASK_SONAR_MODEL` | Override hosted endpoint/model (e.g. Groq: `https://api.groq.com/openai/v1`) |
+| `CODE_SONAR_REMEDIATION_EXECUTOR` | `deterministic` (default, free), `groq` (AI fixes via Groq API), or `cursor` (Cursor Agent CLI) |
+| `CODE_SONAR_GROQ_MODEL` | Model for Groq remediation (default `llama-3.3-70b-versatile`) |
 | `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth

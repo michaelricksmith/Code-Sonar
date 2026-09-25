@@ -2,7 +2,27 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Current handoff — 2026-09-23 PDT**
+> **Current handoff — 2026-09-25 PDT**
+
+Remediation now has three executors: `deterministic` (default, free
+structural fixes — currently the only safe live path), `groq` (new
+`backend/app/remediation/groq.py`: AI-generated fixes via Groq's
+OpenAI-compatible API, no local binary so it runs on Render's free tier;
+production env set to `CODE_SONAR_REMEDIATION_EXECUTOR=groq` with
+`ASK_SONAR_PROVIDER=openai`,
+`ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1`,
+`ASK_SONAR_MODEL=llama-3.3-70b-versatile` — activation pending the owner
+setting `GROQ_API_KEY` in the Render dashboard), and `cursor` (legacy
+CLI path; installed-Cursor host proof still outstanding). Ask Sonar's
+OpenAI-compatible provider now also accepts `GROQ_API_KEY`. The
+deterministic splitter from 2026-09-24 is intentionally NOT the live
+fix path — its block-splitting is unproven on real files and must be
+hardened or gated before production use. Prior deployments 2026-09-25
+of 106efe5/4c268d3/4b565f2 hit transient Render `update_failed` /
+`build_failed` states; a fresh deploy was triggered — verify it reaches
+`live` before demoing.
+
+> Previous handoff — 2026-09-23 PDT
 
 Public-beta launch state. What's new since 2026-09-08: GitHub/Google OAuth
 (`backend/app/oauth.py`), async scan jobs (`backend/app/scan_jobs.py` —

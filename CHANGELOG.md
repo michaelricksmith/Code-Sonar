@@ -1,3 +1,25 @@
+## 2026-09-25 — Groq-powered remediation executor and Ask Sonar key support
+
+- New `GroqRemediationExecutor` (`backend/app/remediation/groq.py`):
+  AI-generated fixes via Groq's OpenAI-compatible API — no
+  `cursor-agent` binary required, so it runs on Render's free tier.
+  Set `CODE_SONAR_REMEDIATION_EXECUTOR=groq`; deterministic rules
+  (e.g. oversized-file splits) still run through the free local
+  executor to save API quota. Requires `GROQ_API_KEY` (or
+  `OPENAI_API_KEY`); model override via `CODE_SONAR_GROQ_MODEL`
+  (default `llama-3.3-70b-versatile`).
+- Ask Sonar now also accepts `GROQ_API_KEY` for the `openai`
+  (OpenAI-compatible) provider, alongside `OPENAI_API_KEY`. Set
+  `ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1` and
+  `ASK_SONAR_MODEL` to point hosted Ask Sonar at Groq's free tier.
+- Production env configured: `CODE_SONAR_REMEDIATION_EXECUTOR=groq`,
+  `ASK_SONAR_PROVIDER=openai`,
+  `ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1`,
+  `ASK_SONAR_MODEL=llama-3.3-70b-versatile`. Activation pending the
+  owner setting `GROQ_API_KEY` in the Render dashboard.
+
+---
+
 ## 2026-09-24 — Sign out is reachable on mobile and visible on desktop
 
 - The sidebar (the only place with a Sign out button) is hidden below 960px,

@@ -2,14 +2,19 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Authoritative current snapshot — 2026-09-23 PDT**
+> **Authoritative current snapshot — 2026-09-25 PDT**
 - **Public beta (v0.2.0-beta).** Real GitHub + Google OAuth sign-in, async
   scan jobs (clone → scan → score with human-readable progress), hosted Ask
-  Sonar providers (OpenAI-compatible, Anthropic, BYOK, Ollama self-host
-  retained), and a light "credit report" UI rebuild for non-technical users
-  (landing page, onboarding wizard, plain-language copy map, guided
-  remediation). Engine untouched: 300–850 score, grade bands A≥800/B≥740/
-  C≥670/D≥580/F, 8 analyzers.
+  Sonar providers (OpenAI-compatible incl. Groq via `GROQ_API_KEY`,
+  Anthropic, BYOK, Ollama self-host retained), and a light "credit report"
+  UI rebuild for non-technical users (landing page, onboarding wizard,
+  plain-language copy map, guided remediation). Engine untouched: 300–850
+  score, grade bands A≥800/B≥740/C≥670/D≥580/F, 8 analyzers.
+- **Remediation executors:** `deterministic` (default, free structural
+  fixes e.g. oversized-file splits), `groq` (AI fixes via Groq API, no
+  local binary — configured on production, activation pending owner-set
+  `GROQ_API_KEY`), `cursor` (Cursor Agent CLI, still requires the
+  installed-Cursor host run for the complete proof).
 - Verified: 507 pytest passed / 1 skipped, tsc clean, eslint 0 warnings,
   vite build exit 0, live E2E scan (score 833, grade A, 8/8 analyzers) and
   live scan-job clone→scan (score 850, grade A).

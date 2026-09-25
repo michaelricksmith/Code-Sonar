@@ -1,3 +1,19 @@
+## 2026-09-25 — Remediation UI surfaces execution outcome and offers retry
+
+- The fix panel now shows what the executor actually did when validation
+  didn't run: execution state (`EXECUTED`/`DRY_RUN`/`FAILED`), the
+  executor's summary, the error text on failure, and files touched.
+  Previously the UI showed a bare "Run finished" with no explanation.
+- Added a "Try the fix again" button when the workflow stops before
+  validation, so the test/rescan steps can actually complete.
+- Steps 3 ("apply the fix") and 4 ("see your new score") plus the progress
+  counter only mark done when validation data exists — no more premature
+  "Done ✓" on incomplete runs.
+- Frontend `RemediationWorkflow.execution` type now includes the backend's
+  `summary` and `error` fields.
+
+---
+
 ## 2026-09-25 — Groq-powered remediation executor and Ask Sonar key support
 
 - New `GroqRemediationExecutor` (`backend/app/remediation/groq.py`):

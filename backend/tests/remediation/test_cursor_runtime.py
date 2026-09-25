@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.remediation.contracts import DryRunRemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
+from app.remediation.deterministic import DeterministicRemediationExecutor
 from app.remediation.runtime import (
     configure_remediation_executor_from_env,
     get_remediation_executor,
@@ -39,4 +40,6 @@ def test_cursor_runtime_requires_explicit_valid_configuration(
     monkeypatch.delenv("CODE_SONAR_REMEDIATION_EXECUTOR", raising=False)
     monkeypatch.delenv("CODE_SONAR_CURSOR_COMMAND_JSON", raising=False)
     configure_remediation_executor_from_env()
-    assert isinstance(get_remediation_executor(), DryRunRemediationExecutor)
+    # No executor configured: the default is the deterministic executor
+    # (free structural fixes), not a dry run.
+    assert isinstance(get_remediation_executor(), DeterministicRemediationExecutor)

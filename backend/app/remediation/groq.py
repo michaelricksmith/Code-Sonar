@@ -33,6 +33,8 @@ from app.remediation.contracts import (
 )
 from app.remediation.deterministic import (
     SUPPORTED_RULES as DETERMINISTIC_RULES,
+)
+from app.remediation.deterministic import (
     DeterministicRemediationExecutor,
     _parse_instruction,
 )
@@ -99,9 +101,12 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
         raise RuntimeError(f"Groq API connection failed: {exc}") from exc
 
     try:
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"Unexpected Groq API response format: {exc}") from exc
+    if not isinstance(content, str):
+        raise RuntimeError(f"Unexpected Groq API response format: {type(content).__name__}")
+    return content
 
 
 def _extract_code_block(response: str) -> str | None:

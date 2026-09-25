@@ -245,10 +245,10 @@ def _split_oversized_file(
         written_files[block.name] = candidates[0]
 
     for block in exports:
-        target = written_files.get(block.name)
-        if target is None:
+        split_target = written_files.get(block.name)
+        if split_target is None:
             continue
-        rel = f"./{split_dir.name}/{target.stem}"
+        rel = f"./{split_dir.name}/{split_target.stem}"
         if block.name.startswith("export_"):
             # Unnamed/default export — keep inline to preserve behavior.
             inline_blocks.append(block.text)

@@ -6,7 +6,7 @@ import hashlib
 import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Sequence
 
 from sqlalchemy import Engine, and_, delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
@@ -101,7 +101,7 @@ class SqlHistoryStore:
             rows = connection.execute(query).mappings().all()
             result: list[ScanRecord] = []
             for row in rows:
-                finding_rows = (
+                finding_rows: Sequence[Any] = (
                     connection.execute(
                         select(findings.c.payload)
                         .where(
@@ -254,7 +254,7 @@ class SqlGitHubInstallationStore:
 
     def tenant_for_installation(self, installation_id: int) -> str | None:
         with self.engine.connect() as connection:
-            values = set(
+            values: set[Any] = set(
                 connection.execute(
                     select(github_installations.c.tenant_id).where(
                         github_installations.c.installation_id == str(installation_id)
@@ -354,7 +354,7 @@ class SqlWebhookAuditStore:
 
     def list(self, limit: int = 50) -> list[WebhookAuditRecord]:
         with self.engine.connect() as connection:
-            rows = (
+            rows: Sequence[Any] = (
                 connection.execute(
                     select(webhook_deliveries.c.payload).where(
                         webhook_deliveries.c.tenant_id == current_tenant_id()
@@ -481,7 +481,7 @@ class SqlOutcomeStore:
         if repository_id:
             query = query.where(remediation_outcomes.c.repository_id == repository_id)
         with self.engine.connect() as connection:
-            rows = connection.execute(query).scalars().all()
+            rows: Sequence[Any] = connection.execute(query).scalars().all()
         return sorted(
             (RemediationOutcome.from_dict(row) for row in rows),
             key=lambda x: (x.attempted_at, x.outcome_id),

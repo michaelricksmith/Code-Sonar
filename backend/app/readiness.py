@@ -57,10 +57,10 @@ def _database_revision(database_url: str) -> str | None:
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
-            revision = connection.execute(
+            revision: str = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            return str(revision)
+            return revision
     finally:
         engine.dispose()
 

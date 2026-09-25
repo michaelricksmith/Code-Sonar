@@ -1,3 +1,17 @@
+## 2026-09-25 — Backend CI green again
+
+- Fixed the `Backend tests + lint` job: ruff import sorting, 7 mypy-strict
+  errors, and 2 failing tests.
+- `is_postgresql` recognizes `postgresql+` dialect qualifiers again
+  (e.g. `postgresql+psycopg://`) — a prior Postgres-wiring change had
+  narrowed it to `postgresql://` and broken shared-mode validation for
+  already-qualified URLs.
+- Default remediation executor is deterministic (free structural fixes);
+  the stale dry-run default assertion in the cursor runtime test was
+  updated.
+
+---
+
 ## 2026-09-25 (late) — Groq key live on production
 
 - `GROQ_API_KEY` is now set in the Render dashboard (key verified working

@@ -9,6 +9,7 @@ from app.remediation.approval import RemediationAuthorizationService
 from app.remediation.contracts import DryRunRemediationExecutor, RemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
 from app.remediation.deterministic import DeterministicRemediationExecutor
+from app.remediation.groq import GroqRemediationExecutor
 from app.remediation.orchestration import RemediationOrchestrator
 from app.remediation.validation import RemediationValidationService, ValidationCommand
 from app.remediation.workspace import GitWorktreeManager
@@ -77,6 +78,9 @@ def configure_remediation_executor_from_env() -> None:
     executor_name = os.getenv("CODE_SONAR_REMEDIATION_EXECUTOR", "").strip().lower()
     if executor_name == "deterministic":
         _executor = DeterministicRemediationExecutor()
+        return
+    if executor_name == "groq":
+        _executor = GroqRemediationExecutor()
         return
     if executor_name == "cursor":
         raw_command = os.getenv("CODE_SONAR_CURSOR_COMMAND_JSON", "").strip()

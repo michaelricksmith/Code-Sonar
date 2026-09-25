@@ -8,6 +8,7 @@ import os
 from app.remediation.approval import RemediationAuthorizationService
 from app.remediation.contracts import DryRunRemediationExecutor, RemediationExecutor
 from app.remediation.cursor import CursorRemediationExecutor
+from app.remediation.deterministic import DeterministicRemediationExecutor
 from app.remediation.orchestration import RemediationOrchestrator
 from app.remediation.validation import RemediationValidationService, ValidationCommand
 from app.remediation.workspace import GitWorktreeManager
@@ -74,30 +75,34 @@ def configure_remediation_executor_from_env() -> None:
     """Configure an executor explicitly from environment without running commands."""
     global _executor
     executor_name = os.getenv("CODE_SONAR_REMEDIATION_EXECUTOR", "").strip().lower()
-    if executor_name != "cursor":
-        _executor = DryRunRemediationExecutor()
+    if executor_name == "deterministic":
+        _executor = DeterministicRemediationExecutor()
         return
+    if executor_name == "cursor":
+        raw_command = os.getenv("CODE_SONAR_CURSOR_COMMAND_JSON", "").strip()
+        if not raw_command:
+            _executor = DryRunRemediationExecutor()
+            return
 
-    raw_command = os.getenv("CODE_SONAR_CURSOR_COMMAND_JSON", "").strip()
-    if not raw_command:
-        _executor = DryRunRemediationExecutor()
+        try:
+            payload = json.loads(raw_command)
+            if not isinstance(payload, list) or not payload:
+                raise ValueError("Cursor command must be a non-empty JSON array")
+            command_template = tuple(str(token) for token in payload)
+            timeout_seconds = float(os.getenv("CODE_SONAR_CURSOR_TIMEOUT_SECONDS", "900"))
+            if timeout_seconds <= 0:
+                raise ValueError("Cursor timeout must be positive")
+            _executor = CursorRemediationExecutor(
+                command_template,
+                workspace_root=_workspace_manager.root,
+                timeout_seconds=timeout_seconds,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError):
+            _executor = DryRunRemediationExecutor()
         return
-
-    try:
-        payload = json.loads(raw_command)
-        if not isinstance(payload, list) or not payload:
-            raise ValueError("Cursor command must be a non-empty JSON array")
-        command_template = tuple(str(token) for token in payload)
-        timeout_seconds = float(os.getenv("CODE_SONAR_CURSOR_TIMEOUT_SECONDS", "900"))
-        if timeout_seconds <= 0:
-            raise ValueError("Cursor timeout must be positive")
-        _executor = CursorRemediationExecutor(
-            command_template,
-            workspace_root=_workspace_manager.root,
-            timeout_seconds=timeout_seconds,
-        )
-    except (json.JSONDecodeError, TypeError, ValueError):
-        _executor = DryRunRemediationExecutor()
+    # Default: deterministic executor handles structural issues for free.
+    # Set CODE_SONAR_REMEDIATION_EXECUTOR=cursor for AI-powered fixes.
+    _executor = DeterministicRemediationExecutor()
 
 
 def configure_validation_service_from_env() -> None:

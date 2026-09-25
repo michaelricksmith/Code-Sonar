@@ -59,8 +59,6 @@ export function AskSonarDrawer({
   onOpenIssue,
   providerName,
   apiKey,
-  onProviderChange,
-  onApiKeyChange,
 }: AskSonarDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -69,7 +67,6 @@ export function AskSonarDrawer({
   const chatRef = useRef<HTMLDivElement>(null);
 
   const configured = providers?.find((p) => p.configured) ?? null;
-  const byokOptions = (providers ?? []).filter((p) => !p.configured);
   // Headers are only sent when the user explicitly picked a provider via BYOK.
   // Otherwise the server answers with its configured provider (or reports
   // honestly that none is configured) instead of rejecting a phantom default.

@@ -9,6 +9,12 @@ import type { User } from "../api/auth";
 
 export type ShellView = "overview" | "issues" | "fixes";
 
+export interface PromptActivity {
+  inProgress: number;
+  resolved: number;
+  stillOpen: number;
+}
+
 interface ShellProps {
   user: User;
   repoLabel: string | null;
@@ -16,6 +22,7 @@ interface ShellProps {
   view: ShellView;
   issueCount: number | null;
   fixCount: number | null;
+  promptActivity: PromptActivity | null;
   onNavigate: (view: ShellView) => void;
   onSignOut: () => void;
   onOpenSonar: () => void;
@@ -29,6 +36,7 @@ export function Shell({
   view,
   issueCount,
   fixCount,
+  promptActivity,
   onNavigate,
   onSignOut,
   onOpenSonar,
@@ -66,6 +74,29 @@ export function Shell({
           <button className={`side-item ${view === "fixes" ? "active" : ""}`} onClick={() => onNavigate("fixes")}>
             ✓ Fixes{fixCount != null && fixCount > 0 && <span className="count">{fixCount}</span>}
           </button>
+          {promptActivity != null &&
+            promptActivity.inProgress + promptActivity.resolved + promptActivity.stillOpen > 0 && (
+              <div className="side-detail" aria-label="Fix activity">
+                {promptActivity.inProgress > 0 && (
+                  <div className="side-detail-row">
+                    <span>✎</span>
+                    <span>{promptActivity.inProgress} prompt{promptActivity.inProgress === 1 ? "" : "s"} in progress</span>
+                  </div>
+                )}
+                {promptActivity.resolved > 0 && (
+                  <div className="side-detail-row">
+                    <span>✓</span>
+                    <span>{promptActivity.resolved} verified fixed</span>
+                  </div>
+                )}
+                {promptActivity.stillOpen > 0 && (
+                  <div className="side-detail-row">
+                    <span>⚠</span>
+                    <span>{promptActivity.stillOpen} still open</span>
+                  </div>
+                )}
+              </div>
+            )}
           <button className="side-item" onClick={onOpenSonar}>↗ History</button>
         </div>
 

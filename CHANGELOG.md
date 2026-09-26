@@ -1,5 +1,14 @@
 ## Unreleased — Prompt-first remediation
 
+- **Database-backed user accounts.** OAuth sign-in now stores accounts in
+  the `users` table (Alembic `20260926_0003`) instead of only the ephemeral
+  JSON file: GitHub/Google identities link to one account by normalized
+  email, GitHub OAuth tokens are encrypted at rest, `last_login_at` is
+  tracked, and suspended accounts are rejected at login and on existing
+  sessions. On first startup with SQL configured, any legacy
+  `~/.code-sonar/oauth-users.json` is imported once (only when the table is
+  empty; the JSON file is left untouched) preserving user ids so existing
+  sessions keep working.
 - **Ask Sonar never feels broken.** When the LLM provider is missing or fails
   (e.g. bad API key), Ask Sonar now answers from the deterministic scan data
   instead of showing a raw error like "Unauthorized". Intent-matched answers

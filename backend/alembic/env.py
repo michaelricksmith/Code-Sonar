@@ -5,6 +5,7 @@ import os
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from app.models.user import users as users_table  # noqa: F401 - registers table on metadata
 from app.persistence.config import psycopg3_database_url
 from app.persistence.schema import metadata
 

@@ -19,6 +19,7 @@ class EncryptionProvider(Protocol):
 
 class LocalDevelopmentEncryptionProvider:
     """AES-GCM provider permitted only for explicit local development."""
+
     provider_name = "local-aes-gcm"
     production_safe = False
 
@@ -90,3 +91,7 @@ class EnvKeyEncryptionProvider:
 
 def checkout_path_aad(tenant_id: str, project_id: str) -> bytes:
     return f"code-sonar:v1:{tenant_id}:projects:{project_id}:checkout_path".encode()
+
+
+def oauth_token_aad(user_id: str) -> bytes:
+    return f"code-sonar:v1:users:{user_id}:github_token".encode()

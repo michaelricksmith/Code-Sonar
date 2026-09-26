@@ -371,6 +371,10 @@ The optional transactional persistence boundary uses SQLAlchemy repositories
 and an Alembic tenant-aware baseline. Shared deployments fail closed unless
 PostgreSQL and a deployment-injected production encryption provider are
 configured; SQLite and the bundled AES-GCM provider are local-development only.
+User accounts (GitHub/Google OAuth) live in the database-backed `users` table
+whenever SQL is configured — identities link across providers by normalized
+email, GitHub tokens are encrypted at rest, and a one-time startup import
+carries over the legacy JSON user file without deleting it.
 See [Transactional persistence](docs/TRANSACTIONAL_PERSISTENCE.md) for migration,
 legacy import, filesystem, and remaining-readiness boundaries.
 See [Operational privacy](docs/OPERATIONAL_PRIVACY.md) for tenant retention

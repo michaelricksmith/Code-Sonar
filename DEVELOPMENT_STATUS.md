@@ -2,7 +2,13 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Authoritative current snapshot — 2026-09-25 PDT (late)**
+> **Authoritative current snapshot — 2026-09-26 PDT**
+- **Database-backed user accounts (new).** OAuth sign-in now stores accounts
+  in the `users` table (Alembic `20260926_0003`, 19 new tests passing): one
+  account per normalized email across GitHub/Google, GitHub tokens encrypted
+  at rest, `last_login_at` tracked, suspended accounts rejected at login and
+  on existing sessions, one-time legacy JSON import on startup. When no
+  database is configured the local JSON store keeps working unchanged.
 - **Public beta (v0.2.0-beta).** Real GitHub + Google OAuth sign-in, async
   scan jobs (clone → scan → score with human-readable progress), hosted Ask
   Sonar providers (OpenAI-compatible incl. Groq via `GROQ_API_KEY`,

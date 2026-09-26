@@ -6,9 +6,11 @@ import hashlib
 import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Sequence
 
-from sqlalchemy import Engine, and_, delete, insert, select, update
+from sqlalchemy import Engine, and_, delete, func, insert, select, update
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from app.github_app import (
@@ -18,7 +20,16 @@ from app.github_app import (
 )
 from app.history import ScanRecord
 from app.ml.outcomes.schema import RemediationOutcome
-from app.persistence.crypto import EncryptionProvider, checkout_path_aad
+from app.models.user import (
+    PLAN_FREE,
+    PROVIDER_GITHUB,
+    PROVIDER_GOOGLE,
+    STATUS_ACTIVE,
+    STATUS_SUSPENDED,
+    users,
+)
+from app.oauth import OAuthUser, OAuthUserStore
+from app.persistence.crypto import EncryptionProvider, checkout_path_aad, oauth_token_aad
 from app.persistence.schema import (
     findings,
     github_installations,
@@ -489,3 +500,367 @@ class SqlOutcomeStore:
 
     def get(self, outcome_id: str) -> RemediationOutcome | None:
         return next((item for item in self.load_all() if item.outcome_id == outcome_id), None)
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_email(email: str) -> str | None:
+    normalized = (email or "").strip().lower()
+    return normalized or None
+
+
+def _identity_columns(
+    provider: str, provider_user_id: str, github_username: str = ""
+) -> dict[str, Any]:
+    """Map an OAuth identity to the users-table identity columns."""
+    if provider == PROVIDER_GITHUB:
+        return {
+            "github_id": provider_user_id or None,
+            "github_username": github_username or None,
+        }
+    if provider == PROVIDER_GOOGLE:
+        return {"google_sub": provider_user_id or None}
+    return {}
+
+
+def _effective_identity(record: OAuthUser) -> dict[str, Any]:
+    """Resolve a (possibly legacy) user record to users-table identity columns.
+
+    Records written before the identity columns existed only carry
+    ``provider``/``provider_user_id``; fall back to those.
+    """
+    github_id = record.github_id or (
+        record.provider_user_id if record.provider == PROVIDER_GITHUB else ""
+    )
+    google_sub = record.google_sub or (
+        record.provider_user_id if record.provider == PROVIDER_GOOGLE else ""
+    )
+    return {
+        "github_id": github_id or None,
+        "github_username": record.github_username or None,
+        "google_sub": google_sub or None,
+    }
+
+
+class SqlUserStore:
+    """Database-backed user accounts.
+
+    This is the source of truth for user accounts whenever SQL persistence
+    is configured; ``app.oauth`` swaps it in as the process-wide user store
+    at startup. The ``get``/``upsert`` interface mirrors ``OAuthUserStore``
+    so the OAuth callbacks work unchanged.
+
+    A user may link both GitHub and Google to one account: sign-ins are
+    matched by provider identity first, then by normalized email, so the
+    same email can never fork into two accounts.
+    """
+
+    def __init__(self, engine: Engine, encryption: EncryptionProvider) -> None:
+        self.engine = engine
+        self.encryption = encryption
+
+    # -- mapping ------------------------------------------------------
+
+    def _encrypt_token(self, user_id: str, token: str) -> str | None:
+        if not token:
+            return None
+        return self.encryption.encrypt(token, aad=oauth_token_aad(user_id))
+
+    def _row_to_user(self, row: RowMapping) -> OAuthUser:
+        token = ""
+        ciphertext = row["github_token_ciphertext"]
+        if ciphertext:
+            try:
+                token = self.encryption.decrypt(ciphertext, aad=oauth_token_aad(row["id"]))
+            except Exception:
+                # A token that can no longer decrypt (e.g. key rotation)
+                # must not break sign-in; the user re-links on next OAuth.
+                token = ""
+        provider = row["provider"] or ""
+        provider_user_id = ""
+        if provider == PROVIDER_GITHUB:
+            provider_user_id = row["github_id"] or ""
+        elif provider == PROVIDER_GOOGLE:
+            provider_user_id = row["google_sub"] or ""
+        return OAuthUser(
+            id=row["id"],
+            provider=provider,
+            provider_user_id=provider_user_id,
+            name=row["display_name"] or "",
+            email=row["email"] or "",
+            avatar_url=row["avatar_url"] or "",
+            github_access_token=token,
+            created_at=row["created_at"] or "",
+            updated_at=row["updated_at"] or "",
+            github_id=row["github_id"] or "",
+            github_username=row["github_username"] or "",
+            google_sub=row["google_sub"] or "",
+            plan=row["plan"] or PLAN_FREE,
+            status=row["status"] or STATUS_ACTIVE,
+            is_admin=bool(row["is_admin"]),
+            last_login_at=row["last_login_at"] or "",
+        )
+
+    # -- reads --------------------------------------------------------
+
+    def get(self, user_id: str) -> OAuthUser | None:
+        with self.engine.connect() as connection:
+            row = connection.execute(select(users).where(users.c.id == user_id)).mappings().first()
+        if row is None:
+            return None
+        return self._row_to_user(row)
+
+    def get_by_email(self, email: str) -> OAuthUser | None:
+        email_norm = _normalize_email(email)
+        if not email_norm:
+            return None
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(select(users).where(users.c.email == email_norm))
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return self._row_to_user(row)
+
+    def count(self) -> int:
+        with self.engine.connect() as connection:
+            return self._count(connection)
+
+    def _count(self, connection: Any) -> int:
+        return int(connection.execute(select(func.count()).select_from(users)).scalar() or 0)
+
+    def list_users(self, *, limit: int = 100, offset: int = 0) -> list[OAuthUser]:
+        with self.engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(users).order_by(users.c.created_at.desc()).limit(limit).offset(offset)
+                )
+                .mappings()
+                .all()
+            )
+        return [self._row_to_user(row) for row in rows]
+
+    # -- writes -------------------------------------------------------
+
+    def _find_user_id(
+        self,
+        connection: Any,
+        provider: str,
+        provider_user_id: str,
+        email_norm: str | None,
+    ) -> str | None:
+        identity_column = None
+        if provider == PROVIDER_GITHUB:
+            identity_column = users.c.github_id
+        elif provider == PROVIDER_GOOGLE:
+            identity_column = users.c.google_sub
+        if identity_column is not None and provider_user_id:
+            found = connection.execute(
+                select(users.c.id).where(identity_column == provider_user_id)
+            ).scalar_one_or_none()
+            if found is not None:
+                return str(found)
+        if email_norm:
+            found = connection.execute(
+                select(users.c.id).where(users.c.email == email_norm)
+            ).scalar_one_or_none()
+            if found is not None:
+                return str(found)
+        return None
+
+    def _apply_login(
+        self,
+        connection: Any,
+        user_id: str,
+        *,
+        provider: str,
+        provider_user_id: str,
+        name: str,
+        avatar_url: str,
+        github_access_token: str,
+        github_username: str,
+        now: str,
+    ) -> None:
+        values: dict[str, Any] = {
+            "provider": provider,
+            "updated_at": now,
+            "last_login_at": now,
+        }
+        if name:
+            values["display_name"] = name
+        if avatar_url:
+            values["avatar_url"] = avatar_url
+        values.update(_identity_columns(provider, provider_user_id, github_username))
+        if github_access_token:
+            values["github_token_ciphertext"] = self._encrypt_token(user_id, github_access_token)
+        connection.execute(update(users).where(users.c.id == user_id).values(**values))
+
+    def _get_or_raise(self, connection: Any, user_id: str) -> OAuthUser:
+        row = connection.execute(select(users).where(users.c.id == user_id)).mappings().first()
+        if row is None:  # pragma: no cover - defensive
+            raise LookupError("User not found")
+        return self._row_to_user(row)
+
+    def upsert(
+        self,
+        *,
+        provider: str,
+        provider_user_id: str,
+        name: str,
+        email: str,
+        avatar_url: str,
+        github_access_token: str = "",
+        github_username: str = "",
+    ) -> OAuthUser:
+        now = _utcnow_iso()
+        email_norm = _normalize_email(email)
+        with self.engine.begin() as connection:
+            user_id = self._find_user_id(connection, provider, provider_user_id, email_norm)
+            if user_id is None:
+                user_id = uuid.uuid4().hex
+                values: dict[str, Any] = {
+                    "id": user_id,
+                    "email": email_norm,
+                    "display_name": name,
+                    "avatar_url": avatar_url,
+                    "provider": provider,
+                    "plan": PLAN_FREE,
+                    "status": STATUS_ACTIVE,
+                    "is_admin": False,
+                    "github_token_ciphertext": self._encrypt_token(user_id, github_access_token),
+                    "created_at": now,
+                    "updated_at": now,
+                    "last_login_at": now,
+                }
+                values.update(_identity_columns(provider, provider_user_id, github_username))
+                try:
+                    connection.execute(insert(users).values(**values))
+                except IntegrityError:
+                    # Lost a race with a concurrent sign-in; use the winner.
+                    user_id = self._find_user_id(connection, provider, provider_user_id, email_norm)
+                    if user_id is None:
+                        raise
+                    self._apply_login(
+                        connection,
+                        user_id,
+                        provider=provider,
+                        provider_user_id=provider_user_id,
+                        name=name,
+                        avatar_url=avatar_url,
+                        github_access_token=github_access_token,
+                        github_username=github_username,
+                        now=now,
+                    )
+            else:
+                self._apply_login(
+                    connection,
+                    user_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
+                    name=name,
+                    avatar_url=avatar_url,
+                    github_access_token=github_access_token,
+                    github_username=github_username,
+                    now=now,
+                )
+            return self._get_or_raise(connection, user_id)
+
+    def set_status(self, user_id: str, status: str) -> OAuthUser:
+        if status not in (STATUS_ACTIVE, STATUS_SUSPENDED):
+            raise ValueError(f"Unknown user status: {status}")
+        with self.engine.begin() as connection:
+            updated = connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(status=status, updated_at=_utcnow_iso())
+            )
+            if updated.rowcount != 1:
+                raise LookupError("User not found")
+            return self._get_or_raise(connection, user_id)
+
+    def set_admin(self, user_id: str, is_admin: bool) -> OAuthUser:
+        with self.engine.begin() as connection:
+            updated = connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(is_admin=is_admin, updated_at=_utcnow_iso())
+            )
+            if updated.rowcount != 1:
+                raise LookupError("User not found")
+            return self._get_or_raise(connection, user_id)
+
+    def set_plan(self, user_id: str, plan: str) -> OAuthUser:
+        with self.engine.begin() as connection:
+            updated = connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(plan=plan, updated_at=_utcnow_iso())
+            )
+            if updated.rowcount != 1:
+                raise LookupError("User not found")
+            return self._get_or_raise(connection, user_id)
+
+    # -- legacy import ------------------------------------------------
+
+    def import_legacy_json(self, path: Path) -> int:
+        """One-time import of a legacy ``oauth-users.json`` file.
+
+        Imports only when the users table is empty. Records sharing an
+        email are merged into one account (same linking rule as upsert).
+        The JSON file is left untouched. Returns the number of imported
+        users.
+        """
+        if not path.exists():
+            return 0
+        legacy = OAuthUserStore(path=path).load_all()
+        if not legacy:
+            return 0
+        merged: dict[str, OAuthUser] = {}
+        order: list[str] = []
+        for record in legacy:
+            key = _normalize_email(record.email) or f"{record.provider}:{record.provider_user_id}"
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = record
+                order.append(key)
+                continue
+            merged[key] = replace(
+                existing,
+                github_id=existing.github_id
+                or record.github_id
+                or (record.provider_user_id if record.provider == PROVIDER_GITHUB else ""),
+                github_username=existing.github_username or record.github_username,
+                google_sub=existing.google_sub
+                or record.google_sub
+                or (record.provider_user_id if record.provider == PROVIDER_GOOGLE else ""),
+                github_access_token=existing.github_access_token or record.github_access_token,
+            )
+        with self.engine.begin() as connection:
+            if self._count(connection) > 0:
+                return 0
+            for key in order:
+                record = merged[key]
+                connection.execute(
+                    insert(users).values(
+                        id=record.id,
+                        email=_normalize_email(record.email),
+                        display_name=record.name,
+                        avatar_url=record.avatar_url,
+                        provider=record.provider,
+                        plan=record.plan or PLAN_FREE,
+                        status=record.status or STATUS_ACTIVE,
+                        is_admin=bool(record.is_admin),
+                        github_token_ciphertext=self._encrypt_token(
+                            record.id, record.github_access_token
+                        ),
+                        created_at=record.created_at,
+                        updated_at=record.updated_at,
+                        last_login_at=record.last_login_at or None,
+                        **_effective_identity(record),
+                    )
+                )
+        return len(order)

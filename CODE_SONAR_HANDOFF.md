@@ -69,6 +69,13 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Database-backed user accounts: `users` table (Alembic `20260926_0003`)
+  with per-email cross-provider identity linking, AES-GCM-encrypted GitHub
+  tokens, `last_login_at` tracking, suspended-account rejection at login and
+  session resolution, and a one-time non-destructive legacy JSON import at
+  startup. **19 new tests pass**; existing OAuth/scan-job/session-cookie
+  tests unaffected (607 passed / 1 skipped full suite; 4 pre-existing
+  Ask Sonar failures unchanged from base).
 - Operational privacy checkpoint: tenant-scoped retention policy, authenticated
   and audited encrypted export job contract, recovery-gated soft/hard deletion,
   content-free idempotent receipt, and crypto-erasure integration seam. The MVP

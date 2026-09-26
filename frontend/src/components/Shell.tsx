@@ -26,6 +26,9 @@ interface ShellProps {
   onNavigate: (view: ShellView) => void;
   onSignOut: () => void;
   onOpenSonar: () => void;
+  /** Re-scan the current repo; exposed in the sidebar so it's one tap away on every page. */
+  onRescan: () => void;
+  rescanning: boolean;
   children: ReactNode;
 }
 
@@ -40,8 +43,11 @@ export function Shell({
   onNavigate,
   onSignOut,
   onOpenSonar,
+  onRescan,
+  rescanning,
   children,
 }: ShellProps) {
+  const rescanLabel = rescanning ? "↻ Scanning…" : "↻ Re-scan";
   return (
     <div className="shell">
       <div className="mobile-topbar">
@@ -49,7 +55,14 @@ export function Shell({
           <span className="brand-mark" />
           Code&nbsp;Sonar
         </a>
-        <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {repoLabel && (
+            <button className="signout" onClick={onRescan} disabled={rescanning} title="Re-scan this repo">
+              {rescanLabel}
+            </button>
+          )}
+          <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
+        </div>
       </div>
       <aside className="sidebar" aria-label="Primary navigation">
         <div>
@@ -61,6 +74,11 @@ export function Shell({
             <b>{repoLabel ?? "No repo yet"}</b>
             <span>{repoSub ?? "Pick a repo to get your first score"}</span>
           </div>
+          {repoLabel && (
+            <button className="side-rescan" onClick={onRescan} disabled={rescanning} title="Re-scan this repo">
+              {rescanLabel}
+            </button>
+          )}
 
           <div className="side-label">Workspace</div>
           <button className={`side-item ${view === "overview" ? "active" : ""}`} onClick={() => onNavigate("overview")}>

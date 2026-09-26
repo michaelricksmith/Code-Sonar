@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.admin_wipe import router as admin_wipe_router
 from app.ask_sonar.api import router as ask_sonar_router
 from app.drift import compute_drift
 from app.github_app import router as github_app_router
@@ -68,6 +69,7 @@ app.include_router(projects_router)
 app.include_router(github_app_router)
 app.include_router(privacy_router)
 app.include_router(readiness_router)
+app.include_router(admin_wipe_router)
 
 _history_store: JsonlHistoryStore | InMemoryHistoryStore = JsonlHistoryStore()
 

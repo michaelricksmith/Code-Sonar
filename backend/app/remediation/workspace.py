@@ -12,7 +12,7 @@ from typing import Callable
 
 from app.remediation.approval import RemediationAuthorization
 from app.remediation.contracts import RemediationRequest
-from app.security import validate_repo_path
+from app.security import REMEDIATION_WORKTREES_DIR, validate_repo_path
 
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -79,7 +79,7 @@ class GitWorktreeManager:
         root: Path | None = None,
         runner: GitCommandRunner = _default_git_runner,
     ) -> None:
-        self.root = root or (Path.home() / ".code-sonar" / "remediation-worktrees")
+        self.root = root or REMEDIATION_WORKTREES_DIR
         self.runner = runner
         self._prepared: dict[str, PreparedWorkspace] = {}
 

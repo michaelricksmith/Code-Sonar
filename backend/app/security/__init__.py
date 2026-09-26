@@ -17,6 +17,12 @@ SCAN_ROOT_DIR: Path = Path(
     os.environ.get("CODESONAR_SCAN_ROOT", str(Path(tempfile.gettempdir()) / "code-sonar-scans"))
 )
 
+# Remediation worktrees must live inside the scan root so the deterministic
+# rescan step (scan_repository -> validate_repo_path) accepts them. A worktree
+# outside the root fails containment validation with "repository path is
+# outside the allowed scan root".
+REMEDIATION_WORKTREES_DIR: Path = SCAN_ROOT_DIR / "remediation-worktrees"
+
 EXCLUDED_DIRS: frozenset[str] = frozenset({
     ".git", ".svn", ".hg",
     "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",

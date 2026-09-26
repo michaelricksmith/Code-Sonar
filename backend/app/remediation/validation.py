@@ -14,6 +14,7 @@ from app.ml.outcomes import JsonlOutcomeStore, RemediationOutcome
 from app.ml.outcomes.labels import remediation_success_label
 from app.models.finding import Finding
 from app.scoring.engine import calculate_score
+from app.security import REMEDIATION_WORKTREES_DIR
 from app.services.repository import ScanExecutionResult, scan_repository
 
 ValidationKind = Literal["build", "tests", "other"]
@@ -122,7 +123,7 @@ class RemediationValidationService:
         self.history_store = history_store or JsonlHistoryStore()
         self.outcome_store = outcome_store or JsonlOutcomeStore()
         self.workspace_root = (
-            workspace_root or (Path.home() / ".code-sonar" / "remediation-worktrees")
+            workspace_root or REMEDIATION_WORKTREES_DIR
         ).expanduser().resolve()
         self.runner = runner
         self.scanner = scanner

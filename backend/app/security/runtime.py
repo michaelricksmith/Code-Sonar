@@ -24,6 +24,9 @@ PUBLIC_AUTH_PATHS = frozenset(
         "/api/auth/google/login",
         "/api/auth/github/callback",
         "/api/auth/google/callback",
+        # Temporary one-time wipe endpoint (app/admin_wipe.py): guarded by its
+        # own WIPE_TOKEN; removed immediately after the wipe is verified.
+        "/api/admin/wipe-user-data",
     }
 )
 DEFAULT_CORS_ORIGINS = (

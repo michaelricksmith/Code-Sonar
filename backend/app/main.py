@@ -20,6 +20,7 @@ from app.history import (
     ScanRecord,
     build_scan_record,
     compute_repository_id,
+    compute_repository_id_for_slug,
     display_name,
 )
 from app.hotspots import compute_hotspots
@@ -453,11 +454,18 @@ async def drift(
 ) -> dict[str, Any]:
     try:
         repo_path_obj = validate_repo_path(repo_path)
-    except RepositoryValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RepositoryValidationError:
+        repo_path_obj = None
 
     store = get_history_store()
-    records = store.load_all(compute_repository_id(repo_path_obj))
+    if repo_path_obj is not None:
+        repository_id = compute_repository_id(repo_path_obj)
+    else:
+        # The hosted UI passes the "owner/name" repo slug rather than a
+        # local path; resolve it to the same slug-based identity that
+        # hosted scan jobs persist under.
+        repository_id = compute_repository_id_for_slug(repo_path)
+    records = store.load_all(repository_id)
     if not records:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
 

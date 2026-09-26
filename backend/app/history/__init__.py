@@ -31,7 +31,11 @@ Design constraints:
 from __future__ import annotations
 
 from .history_store import HistoryStore, InMemoryHistoryStore, JsonlHistoryStore
-from .repository_identity import compute_repository_id, display_name
+from .repository_identity import (
+    compute_repository_id,
+    compute_repository_id_for_slug,
+    display_name,
+)
 from .scan_record import (
     SCHEMA_VERSION,
     FindingSnapshot,
@@ -48,5 +52,6 @@ __all__ = [
     "ScanRecord",
     "build_scan_record",
     "compute_repository_id",
+    "compute_repository_id_for_slug",
     "display_name",
 ]

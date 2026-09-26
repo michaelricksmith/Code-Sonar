@@ -6,7 +6,7 @@ refactors, etc.).
 
 Requires:
 - GROQ_API_KEY (or OPENAI_API_KEY) environment variable
-- CODE_SONAR_GROQ_MODEL (optional, defaults to llama-3.3-70b-versatile)
+- CODE_SONAR_GROQ_MODEL (optional, defaults to openai/gpt-oss-120b)
 
 The executor:
 1. Reads the target file
@@ -40,7 +40,9 @@ from app.remediation.deterministic import (
 )
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16;
+# openai/gpt-oss-120b is Groq's recommended replacement.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 # Maximum file size to send to the API (characters). Larger files are
 # truncated with a notice to avoid excessive token usage.

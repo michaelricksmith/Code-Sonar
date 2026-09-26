@@ -3,23 +3,25 @@
  * mockup-remediation.html).
  *
  * Plain-language header, "What's going on" / "Why it matters", a numbered
- * fix checklist, and the "Fix this for me" consent → approve → live tracker
- * (Plan → Fix → Test → Rescan) → result flow.
+ * fix checklist, and the prompt-first remediation flow: "Generate fix
+ * prompt" → copyable prompt → "Copy prompt" (logged as fix-in-progress) →
+ * user applies it in their own AI assistant → re-scan verifies.
  *
- * Reuses the existing remediation APIs UNCHANGED:
- * fetchRemediationPlan + approveAndRunRemediation (signed single-use
- * approvals). This is a reskin only.
+ * The server-side auto-apply flow (approveAndRunRemediation + the
+ * Plan → Fix → Test → Rescan tracker) is PARKED: backend untouched, UI
+ * entry point removed.
  */
 
 import { useEffect, useRef, useState } from "react";
 
 import type { Finding } from "../api/analyzers";
-import {
-  approveAndRunRemediation,
-  askSonar,
-  fetchRemediationPlan,
-} from "../api/askSonar";
+import { askSonar, fetchRemediationPlan } from "../api/askSonar";
+// NOTE (prompt-first pivot): the server-side auto-apply flow
+// (approveAndRunRemediation + the Plan → Fix → Test → Rescan tracker) is
+// PARKED, not deleted. The backend in app/remediation/ is untouched; the
+// UI now leads with fix-prompt generation instead.
 import type { ApproveRemediationResponse, RemediationPlanResponse } from "../api/askSonar";
+import { fetchFixPrompt, logPromptCopied } from "../api/prompts";
 import {
   CATEGORY_AREA,
   SEVERITY_LABEL,
@@ -37,6 +39,7 @@ import { NerdsDetails } from "./NerdsDetails";
 interface IssueDetailProps {
   finding: Finding;
   scanId: string | null;
+  repository: string;
   currentScore: number;
   /** true when an AI provider is configured for plain-language explanations */
   aiReady: boolean;
@@ -44,12 +47,23 @@ interface IssueDetailProps {
   aiApiKey?: string;
   onBack: () => void;
   onAskSonar: (question: string) => void;
-  onScoreChanged: (newScore: number) => void;
 }
 
-function requestId(scanId: string, findingId: string): string {
-  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`;
-  return `ask-sonar-${scanId.slice(0, 10)}-${findingId.slice(0, 10)}-${suffix}`;
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Fallback for contexts where the async clipboard API is unavailable.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
 }
 
 function riskIfIgnored(finding: Finding): string {
@@ -68,46 +82,41 @@ function plainHeadline(finding: Finding): string {
 export function IssueDetail({
   finding,
   scanId,
+  repository,
   currentScore,
   aiReady,
   aiProvider,
   aiApiKey,
   onBack,
   onAskSonar,
-  onScoreChanged,
 }: IssueDetailProps) {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
   const [planResponse, setPlanResponse] = useState<RemediationPlanResponse | null>(null);
-  const [workflowResponse, setWorkflowResponse] = useState<ApproveRemediationResponse | null>(null);
+  // Parked auto-apply state: the approve-and-run backend is untouched, but the
+  // UI no longer drives it. Kept so the step checklist below renders as-is.
+  const [workflowResponse, setWorkflowResponse] =
+    useState<ApproveRemediationResponse | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [planReviewed, setPlanReviewed] = useState(false);
-  /** Animated stage index (0=Plan, 1=Fix, 2=Test, 3=Rescan) while a fix run is in flight. */
-  const [runStage, setRunStage] = useState(0);
+  // Prompt-first remediation state.
+  const [fixPrompt, setFixPrompt] = useState<string | null>(null);
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
   const askedRef = useRef(false);
-
-  // Advance the visible stage on a timer while the run is in flight so the
-  // user can watch Sonar work through Plan → Fix → Test → Rescan.
-  useEffect(() => {
-    if (!running) return;
-    const id = window.setInterval(() => {
-      setRunStage((s) => (s < 3 ? s + 1 : s));
-    }, 3500);
-    return () => window.clearInterval(id);
-  }, [running]);
 
   // Reset per issue.
   useEffect(() => {
     setExplanation(null);
     setPlanResponse(null);
     setWorkflowResponse(null);
-    setError(null);
     setPlanReviewed(false);
     setLoadingPlan(false);
-    setRunning(false);
-    setRunStage(0);
+    setFixPrompt(null);
+    setPromptLoading(false);
+    setPromptError(null);
+    setPromptCopied(false);
     askedRef.current = false;
   }, [finding.id]);
 
@@ -136,40 +145,45 @@ export function IssueDetail({
   async function buildPlan(): Promise<void> {
     if (!scanId) return;
     setLoadingPlan(true);
-    setError(null);
     setWorkflowResponse(null);
     try {
       setPlanResponse(await fetchRemediationPlan(scanId, finding.id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch {
+      setPlanResponse(null);
     } finally {
       setLoadingPlan(false);
     }
   }
 
-  async function approveAndRun(): Promise<void> {
-    if (!scanId || !planResponse) return;
-    setRunning(true);
-    setRunStage(0);
-    setError(null);
+  async function generatePrompt(): Promise<void> {
+    setPromptLoading(true);
+    setPromptError(null);
+    setPromptCopied(false);
     try {
-      const response = await approveAndRunRemediation({
-        requestId: requestId(scanId, finding.id),
-        scanId,
-        findingId: finding.id,
-        planId: planResponse.plan.plan_id,
-      });
-      setWorkflowResponse(response);
-      const delta = response.workflow.validation?.score_delta;
-      if (typeof delta === "number") onScoreChanged(currentScore + delta);
+      setFixPrompt(await fetchFixPrompt(repository, scanId, finding));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setPromptError(e instanceof Error ? e.message : String(e));
     } finally {
-      setRunning(false);
+      setPromptLoading(false);
     }
   }
 
-  const RUN_STAGE_LABELS = ["Reading the approved plan", "Applying the fix in a safe copy", "Running your tests", "Re-scoring your repo"] as const;
+  async function copyPrompt(): Promise<void> {
+    if (!fixPrompt) return;
+    setPromptError(null);
+    try {
+      await copyText(fixPrompt);
+      // Best-effort: record the copy even if the log call fails.
+      try {
+        await logPromptCopied(repository, scanId, finding);
+      } catch {
+        // The copy itself succeeded; the log is auxiliary.
+      }
+      setPromptCopied(true);
+    } catch (e) {
+      setPromptError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   const sevLabel = SEVERITY_LABEL[finding.severity];
   const sevTone = { critical: "critical", error: "attention", warning: "ok", info: "good" }[finding.severity];
@@ -181,8 +195,6 @@ export function IssueDetail({
       : null;
 
   const validation = workflowResponse?.workflow.validation ?? null;
-  const execution = workflowResponse?.workflow.execution ?? null;
-  const workflowCompleted = workflowResponse?.workflow.completed ?? false;
   const afterScore = validation ? currentScore + validation.score_delta : null;
   const plan = planResponse?.plan ?? null;
 
@@ -335,104 +347,58 @@ export function IssueDetail({
           </div>
 
           <div className="fix-panel">
-            {!workflowResponse && !running ? (
+            <h2>✦ &nbsp;Fix it with your AI assistant</h2>
+            <p>
+              Sonar writes a precise fix prompt for this exact issue — file, lines,
+              and what to change. Copy it into <b>Cursor</b>, <b>Claude</b>, or your
+              own assistant, let it change your real code, then <b>re-scan</b> here
+              to verify the fix landed.
+            </p>
+            {!fixPrompt ? (
               <>
-                <h2>✦ &nbsp;Want Sonar to do this for you?</h2>
-                <p>
-                  Approve once and Sonar will apply the fix in a <b>safe copy</b> of your code,
-                  run your tests, and re-score — <b>before anything touches your real files.</b>{" "}
-                  You review the result and decide what merges.
-                </p>
-                <div className="fix-list">
-                  <div><span className="ok">✓</span><span>Only touches <b>&nbsp;{(plan?.expected_files ?? [finding.file_path]).join(", ")}</b></span></div>
-                  <div><span className="ok">✓</span><span>Runs your test suite before and after</span></div>
-                  <div><span className="ok">✓</span><span>Nothing commits, pushes, or merges without you</span></div>
-                </div>
-                {error && (
+                {promptError && (
                   <div className="notice danger" style={{ position: "relative", marginTop: 16 }}>
-                    <b>Something went wrong</b>{error}
+                    <b>Something went wrong</b>{promptError}
                   </div>
                 )}
                 <button
                   className="btn btn-fix"
-                  onClick={() => void (plan ? approveAndRun() : buildPlan().then(() => undefined))}
-                  disabled={running || loadingPlan || !scanId || (plan != null && !planReviewed)}
+                  onClick={() => void generatePrompt()}
+                  disabled={promptLoading}
                 >
-                  {running ? "Sonar is fixing it…" : loadingPlan ? "Writing the plan…" : plan ? "Approve & fix this for me →" : "Fix this for me →"}
+                  {promptLoading ? "Writing the prompt…" : "Generate fix prompt"}
                 </button>
-                {plan && !planReviewed && (
-                  <p style={{ fontSize: 12.5, marginTop: 10 }}>Tick the &ldquo;I&rsquo;ve reviewed the plan&rdquo; box above to enable approval.</p>
-                )}
               </>
             ) : (
               <>
-                <h2>{running ? "Sonar is on it" : validation?.finding_resolved ? "Fixed ✓" : workflowCompleted ? "Run finished" : "Fix didn't complete"}</h2>
-                <div className="tracker" aria-label="Fix progress">
-                  {["Plan", "Fix", "Test", "Rescan"].map((label, i) => {
-                    let cls: string;
-                    if (workflowResponse) {
-                      cls = i < 2 || validation ? "finished" : "";
-                    } else {
-                      cls = i < runStage ? "finished" : i === runStage ? "doing" : "";
-                    }
-                    return (
-                      <div key={label} className={`track-step ${cls}`}>
-                        <div className="tdot">{cls === "finished" ? "✓" : i + 1}</div>
-                        {label}
-                      </div>
-                    );
-                  })}
-                </div>
-                {running && !workflowResponse && (
-                  <>
-                    <div className="run-progress" aria-hidden="true"><span /></div>
-                    <p className="run-status">{RUN_STAGE_LABELS[runStage]}<span className="dots" aria-hidden="true" /></p>
-                  </>
-                )}
-                {validation && (
-                  <div className="result-banner">
-                    <h3>{validation.finding_resolved ? `Fixed. Your score went from ${currentScore} → ${afterScore}.` : "The issue is still present."}</h3>
-                    <p>
-                      {validation.finding_resolved
-                        ? `${validation.regression_detected ? "No regressions were detected" : "Tests passed with no regressions"}${validation.tests_passed == null ? " (test reporting not configured)" : ""}. Review the change and merge when you're ready.`
-                        : "Sonar ran the fix but the issue is still there. Try the manual steps above, or ask Sonar what to try next."}
-                    </p>
-                    {validation.finding_resolved && <div className="score-move">{currentScore} → {afterScore}</div>}
+                <textarea
+                  className="prompt-box"
+                  readOnly
+                  value={fixPrompt}
+                  rows={Math.min(18, Math.max(8, fixPrompt.split("\n").length))}
+                  aria-label="Fix prompt"
+                />
+                {promptError && (
+                  <div className="notice danger" style={{ position: "relative", marginTop: 16 }}>
+                    <b>Something went wrong</b>{promptError}
                   </div>
                 )}
-                {!validation && execution && (
-                  <div className="result-banner" style={{ marginTop: 12 }}>
-                    <h3>
-                      {execution.state === "FAILED"
-                        ? "The fix ran into a problem."
-                        : execution.state === "DRY_RUN"
-                          ? "No changes were made."
-                          : "The fix step didn't produce a result."}
-                    </h3>
-                    <p>{execution.summary || execution.error || "Sonar stopped before testing and re-scoring."}</p>
-                    {execution.error && execution.summary && (
-                      <p className="code-note" style={{ marginTop: 8 }}>{execution.error}</p>
-                    )}
-                    {execution.changed_files.length > 0 && (
-                      <p style={{ marginTop: 8 }}>Files touched: <span className="mono">{execution.changed_files.join(", ")}</span></p>
-                    )}
-                  </div>
-                )}
-                {!running && (
-                <div style={{ marginTop: 16, position: "relative", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {!validation && (
-                    <button
-                      className="btn btn-fix btn-sm"
-                      onClick={() => void approveAndRun()}
-                      disabled={!plan}
-                    >
-                      ↻ Try the fix again
-                    </button>
-                  )}
-                  <button className="btn btn-ghost btn-sm" style={{ background: "transparent", color: "#fff", borderColor: "#3A4450" }} onClick={() => { setPlanResponse(null); setWorkflowResponse(null); setPlanReviewed(false); }}>
-                    Start over with a fresh plan
+                <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-fix" onClick={() => void copyPrompt()}>
+                    ⧉ Copy prompt
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ background: "transparent", color: "#fff", borderColor: "#3A4450", alignSelf: "center" }}
+                    onClick={() => { setFixPrompt(null); setPromptCopied(false); }}
+                  >
+                    Regenerate
                   </button>
                 </div>
+                {promptCopied && (
+                  <p className="copied-note" style={{ marginTop: 12 }}>
+                    Copied — paste it into your LLM, then re-scan to verify.
+                  </p>
                 )}
               </>
             )}

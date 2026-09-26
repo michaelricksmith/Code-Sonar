@@ -89,6 +89,10 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            # Groq sits behind Cloudflare, which 403s (error code 1010)
+            # requests carrying urllib's default User-Agent before auth
+            # is even checked. Identify the client explicitly.
+            "User-Agent": "Code-Sonar/1.0",
         },
         method="POST",
     )

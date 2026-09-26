@@ -135,6 +135,10 @@ class OpenAICompatibleProvider:
             {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                # Groq sits behind Cloudflare, which 403s (error code 1010)
+                # requests carrying urllib's default User-Agent before auth
+                # is even checked. Identify the client explicitly.
+                "User-Agent": "Code-Sonar/1.0",
             },
         )
 

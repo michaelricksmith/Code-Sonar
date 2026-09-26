@@ -24,6 +24,7 @@ import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
 import { fetchFixLog } from "./api/outcomes";
+import { fetchPromptStatus } from "./api/prompts";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
 import { Dashboard } from "./components/Dashboard";
 import { FixesView } from "./components/FixesView";
@@ -88,6 +89,13 @@ export default function App() {
   const [sonarOpen, setSonarOpen] = useState(false);
   const [sonarQuestion, setSonarQuestion] = useState<string | null>(null);
   const [fixCount, setFixCount] = useState<number | null>(null);
+  const [promptActivity, setPromptActivity] = useState<{
+    inProgress: number;
+    resolved: number;
+    stillOpen: number;
+  } | null>(null);
+  /** Bumped whenever a fix prompt is copied, so the sidebar activity refreshes. */
+  const [promptTick, setPromptTick] = useState(0);
   const [providers, setProviders] = useState<AiProvider[] | null>(null);
   const [providersError, setProvidersError] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("");
@@ -137,10 +145,11 @@ export default function App() {
       .catch((e) => setProvidersError(e instanceof Error ? e.message : String(e)));
   }, [user]);
 
-  // Fix-log badge for the sidebar.
+  // Fix-log badge + prompt-first fix activity for the sidebar.
   useEffect(() => {
     if (!user || !repoLabel) {
       setFixCount(null);
+      setPromptActivity(null);
       return;
     }
     let cancelled = false;
@@ -151,10 +160,24 @@ export default function App() {
       .catch(() => {
         if (!cancelled) setFixCount(null);
       });
+    // Prompt-first activity: prompts copied, reconciled against the latest
+    // scan. Refreshed on navigation, on new scans, and when a prompt is copied.
+    fetchPromptStatus(repoLabel)
+      .then((items) => {
+        if (cancelled) return;
+        setPromptActivity({
+          inProgress: items.filter((i) => i.status === "in_progress").length,
+          resolved: items.filter((i) => i.status === "resolved").length,
+          stillOpen: items.filter((i) => i.status === "still_open").length,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setPromptActivity(null);
+      });
     return () => {
       cancelled = true;
     };
-  }, [user, repoLabel, route.name]);
+  }, [user, repoLabel, route.name, result?.scan_id, promptTick]);
 
   // Hash routing.
   useEffect(() => {
@@ -290,6 +313,7 @@ export default function App() {
         view={shellView}
         issueCount={result?.finding_count ?? null}
         fixCount={fixCount}
+        promptActivity={promptActivity}
         onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : view === "fixes" ? "/app/fixes" : "/app")}
         onSignOut={() => void handleSignOut()}
         onOpenSonar={() => openSonar()}
@@ -338,6 +362,7 @@ export default function App() {
             aiApiKey={aiKey || undefined}
             onBack={() => navigate("/app/issues")}
             onAskSonar={openSonar}
+            onPromptCopied={() => setPromptTick((t) => t + 1)}
           />
         )}
 

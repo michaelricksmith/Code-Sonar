@@ -47,6 +47,8 @@ interface IssueDetailProps {
   aiApiKey?: string;
   onBack: () => void;
   onAskSonar: (question: string) => void;
+  /** Called after a fix prompt is copied, so parents can refresh activity badges. */
+  onPromptCopied?: () => void;
 }
 
 async function copyText(text: string): Promise<void> {
@@ -89,6 +91,7 @@ export function IssueDetail({
   aiApiKey,
   onBack,
   onAskSonar,
+  onPromptCopied,
 }: IssueDetailProps) {
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
@@ -180,6 +183,7 @@ export function IssueDetail({
         // The copy itself succeeded; the log is auxiliary.
       }
       setPromptCopied(true);
+      onPromptCopied?.();
     } catch (e) {
       setPromptError(e instanceof Error ? e.message : String(e));
     }

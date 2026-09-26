@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, text, update
 
 from app.history import ScanRecord
+from app.models.user import users as users_table  # noqa: F401 - registers table on metadata
 from app.persistence.config import (
     persistence_config_from_env,
     psycopg3_database_url,
@@ -27,6 +28,7 @@ from app.persistence.repositories import (
     SqlHistoryStore,
     SqlOutcomeStore,
     SqlProjectStore,
+    SqlUserStore,
     SqlWebhookAuditStore,
     SqlWebhookScanJobStore,
 )
@@ -50,6 +52,7 @@ class PersistenceUnitOfWork:
         self.webhook_audit = SqlWebhookAuditStore(self.engine)
         self.webhook_jobs = SqlWebhookScanJobStore(self.engine)
         self.outcomes = SqlOutcomeStore(self.engine)
+        self.users = SqlUserStore(self.engine, self.encryption)
         self.privacy = SqlPrivacyRepository(self.engine, self.encryption, self.crypto_erasure)
 
     def record_project_scan(self, project_id: str, record: ScanRecord) -> None:
@@ -135,7 +138,7 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
             revision = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one_or_none()
-        if revision != "20260902_0002":
+        if revision != "20260926_0003":
             raise RuntimeError("Database schema is not at required Alembic revision")
     persistence = PersistenceUnitOfWork(engine, encryption)
 
@@ -146,16 +149,30 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
     )
     from app.main import set_history_store
     from app.ml.outcomes.runtime import set_outcome_store
+    from app.oauth import OAuthUserStore, set_oauth_user_store
     from app.projects import set_project_store
     from app.remediation.runtime import get_validation_service, set_validation_service
     from app.remediation.validation import RemediationValidationService
 
     set_history_store(persistence.history)  # type: ignore[arg-type]
     set_project_store(persistence.projects)  # type: ignore[arg-type]
+    set_oauth_user_store(persistence.users)
     set_installation_store(persistence.installations)  # type: ignore[arg-type]
     set_webhook_audit_store(persistence.webhook_audit)  # type: ignore[arg-type]
     set_webhook_job_store(persistence.webhook_jobs)  # type: ignore[arg-type]
     set_outcome_store(persistence.outcomes)  # type: ignore[arg-type]
+
+    # One-time migration off the legacy JSON user file: if accounts exist in
+    # ~/.code-sonar/oauth-users.json but the users table is empty, import
+    # them (preserving ids so existing sessions keep working). The JSON
+    # file is left untouched.
+    legacy_path = OAuthUserStore().path
+    try:
+        imported = persistence.users.import_legacy_json(legacy_path)
+    except Exception as exc:
+        raise RuntimeError(f"Legacy user import failed: {exc}") from exc
+    if imported:
+        print(f"Imported {imported} user(s) from {legacy_path}", flush=True)
     previous_validation = get_validation_service()
     set_validation_service(
         RemediationValidationService(

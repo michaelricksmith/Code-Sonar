@@ -8,8 +8,11 @@ Config comes only from the environment (never hardcoded, never logged):
 - SONAR_SESSION_SECRET (dev fallback is a random per-process secret with a
   loud startup warning)
 
-OAuth access tokens are stored server-side only (JSON user store under
-~/.code-sonar/, mode 0600) and are never returned to any client.
+OAuth access tokens are stored server-side only and are never returned to any
+client. When SQL persistence is configured (``CODESONAR_DATABASE_URL``), user
+accounts live in the database-backed ``SqlUserStore`` (tokens encrypted at
+rest); otherwise they fall back to the local JSON user store under
+``~/.code-sonar/`` (mode 0600), which is ephemeral on hosted deployments.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 from urllib.parse import urlencode
 
 import httpx
@@ -64,9 +67,7 @@ def _default_http_post(
     return response.status_code, payload if isinstance(payload, dict) else {}
 
 
-def _default_http_get(
-    url: str, headers: dict[str, str]
-) -> tuple[int, dict[str, Any]]:
+def _default_http_get(url: str, headers: dict[str, str]) -> tuple[int, dict[str, Any]]:
     with httpx.Client(timeout=20.0, trust_env=False) as client:
         response = client.get(url, headers=headers)
     try:
@@ -82,9 +83,7 @@ _http_post: HttpPost = _default_http_post
 _http_get: HttpGet = _default_http_get
 
 
-def set_oauth_transport(
-    http_post: HttpPost | None = None, http_get: HttpGet | None = None
-) -> None:
+def set_oauth_transport(http_post: HttpPost | None = None, http_get: HttpGet | None = None) -> None:
     """Override OAuth HTTP calls; primarily used by tests."""
     global _http_post, _http_get
     if http_post is not None:
@@ -203,6 +202,19 @@ class OAuthUser:
     github_access_token: str = ""
     created_at: str = ""
     updated_at: str = ""
+    # Database-backed account fields. Defaults keep legacy JSON records
+    # (written before these fields existed) loadable.
+    github_id: str = ""
+    github_username: str = ""
+    google_sub: str = ""
+    plan: str = "free"
+    status: str = "active"
+    is_admin: bool = False
+    last_login_at: str = ""
+
+    @property
+    def is_suspended(self) -> bool:
+        return self.status != "active"
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -212,6 +224,28 @@ class OAuthUser:
             "avatar_url": self.avatar_url,
             "provider": self.provider,
         }
+
+
+class UserStore(Protocol):
+    """Structural interface for user account stores.
+
+    ``OAuthUserStore`` (local JSON) and ``SqlUserStore`` (database) both
+    satisfy this protocol, so the OAuth callbacks work unchanged against
+    either backend.
+    """
+
+    def get(self, user_id: str) -> OAuthUser | None: ...
+    def upsert(
+        self,
+        *,
+        provider: str,
+        provider_user_id: str,
+        name: str,
+        email: str,
+        avatar_url: str,
+        github_access_token: str = "",
+        github_username: str = "",
+    ) -> OAuthUser: ...
 
 
 class OAuthUserStore:
@@ -230,6 +264,11 @@ class OAuthUserStore:
             return []
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         return [OAuthUser(**item) for item in payload]
+
+    def load_all(self) -> list[OAuthUser]:
+        """Return every stored user. Used by the one-time DB import."""
+        with self._lock:
+            return self._load()
 
     def _save(self, records: list[OAuthUser]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,15 +296,13 @@ class OAuthUserStore:
         email: str,
         avatar_url: str,
         github_access_token: str = "",
+        github_username: str = "",
     ) -> OAuthUser:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._lock:
             records = self._load()
             for index, existing in enumerate(records):
-                if (
-                    existing.provider == provider
-                    and existing.provider_user_id == provider_user_id
-                ):
+                if existing.provider == provider and existing.provider_user_id == provider_user_id:
                     updated = OAuthUser(
                         id=existing.id,
                         provider=provider,
@@ -273,10 +310,18 @@ class OAuthUserStore:
                         name=name or existing.name,
                         email=email or existing.email,
                         avatar_url=avatar_url or existing.avatar_url,
-                        github_access_token=github_access_token
-                        or existing.github_access_token,
+                        github_access_token=github_access_token or existing.github_access_token,
                         created_at=existing.created_at,
                         updated_at=now,
+                        github_id=provider_user_id if provider == "github" else existing.github_id,
+                        github_username=github_username or existing.github_username,
+                        google_sub=provider_user_id
+                        if provider == "google"
+                        else existing.google_sub,
+                        plan=existing.plan,
+                        status=existing.status,
+                        is_admin=existing.is_admin,
+                        last_login_at=now,
                     )
                     records[index] = updated
                     self._save(records)
@@ -291,21 +336,29 @@ class OAuthUserStore:
                 github_access_token=github_access_token,
                 created_at=now,
                 updated_at=now,
+                github_id=provider_user_id if provider == "github" else "",
+                github_username=github_username,
+                google_sub=provider_user_id if provider == "google" else "",
+                last_login_at=now,
             )
             records.append(user)
             self._save(records)
             return user
 
 
-_user_store = OAuthUserStore()
+_user_store: UserStore = OAuthUserStore()
 
 
-def get_oauth_user_store() -> OAuthUserStore:
+def get_oauth_user_store() -> UserStore:
     return _user_store
 
 
-def set_oauth_user_store(store: OAuthUserStore) -> None:
-    """Replace the process-wide OAuth user store. Used by tests."""
+def set_oauth_user_store(store: UserStore) -> None:
+    """Replace the process-wide OAuth user store.
+
+    Used by tests, and by persistence startup to swap in the
+    database-backed ``SqlUserStore`` when SQL is configured.
+    """
     global _user_store
     _user_store = store
 
@@ -448,7 +501,10 @@ async def github_callback(code: str | None = None, state: str | None = None) -> 
         email=str(profile.get("email") or ""),
         avatar_url=str(profile.get("avatar_url") or ""),
         github_access_token=token,
+        github_username=str(profile.get("login") or ""),
     )
+    if user.is_suspended:
+        raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
     _set_session_cookie(response, user.id, config.session_secret)
     return response
@@ -473,20 +529,28 @@ async def google_callback(code: str | None = None, state: str | None = None) -> 
         email=str(profile.get("email") or ""),
         avatar_url=str(profile.get("picture") or ""),
     )
+    if user.is_suspended:
+        raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
     _set_session_cookie(response, user.id, config.session_secret)
     return response
 
 
 def current_user(request: Request) -> OAuthUser | None:
-    """Resolve the signed session cookie to a user, or None when absent."""
+    """Resolve the signed session cookie to a user, or None when absent.
+
+    Suspended users resolve to None: their sessions are dead.
+    """
     token = request.cookies.get(_SESSION_COOKIE)
     if not token:
         return None
     user_id = verify_session_token(token, _session_secret())
     if not user_id:
         return None
-    return get_oauth_user_store().get(user_id)
+    user = get_oauth_user_store().get(user_id)
+    if user is None or user.is_suspended:
+        return None
+    return user
 
 
 def require_user(request: Request) -> OAuthUser:
@@ -511,7 +575,7 @@ async def auth_logout() -> JSONResponse:
 @router.get("/repos")
 async def auth_repos(request: Request) -> dict[str, Any]:
     user = require_user(request)
-    if user.provider != "github" or not user.github_access_token:
+    if not user.github_access_token:
         raise HTTPException(
             status_code=409,
             detail="No GitHub account is connected; sign in with GitHub first",

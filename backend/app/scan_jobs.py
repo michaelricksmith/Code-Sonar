@@ -30,7 +30,6 @@ from app.security import SCAN_ROOT_DIR
 router = APIRouter(prefix="/api/scan-job", tags=["scan-job"])
 
 
-
 # Cloned workspaces live INSIDE the configured scan root so the existing
 # path-containment validation (validate_repo_path) accepts them without any
 # special-casing. Honors CODESONAR_SCAN_ROOT like everything else.
@@ -79,7 +78,7 @@ def _github_token_for_request(request: Request) -> str:
     except Exception:  # pragma: no cover - defensive
         return ""
     user = current_user(request)
-    if user is None or user.provider != "github":
+    if user is None or not user.github_access_token:
         return ""
     return user.github_access_token
 
@@ -94,9 +93,7 @@ def _parse_repo_input(repo: str) -> str:
         if not parsed.hostname:
             raise ValueError("Repository URL has no host")
         return text
-    raise ValueError(
-        "Repository must be 'owner/name' or an https:// repository URL"
-    )
+    raise ValueError("Repository must be 'owner/name' or an https:// repository URL")
 
 
 def _with_token(clone_url: str, token: str) -> str:
@@ -211,9 +208,7 @@ def _run_job(
         execution = scan_repository(repo_path)
         if not execution.complete:
             failures = [item.analyzer for item in execution.analyzers if item.status == "failed"]
-            raise RuntimeError(
-                "Scan incomplete; failed analyzers: " + ", ".join(failures)
-            )
+            raise RuntimeError("Scan incomplete; failed analyzers: " + ", ".join(failures))
 
         _update_job(job_id, step="Tallying your score…", progress=0.8)
         findings = list(execution.findings)

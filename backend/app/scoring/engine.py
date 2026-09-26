@@ -10,7 +10,7 @@ large test suites and fixtures cannot overwhelm real production findings.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from math import fsum
+from math import fsum, log1p
 from typing import Any
 
 from app.models.finding import Finding, FindingCategory, FindingSeverity
@@ -246,13 +246,25 @@ def _calculate_category_penalty(findings: list[Finding]) -> dict[str, float | bo
 
     bounded_non_source = min(NON_SOURCE_CATEGORY_CAP, non_source_penalty)
     combined = source_penalty + bounded_non_source
+    # Responsive cap: linear up to MAX_PENALTY, then logarithmic growth.
+    # A hard cap created dead zones where fixing issues didn't move the
+    # score; this keeps every fix meaningful while preventing huge
+    # finding counts from linearly exploding the penalty.
+    if combined <= MAX_PENALTY:
+        capped = combined
+        cap_applied = False
+    else:
+        capped = MAX_PENALTY + MAX_PENALTY * 0.1 * log1p(
+            (combined - MAX_PENALTY) / MAX_PENALTY
+        )
+        cap_applied = True
     return {
         "source_penalty": source_penalty,
         "non_source_penalty": non_source_penalty,
         "bounded_non_source_penalty": bounded_non_source,
         "non_source_cap_applied": non_source_penalty > NON_SOURCE_CATEGORY_CAP,
-        "category_cap_applied": combined > MAX_PENALTY,
-        "capped_penalty": min(MAX_PENALTY, combined),
+        "category_cap_applied": cap_applied,
+        "capped_penalty": capped,
     }
 
 

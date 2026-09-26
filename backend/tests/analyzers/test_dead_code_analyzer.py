@@ -164,6 +164,34 @@ class TestUnusedPrivate:
         rules = [(f.rule_id, f.symbol) for f in findings]
         assert ("dead_code:unused-private", "_afn") in rules
 
+    def test_private_method_called_via_self_not_flagged(self, tmp_path):
+        # Regression: methods invoked as self._helper() are references;
+        # without attribute tracking they were falsely flagged unused.
+        _write(
+            tmp_path / "m.py",
+            "class C:\n"
+            "    def run(self):\n"
+            "        return self._helper()\n"
+            "    def _helper(self):\n"
+            "        return 1\n",
+        )
+        findings = DeadCodeAnalyzer().analyze(tmp_path)
+        rules = [f.rule_id for f in findings]
+        assert "dead_code:unused-private" not in rules
+
+    def test_private_method_never_called_still_flagged(self, tmp_path):
+        _write(
+            tmp_path / "m.py",
+            "class C:\n"
+            "    def run(self):\n"
+            "        return 1\n"
+            "    def _helper(self):\n"
+            "        return 2\n",
+        )
+        findings = DeadCodeAnalyzer().analyze(tmp_path)
+        rules = [(f.rule_id, f.symbol) for f in findings]
+        assert ("dead_code:unused-private", "_helper") in rules
+
 
 class TestStaleFixture:
     def test_unused_test_function_in_tests_dir_flagged(self, tmp_path):

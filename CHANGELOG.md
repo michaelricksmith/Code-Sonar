@@ -1,3 +1,21 @@
+## Unreleased — Prompt-first remediation
+
+- The issue detail page no longer offers server-side auto-fix. The primary
+  action is now "Generate fix prompt": a deterministic, copyable prompt
+  grounded in the finding (repo, file/lines, evidence, rule, requested
+  change, anti-rewrite constraints, test + re-scan instructions) for the
+  user to paste into their own AI assistant (Cursor/Claude/...).
+- New endpoints: `POST /api/remediation/fix-prompt`,
+  `POST /api/remediation/prompt-copied` (JSONL log at
+  `~/.code-sonar/prompt-events.jsonl`), and
+  `GET /api/remediation/prompt-status` (reconciles copied prompts against
+  the latest scan: in_progress / resolved / still_open).
+- The Fixes log surfaces copied prompts as "Fix in progress" entries.
+- The server-side auto-apply machinery in `backend/app/remediation/` is
+  parked, not deleted.
+
+---
+
 ## 2026-09-25 — Groq model swap: llama-3.3-70b-versatile decommissioned
 
 - Root cause of the Ask Sonar / guided-remediation 403s: Groq shut down

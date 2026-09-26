@@ -331,15 +331,13 @@ export default function App() {
           <IssueDetail
             finding={activeFinding}
             scanId={result.scan_id}
+            repository={repoLabel ?? result.repository}
             currentScore={result.score}
             aiReady={aiReady}
             aiProvider={aiProvider || undefined}
             aiApiKey={aiKey || undefined}
             onBack={() => navigate("/app/issues")}
             onAskSonar={openSonar}
-            onScoreChanged={(newScore) =>
-              persistScan({ ...result, score: newScore }, repoLabel ?? result.repository)
-            }
           />
         )}
 

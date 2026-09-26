@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { timeAgo } from "../copy";
 import { issueCardTitle } from "../copy/issues";
 import { fetchFixLog, type RemediationOutcomeRecord } from "../api/outcomes";
+import { fetchPromptStatus, type PromptStatusItem } from "../api/prompts";
 import type { Finding } from "../api/analyzers";
 
 interface ResolvedFix {
@@ -42,18 +43,29 @@ export function FixesView({ repoLabel }: { repoLabel: string }) {
   const [error, setError] = useState<string | null>(null);
   const [resolved, setResolved] = useState<ResolvedFix[]>([]);
   const [resolving, setResolving] = useState(false);
+  const [promptItems, setPromptItems] = useState<PromptStatusItem[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setOutcomes(null);
     setError(null);
     setResolved([]);
+    setPromptItems(null);
     fetchFixLog(repoLabel)
       .then((data) => {
         if (!cancelled) setOutcomes(data.outcomes);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load the fix log.");
+      });
+    // Prompt-first fixes: prompts the user copied, reconciled against the
+    // latest scan. Best-effort — the auto-apply log below is authoritative.
+    fetchPromptStatus(repoLabel)
+      .then((items) => {
+        if (!cancelled) setPromptItems(items);
+      })
+      .catch(() => {
+        if (!cancelled) setPromptItems([]);
       });
     return () => {
       cancelled = true;
@@ -98,6 +110,11 @@ export function FixesView({ repoLabel }: { repoLabel: string }) {
     return { total: outcomes.length, fixed, points };
   }, [outcomes]);
 
+  const inProgress = useMemo(
+    () => (promptItems ?? []).filter((i) => i.status === "in_progress"),
+    [promptItems],
+  );
+
   return (
     <div className="page fixlog">
       <div className="page-head">
@@ -116,12 +133,12 @@ export function FixesView({ repoLabel }: { repoLabel: string }) {
         </div>
       )}
 
-      {outcomes && outcomes.length === 0 && (
+      {outcomes && outcomes.length === 0 && inProgress.length === 0 && (
         <div className="empty-panel">
           <h2>No fixes yet</h2>
           <p>
-            When Sonar fixes an issue, it lands here with the score change and the
-            proof. Open any issue and press “Fix this for me” to make the first entry.
+            When you copy a fix prompt for an issue, it lands here as “in progress”
+            until your next scan confirms the fix.
           </p>
         </div>
       )}
@@ -153,6 +170,20 @@ export function FixesView({ repoLabel }: { repoLabel: string }) {
       )}
 
       <div className="fixlog-list">
+        {inProgress.map((item) => (
+          <div key={`${item.rule_id}:${item.file_path}`} className="fixlog-row progress">
+            <div className="fixlog-badge progress">◷</div>
+            <div className="fixlog-body">
+              <div className="fixlog-title">Fix in progress</div>
+              <div className="fixlog-meta">
+                <span className="mono">{item.file_path}</span>
+                <span className="mono">{item.rule_id}</span>
+                <span>{timeAgo(item.copied_at)}</span>
+                <span>prompt copied — waiting on your next scan</span>
+              </div>
+            </div>
+          </div>
+        ))}
         {resolved.map(({ outcome, title, filePath, severity }) => (
           <div key={outcome.outcome_id} className={`fixlog-row ${outcome.successful ? "ok" : "miss"}`}>
             <div className={`fixlog-badge ${outcome.successful ? "ok" : "miss"}`}>

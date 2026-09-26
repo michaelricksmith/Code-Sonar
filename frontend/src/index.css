@@ -388,6 +388,15 @@ button { font-family: inherit; }
 .btn-fix { background: var(--teal); color: #fff; margin-top: 18px; position: relative; box-shadow: 0 8px 22px rgba(11, 124, 123, 0.4); font-size: 16px; }
 .btn-fix:hover:not(:disabled) { background: #0d8f8e; }
 
+/* Prompt-first remediation: readable, copyable fix prompt. */
+.prompt-box { margin-top: 16px; width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid #2b3b3a; border-radius: 12px; background: #081917; color: #e8f0ef; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 13px; line-height: 1.65; padding: 16px 18px; position: relative; white-space: pre-wrap; }
+.prompt-box:focus { outline: 2px solid var(--teal); outline-offset: 2px; }
+.copied-note { color: #5bd6a0 !important; font-weight: 600; }
+
+/* "Fix in progress" rows in the fix log (prompt copied, awaiting rescan). */
+.fixlog-row.progress .fixlog-badge { background: #fff7e6; color: #b45309; border: 1px solid #f5d78e; }
+.fixlog-badge.progress { font-size: 15px; }
+
 .tracker { display: flex; gap: 0; margin-top: 20px; position: relative; }
 .track-step { flex: 1; text-align: center; position: relative; font-size: 12.5px; font-weight: 600; color: #8fa3a2; }
 .track-step .tdot { width: 30px; height: 30px; border-radius: 50%; border: 2px solid #3a4a4a; margin: 0 auto 8px; display: grid; place-items: center; background: #0b2221; font-size: 13px; color: #8fa3a2; position: relative; z-index: 1; }

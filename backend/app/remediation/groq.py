@@ -164,6 +164,44 @@ def _validate_fix(fixed: str, original: str, file_path: str) -> str | None:
     return None
 
 
+def _truncate_for_prompt(original: str) -> tuple[str, bool]:
+    """Truncate very large files to control token usage; return (code, truncated)."""
+    truncated = len(original) > MAX_FILE_CHARS
+    code_for_prompt = original[:MAX_FILE_CHARS]
+    if truncated:
+        code_for_prompt += "\n\n# ... (file truncated for length) ..."
+    return code_for_prompt, truncated
+
+
+def _build_fix_prompt(
+    request: RemediationRequest, rule_id: str, file_path: str, code_for_prompt: str
+) -> tuple[str, str, int]:
+    """Build the (prompt, system, max_tokens) triple for the Groq fix request."""
+    system = (
+        "You are a precise code-fix assistant. Given a code finding "
+        "and the file content, output ONLY the corrected full file "
+        "content in a markdown code block. Do not explain. Do not "
+        "add comments about the fix. Preserve all behavior except "
+        "what the finding requires. Make the smallest safe change."
+    )
+    prompt = (
+        f"Fix this Code Sonar finding:\n\n"
+        f"Rule: {rule_id}\n"
+        f"File: {file_path}\n"
+        f"Finding: {request.instruction}\n\n"
+        f"Current file content:\n```\n{code_for_prompt}\n```\n\n"
+        f"Output the complete corrected file in a code block."
+    )
+
+    # The model must return the WHOLE file: size the token budget from the
+    # input (~1 token per 3 chars of code, plus headroom). A fixed 4000
+    # budget cannot hold a large file, so the response gets cut off and
+    # there is no usable fix to extract.
+    needed_tokens = int(len(code_for_prompt) / 3 * 1.3) + 500
+    max_tokens = min(max(4000, needed_tokens), 16000)
+    return prompt, system, max_tokens
+
+
 class GroqRemediationExecutor:
     """AI-powered remediation via Groq API.
 
@@ -176,152 +214,65 @@ class GroqRemediationExecutor:
     def __init__(self) -> None:
         self._deterministic = DeterministicRemediationExecutor()
 
-    def execute(self, request: RemediationRequest) -> RemediationExecutionResult:
-        if not request.approved:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.DRY_RUN,
-                summary="Remediation request is not approved; no changes were attempted.",
-            )
-
-        parsed = _parse_instruction(request.instruction)
-        if parsed is None:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error="Could not parse rule_id and file_path from instruction",
-                summary="Groq executor could not understand the request.",
-            )
-
-        rule_id, file_path = parsed
-
-        # Use deterministic for structural rules (free, no API quota).
-        if rule_id in DETERMINISTIC_RULES:
-            result = self._deterministic.execute(request)
-            # Re-label the executor so the UI shows the right source.
-            return RemediationExecutionResult(
-                request_id=result.request_id,
-                executor_name=self.executor_name,
-                state=result.state,
-                changed_files=result.changed_files,
-                summary=f"[deterministic] {result.summary}",
-                build_passed=result.build_passed,
-                tests_passed=result.tests_passed,
-                error=result.error,
-            )
-
-        # Use Groq API for everything else.
-        repo_root = Path(request.repository_path)
-        full = repo_root / file_path
-        if not full.is_file():
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error=f"File not found: {file_path}",
-                summary=f"Groq executor could not find {file_path}.",
-            )
-
-        try:
-            original = full.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error=str(exc),
-                summary=f"Groq executor could not read {file_path}: {exc}",
-            )
-
-        # Truncate very large files to control token usage.
-        truncated = len(original) > MAX_FILE_CHARS
-        code_for_prompt = original[:MAX_FILE_CHARS]
-        if truncated:
-            code_for_prompt += "\n\n# ... (file truncated for length) ..."
-
-        system = (
-            "You are a precise code-fix assistant. Given a code finding "
-            "and the file content, output ONLY the corrected full file "
-            "content in a markdown code block. Do not explain. Do not "
-            "add comments about the fix. Preserve all behavior except "
-            "what the finding requires. Make the smallest safe change."
-        )
-        prompt = (
-            f"Fix this Code Sonar finding:\n\n"
-            f"Rule: {rule_id}\n"
-            f"File: {file_path}\n"
-            f"Finding: {request.instruction}\n\n"
-            f"Current file content:\n```\n{code_for_prompt}\n```\n\n"
-            f"Output the complete corrected file in a code block."
+    def _failed(
+        self, request: RemediationRequest, error: str, summary: str
+    ) -> RemediationExecutionResult:
+        return RemediationExecutionResult(
+            request_id=request.request_id,
+            executor_name=self.executor_name,
+            state=RemediationExecutionState.FAILED,
+            error=error,
+            summary=summary,
         )
 
-        # The model must return the WHOLE file: size the token budget from the
-        # input (~1 token per 3 chars of code, plus headroom). A fixed 4000
-        # budget cannot hold a large file, so the response gets cut off and
-        # there is no usable fix to extract.
-        needed_tokens = int(len(code_for_prompt) / 3 * 1.3) + 500
-        max_tokens = min(max(4000, needed_tokens), 16000)
+    def _dry_run(
+        self, request: RemediationRequest, summary: str
+    ) -> RemediationExecutionResult:
+        return RemediationExecutionResult(
+            request_id=request.request_id,
+            executor_name=self.executor_name,
+            state=RemediationExecutionState.DRY_RUN,
+            summary=summary,
+        )
 
-        try:
-            response = _call_groq(prompt, system=system, max_tokens=max_tokens)
-        except RuntimeError as exc:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error=str(exc),
-                summary=f"Groq API call failed: {exc}",
-            )
+    def _deterministic_result(
+        self, request: RemediationRequest
+    ) -> RemediationExecutionResult:
+        result = self._deterministic.execute(request)
+        # Re-label the executor so the UI shows the right source.
+        return RemediationExecutionResult(
+            request_id=result.request_id,
+            executor_name=self.executor_name,
+            state=result.state,
+            changed_files=result.changed_files,
+            summary=f"[deterministic] {result.summary}",
+            build_passed=result.build_passed,
+            tests_passed=result.tests_passed,
+            error=result.error,
+        )
 
-        fixed = _extract_code_block(response)
-        if not fixed:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error="Groq response did not contain a code block",
-                summary=(
-                    "Groq did not return a usable fix. "
-                    f"Raw response preview: {response[:200]}..."
-                ),
-            )
-
-        # Never overwrite the user's file with a broken or cut-off fix.
-        problem = _validate_fix(fixed, original, file_path)
-        if problem:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error=problem,
-                summary=(
-                    f"Groq did not return a usable fix. {problem}. "
-                    "Nothing was changed."
-                ),
-            )
-
+    def _apply_fix(
+        self,
+        request: RemediationRequest,
+        rule_id: str,
+        file_path: str,
+        full: Path,
+        fixed: str,
+        original: str,
+        truncated: bool,
+    ) -> RemediationExecutionResult:
         if fixed.strip() == original.strip():
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.DRY_RUN,
-                summary=(
-                    "Groq returned the file unchanged; "
-                    "no fix was necessary or possible."
-                ),
+            return self._dry_run(
+                request,
+                "Groq returned the file unchanged; "
+                "no fix was necessary or possible.",
             )
 
         try:
             full.write_text(fixed + "\n", encoding="utf-8")
         except OSError as exc:
-            return RemediationExecutionResult(
-                request_id=request.request_id,
-                executor_name=self.executor_name,
-                state=RemediationExecutionState.FAILED,
-                error=str(exc),
-                summary=f"Failed to write fixed file: {exc}",
+            return self._failed(
+                request, str(exc), f"Failed to write fixed file: {exc}"
             )
 
         return RemediationExecutionResult(
@@ -335,3 +286,67 @@ class GroqRemediationExecutor:
                 + (" (input was truncated)" if truncated else "")
             ),
         )
+
+    def _remediate_with_groq(
+        self, request: RemediationRequest, rule_id: str, file_path: str
+    ) -> RemediationExecutionResult:
+        # Use Groq API for everything else.
+        repo_root = Path(request.repository_path)
+        full = repo_root / file_path
+        if not full.is_file():
+            return self._failed(request, f"File not found: {file_path}",
+                                f"Groq executor could not find {file_path}.")
+
+        try:
+            original = full.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return self._failed(request, str(exc),
+                                f"Groq executor could not read {file_path}: {exc}")
+
+        code_for_prompt, truncated = _truncate_for_prompt(original)
+        prompt, system, max_tokens = _build_fix_prompt(
+            request, rule_id, file_path, code_for_prompt
+        )
+
+        try:
+            response = _call_groq(prompt, system=system, max_tokens=max_tokens)
+        except RuntimeError as exc:
+            return self._failed(request, str(exc), f"Groq API call failed: {exc}")
+
+        fixed = _extract_code_block(response)
+        if not fixed:
+            return self._failed(request, "Groq response did not contain a code block",
+                                "Groq did not return a usable fix. "
+                                f"Raw response preview: {response[:200]}...")
+
+        # Never overwrite the user's file with a broken or cut-off fix.
+        problem = _validate_fix(fixed, original, file_path)
+        if problem:
+            return self._failed(request, problem,
+                                f"Groq did not return a usable fix. {problem}. "
+                                "Nothing was changed.")
+
+        return self._apply_fix(request, rule_id, file_path, full, fixed, original, truncated)
+
+    def execute(self, request: RemediationRequest) -> RemediationExecutionResult:
+        if not request.approved:
+            return self._dry_run(
+                request,
+                "Remediation request is not approved; no changes were attempted.",
+            )
+
+        parsed = _parse_instruction(request.instruction)
+        if parsed is None:
+            return self._failed(
+                request,
+                "Could not parse rule_id and file_path from instruction",
+                "Groq executor could not understand the request.",
+            )
+
+        rule_id, file_path = parsed
+
+        # Use deterministic for structural rules (free, no API quota).
+        if rule_id in DETERMINISTIC_RULES:
+            return self._deterministic_result(request)
+
+        return self._remediate_with_groq(request, rule_id, file_path)

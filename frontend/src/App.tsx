@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { DriftResult, Finding, ScanResponse } from "./api/analyzers";
-import { fetchDrift } from "./api/analyzers";
+import { fetchDrift, fetchHistoryCount } from "./api/analyzers";
 import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
@@ -101,8 +101,27 @@ export default function App() {
         if (me) {
           const saved = loadSavedScan();
           if (saved) {
-            setResult(saved.result);
-            setRepoLabel(saved.repoLabel);
+            // Self-heal a stale cache: if the server has no scan history
+            // (e.g. after a server-side data reset), drop the cached scan
+            // instead of rendering phantom results. If the check itself
+            // fails, keep the cache (offline-friendly).
+            fetchHistoryCount()
+              .then((count) => {
+                if (count > 0) {
+                  setResult(saved.result);
+                  setRepoLabel(saved.repoLabel);
+                } else {
+                  try {
+                    window.localStorage.removeItem(LAST_SCAN_KEY);
+                  } catch {
+                    // best-effort
+                  }
+                }
+              })
+              .catch(() => {
+                setResult(saved.result);
+                setRepoLabel(saved.repoLabel);
+              });
           }
         }
       })

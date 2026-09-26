@@ -65,11 +65,8 @@ def _walk_forbidden(value: Any, path: str = "$") -> None:
             _walk_forbidden(child, f"{path}[{index}]")
 
 
-def validate_artifact(
-    artifact: Mapping[str, Any], *, expected_scoring_version: str | None = None
-) -> None:
-    """Validate one v1 artifact, rejecting incomplete or version-mismatched scans."""
-    kind = artifact.get("artifact_type")
+def _validate_common(artifact: Mapping[str, Any], kind: Any) -> None:
+    """Validate the fields shared by every artifact type."""
     if artifact.get("contract_version") != CONTRACT_VERSION:
         raise EvidenceValidationError("unsupported contract_version")
     if kind not in ARTIFACT_TYPES:
@@ -81,48 +78,98 @@ def validate_artifact(
         raise EvidenceValidationError("case_id must match csb-NNN")
     _walk_forbidden(artifact)
 
-    if kind == "repository_metadata" and not _SHA.fullmatch(str(artifact["commit_sha"])):
+
+def _validate_repository_metadata(artifact: Mapping[str, Any]) -> None:
+    if not _SHA.fullmatch(str(artifact["commit_sha"])):
         raise EvidenceValidationError("commit_sha must be a 40-64 character hexadecimal digest")
+
+
+def _validate_scoring_version(
+    artifact: Mapping[str, Any], expected_scoring_version: str | None
+) -> None:
+    if not isinstance(artifact["scoring_version"], str) or not artifact["scoring_version"]:
+        raise EvidenceValidationError("scoring_version must be non-empty")
+    if expected_scoring_version and artifact["scoring_version"] != expected_scoring_version:
+        raise EvidenceValidationError("scoring_version mismatch")
+
+
+def _validate_analyzer_execution(artifact: Mapping[str, Any]) -> list[Any]:
+    statuses = artifact["analyzer_execution"]
+    if not isinstance(statuses, list) or not statuses:
+        raise EvidenceValidationError("analyzer_execution must be non-empty")
+    if any(item.get("status") != "completed" for item in statuses if isinstance(item, Mapping)):
+        raise EvidenceValidationError("incomplete analyzer execution")
+    if len(statuses) != sum(isinstance(item, Mapping) for item in statuses):
+        raise EvidenceValidationError("invalid analyzer execution record")
+    return statuses
+
+
+def _validate_analyzer_versions(artifact: Mapping[str, Any], statuses: list[Any]) -> None:
+    executed = {str(item.get("analyzer", "")) for item in statuses}
+    versions = artifact["analyzer_versions"]
+    if not isinstance(versions, Mapping) or set(versions) != executed:
+        raise EvidenceValidationError("analyzer_versions must match executed analyzers")
+    if any(not isinstance(version, str) or not version for version in versions.values()):
+        raise EvidenceValidationError("analyzer versions must be non-empty strings")
+
+
+def _validate_frozen_scan(
+    artifact: Mapping[str, Any], expected_scoring_version: str | None
+) -> None:
+    _validate_scoring_version(artifact, expected_scoring_version)
+    statuses = _validate_analyzer_execution(artifact)
+    _validate_analyzer_versions(artifact, statuses)
+    if artifact["grade"] not in GRADES:
+        raise EvidenceValidationError("invalid grade")
+
+
+def _validate_label_grades(artifact: Mapping[str, Any]) -> None:
+    if artifact["grade"] not in GRADES or not 1 <= artifact["ordinal_health"] <= 10:
+        raise EvidenceValidationError("invalid grade or ordinal_health")
+
+
+def _validate_reviewer(artifact: Mapping[str, Any]) -> None:
+    validate_reviewer_id(str(artifact.get("reviewer_id", "")))
+    confidence = artifact.get("confidence")
+    if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+        raise EvidenceValidationError("confidence must be between 0 and 1")
+
+
+def _validate_adjudicated_reviewers(artifact: Mapping[str, Any]) -> None:
+    reviewer_ids = artifact.get("reviewer_ids")
+    if (
+        not isinstance(reviewer_ids, list)
+        or len(set(reviewer_ids)) < 2
+        or any(not _REVIEWER_ID.fullmatch(str(item)) for item in reviewer_ids)
+    ):
+        raise EvidenceValidationError("adjudication requires at least two reviewer pseudonyms")
+
+
+def _validate_finding_review(artifact: Mapping[str, Any]) -> None:
+    if artifact["verdict"] not in FINDING_VERDICTS:
+        raise EvidenceValidationError("invalid finding verdict")
+    if artifact["reported_severity"] not in SEVERITIES:
+        raise EvidenceValidationError("invalid reported severity")
+    if artifact["expert_severity"] not in SEVERITIES | {None}:
+        raise EvidenceValidationError("invalid expert severity")
+
+
+def validate_artifact(
+    artifact: Mapping[str, Any], *, expected_scoring_version: str | None = None
+) -> None:
+    """Validate one v1 artifact, rejecting incomplete or version-mismatched scans."""
+    kind = artifact.get("artifact_type")
+    _validate_common(artifact, kind)
+    if kind == "repository_metadata":
+        _validate_repository_metadata(artifact)
     if kind == "frozen_scan":
-        if not isinstance(artifact["scoring_version"], str) or not artifact["scoring_version"]:
-            raise EvidenceValidationError("scoring_version must be non-empty")
-        if expected_scoring_version and artifact["scoring_version"] != expected_scoring_version:
-            raise EvidenceValidationError("scoring_version mismatch")
-        statuses = artifact["analyzer_execution"]
-        if not isinstance(statuses, list) or not statuses:
-            raise EvidenceValidationError("analyzer_execution must be non-empty")
-        if any(item.get("status") != "completed" for item in statuses if isinstance(item, Mapping)):
-            raise EvidenceValidationError("incomplete analyzer execution")
-        if len(statuses) != sum(isinstance(item, Mapping) for item in statuses):
-            raise EvidenceValidationError("invalid analyzer execution record")
-        executed = {str(item.get("analyzer", "")) for item in statuses}
-        versions = artifact["analyzer_versions"]
-        if not isinstance(versions, Mapping) or set(versions) != executed:
-            raise EvidenceValidationError("analyzer_versions must match executed analyzers")
-        if any(not isinstance(version, str) or not version for version in versions.values()):
-            raise EvidenceValidationError("analyzer versions must be non-empty strings")
-        if artifact["grade"] not in GRADES:
-            raise EvidenceValidationError("invalid grade")
-    if kind in {"expert_label", "adjudicated_label"}:
-        if artifact["grade"] not in GRADES or not 1 <= artifact["ordinal_health"] <= 10:
-            raise EvidenceValidationError("invalid grade or ordinal_health")
-    if kind in {"expert_label", "finding_review"}:
-        validate_reviewer_id(str(artifact.get("reviewer_id", "")))
-        confidence = artifact.get("confidence")
-        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-            raise EvidenceValidationError("confidence must be between 0 and 1")
+        _validate_frozen_scan(artifact, expected_scoring_version)
+    if kind == "expert_label":
+        _validate_label_grades(artifact)
+        _validate_reviewer(artifact)
     if kind == "adjudicated_label":
-        reviewer_ids = artifact.get("reviewer_ids")
-        if (
-            not isinstance(reviewer_ids, list)
-            or len(set(reviewer_ids)) < 2
-            or any(not _REVIEWER_ID.fullmatch(str(item)) for item in reviewer_ids)
-        ):
-            raise EvidenceValidationError("adjudication requires at least two reviewer pseudonyms")
+        _validate_label_grades(artifact)
+        _validate_adjudicated_reviewers(artifact)
     if kind == "finding_review":
-        if artifact["verdict"] not in FINDING_VERDICTS:
-            raise EvidenceValidationError("invalid finding verdict")
-        if artifact["reported_severity"] not in SEVERITIES:
-            raise EvidenceValidationError("invalid reported severity")
-        if artifact["expert_severity"] not in SEVERITIES | {None}:
-            raise EvidenceValidationError("invalid expert severity")
+        _validate_reviewer(artifact)
+        _validate_finding_review(artifact)

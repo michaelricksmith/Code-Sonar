@@ -84,7 +84,19 @@ export function IssueDetail({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planReviewed, setPlanReviewed] = useState(false);
+  /** Animated stage index (0=Plan, 1=Fix, 2=Test, 3=Rescan) while a fix run is in flight. */
+  const [runStage, setRunStage] = useState(0);
   const askedRef = useRef(false);
+
+  // Advance the visible stage on a timer while the run is in flight so the
+  // user can watch Sonar work through Plan → Fix → Test → Rescan.
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setInterval(() => {
+      setRunStage((s) => (s < 3 ? s + 1 : s));
+    }, 3500);
+    return () => window.clearInterval(id);
+  }, [running]);
 
   // Reset per issue.
   useEffect(() => {
@@ -95,6 +107,7 @@ export function IssueDetail({
     setPlanReviewed(false);
     setLoadingPlan(false);
     setRunning(false);
+    setRunStage(0);
     askedRef.current = false;
   }, [finding.id]);
 
@@ -137,6 +150,7 @@ export function IssueDetail({
   async function approveAndRun(): Promise<void> {
     if (!scanId || !planResponse) return;
     setRunning(true);
+    setRunStage(0);
     setError(null);
     try {
       const response = await approveAndRunRemediation({
@@ -154,6 +168,8 @@ export function IssueDetail({
       setRunning(false);
     }
   }
+
+  const RUN_STAGE_LABELS = ["Reading the approved plan", "Applying the fix in a safe copy", "Running your tests", "Re-scoring your repo"] as const;
 
   const sevLabel = SEVERITY_LABEL[finding.severity];
   const sevTone = { critical: "critical", error: "attention", warning: "ok", info: "good" }[finding.severity];
@@ -247,7 +263,7 @@ export function IssueDetail({
                     </p>
                     <div style={{ marginTop: 12 }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => void buildPlan()} disabled={loadingPlan || !scanId}>
-                        {loadingPlan ? "Writing the plan…" : "✦ Write the fix plan"}
+                        {loadingPlan ? (<>Writing the plan<span className="dots" aria-hidden="true" /></>) : "✦ Write the fix plan"}
                       </button>
                     </div>
                     {!scanId && (
@@ -319,7 +335,7 @@ export function IssueDetail({
           </div>
 
           <div className="fix-panel">
-            {!workflowResponse ? (
+            {!workflowResponse && !running ? (
               <>
                 <h2>✦ &nbsp;Want Sonar to do this for you?</h2>
                 <p>
@@ -350,10 +366,15 @@ export function IssueDetail({
               </>
             ) : (
               <>
-                <h2>{validation?.finding_resolved ? "Fixed ✓" : workflowCompleted ? "Run finished" : "Fix didn't complete"}</h2>
+                <h2>{running ? "Sonar is on it" : validation?.finding_resolved ? "Fixed ✓" : workflowCompleted ? "Run finished" : "Fix didn't complete"}</h2>
                 <div className="tracker" aria-label="Fix progress">
                   {["Plan", "Fix", "Test", "Rescan"].map((label, i) => {
-                    const cls = i < 2 || validation ? "finished" : i === 2 && running ? "doing" : "";
+                    let cls: string;
+                    if (workflowResponse) {
+                      cls = i < 2 || validation ? "finished" : "";
+                    } else {
+                      cls = i < runStage ? "finished" : i === runStage ? "doing" : "";
+                    }
                     return (
                       <div key={label} className={`track-step ${cls}`}>
                         <div className="tdot">{cls === "finished" ? "✓" : i + 1}</div>
@@ -362,6 +383,12 @@ export function IssueDetail({
                     );
                   })}
                 </div>
+                {running && !workflowResponse && (
+                  <>
+                    <div className="run-progress" aria-hidden="true"><span /></div>
+                    <p className="run-status">{RUN_STAGE_LABELS[runStage]}<span className="dots" aria-hidden="true" /></p>
+                  </>
+                )}
                 {validation && (
                   <div className="result-banner">
                     <h3>{validation.finding_resolved ? `Fixed. Your score went from ${currentScore} → ${afterScore}.` : "The issue is still present."}</h3>
@@ -391,20 +418,22 @@ export function IssueDetail({
                     )}
                   </div>
                 )}
+                {!running && (
                 <div style={{ marginTop: 16, position: "relative", display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {!validation && (
                     <button
                       className="btn btn-fix btn-sm"
                       onClick={() => void approveAndRun()}
-                      disabled={running || !plan}
+                      disabled={!plan}
                     >
-                      {running ? "Sonar is fixing it…" : "↻ Try the fix again"}
+                      ↻ Try the fix again
                     </button>
                   )}
                   <button className="btn btn-ghost btn-sm" style={{ background: "transparent", color: "#fff", borderColor: "#3A4450" }} onClick={() => { setPlanResponse(null); setWorkflowResponse(null); setPlanReviewed(false); }}>
                     Start over with a fresh plan
                   </button>
                 </div>
+                )}
               </>
             )}
           </div>

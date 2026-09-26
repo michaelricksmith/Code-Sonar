@@ -23,8 +23,10 @@ import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
+import { fetchFixLog } from "./api/outcomes";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
 import { Dashboard } from "./components/Dashboard";
+import { FixesView } from "./components/FixesView";
 import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
 import { LandingPage } from "./components/LandingPage";
@@ -37,7 +39,8 @@ type Route =
   | { name: "landing" }
   | { name: "app" }
   | { name: "issues" }
-  | { name: "issue"; id: string };
+  | { name: "issue"; id: string }
+  | { name: "fixes" };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -49,6 +52,7 @@ function parseRoute(): Route {
   if (hash === "" || hash === "/") return { name: "landing" };
   if (hash === "/app") return { name: "app" };
   if (hash === "/app/issues") return { name: "issues" };
+  if (hash === "/app/fixes") return { name: "fixes" };
   const match = hash.match(/^\/app\/issues\/(.+)$/);
   if (match) return { name: "issue", id: decodeURIComponent(match[1]) };
   return { name: "landing" };
@@ -83,6 +87,7 @@ export default function App() {
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [sonarOpen, setSonarOpen] = useState(false);
   const [sonarQuestion, setSonarQuestion] = useState<string | null>(null);
+  const [fixCount, setFixCount] = useState<number | null>(null);
   const [providers, setProviders] = useState<AiProvider[] | null>(null);
   const [providersError, setProvidersError] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("");
@@ -112,6 +117,25 @@ export default function App() {
       .then(setProviders)
       .catch((e) => setProvidersError(e instanceof Error ? e.message : String(e)));
   }, [user]);
+
+  // Fix-log badge for the sidebar.
+  useEffect(() => {
+    if (!user || !repoLabel) {
+      setFixCount(null);
+      return;
+    }
+    let cancelled = false;
+    fetchFixLog(repoLabel, 1)
+      .then((data) => {
+        if (!cancelled) setFixCount(data.count);
+      })
+      .catch(() => {
+        if (!cancelled) setFixCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, repoLabel, route.name]);
 
   // Hash routing.
   useEffect(() => {
@@ -233,7 +257,8 @@ export default function App() {
 
   if (!user) return <LandingPage />;
 
-  const shellView: ShellView = route.name === "issues" || route.name === "issue" ? "issues" : "overview";
+  const shellView: ShellView =
+    route.name === "issues" || route.name === "issue" ? "issues" : route.name === "fixes" ? "fixes" : "overview";
   const activeFinding =
     route.name === "issue" ? result?.findings.find((f) => f.id === route.id) ?? null : null;
 
@@ -245,7 +270,8 @@ export default function App() {
         repoSub={result ? `Score ${result.score} · scanned ${timeAgo(result.scanned_at)}` : null}
         view={shellView}
         issueCount={result?.finding_count ?? null}
-        onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : "/app")}
+        fixCount={fixCount}
+        onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : view === "fixes" ? "/app/fixes" : "/app")}
         onSignOut={() => void handleSignOut()}
         onOpenSonar={() => openSonar()}
       >
@@ -276,6 +302,10 @@ export default function App() {
 
         {result && route.name === "issues" && (
           <IssuesView result={result} onOpenIssue={openIssue} />
+        )}
+
+        {result && route.name === "fixes" && (
+          <FixesView repoLabel={repoLabel ?? result.repository} />
         )}
 
         {result && route.name === "issue" && activeFinding && (

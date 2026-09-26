@@ -143,7 +143,9 @@ export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onO
   // Prefer backend drift; fall back to the locally computed scan diff so the
   // score delta still shows when server history was wiped (e.g. redeploy).
   const delta = drift?.summary.score_delta ?? scanDiff?.scoreDelta ?? null;
-  const fixedNew = drift == null ? scanDiff : null;
+  // Always show the local fixed/new breakdown when available — it is computed
+  // from the actual findings and is more precise than the drift summary.
+  const fixedNew = scanDiff;
   const files = useMemo(() => riskiestFiles(result.findings), [result]);
   const maxRisk = Math.max(1, ...files.map((f) => f.risk));
   const dist = result.severity_distribution;

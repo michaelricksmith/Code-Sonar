@@ -223,6 +223,19 @@ export async function fetchHealth(): Promise<{ status: string }> {
   return res.json();
 }
 
+/**
+ * Number of scans the server currently has on record. Used on boot to
+ * detect a stale cached scan (e.g. after a server-side data reset): if the
+ * server has no history, the browser's cached last-scan must be dropped
+ * instead of rendered.
+ */
+export async function fetchHistoryCount(): Promise<number> {
+  const res = await fetch(`${API_BASE}/history/list?limit=1`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? `History fetch failed (HTTP ${res.status})`);
+  return typeof data.count === "number" ? data.count : 0;
+}
+
 export async function runScan(req: ScanRequest): Promise<ScanResponse> {
   const res = await fetch(`${API_BASE}/scan`, {
     method: "POST",

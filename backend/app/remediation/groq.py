@@ -11,8 +11,9 @@ Requires:
 The executor:
 1. Reads the target file
 2. Sends the finding + code to Groq with a fix prompt
-3. Parses the returned unified diff or full file content
-4. Applies the change to the worktree
+3. Parses the returned full file content from a markdown code block
+4. Validates it (must parse; must not be a cut-off fragment) and applies
+   the change to the worktree — nothing is written unless it validates
 5. Returns the changed files
 
 If the API call fails, returns FAILED with the error (no fake success).
@@ -20,6 +21,7 @@ If the API call fails, returns FAILED with the error (no fake success).
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -62,7 +64,7 @@ def _get_model() -> str:
     return os.getenv("CODE_SONAR_GROQ_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
-def _call_groq(prompt: str, system: str | None = None) -> str:
+def _call_groq(prompt: str, system: str | None = None, max_tokens: int = 4000) -> str:
     """Call Groq chat completions API. Raises on failure."""
     api_key = _get_api_key()
     if not api_key:
@@ -80,8 +82,13 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
         "model": _get_model(),
         "messages": messages,
         "temperature": 0.1,  # Low temp for deterministic fixes
-        "max_tokens": 4000,
+        "max_tokens": max_tokens,
     }
+    # gpt-oss is a reasoning model: it spends part of the token budget on
+    # hidden reasoning, which can starve the actual answer at low budgets.
+    # Keep reasoning cheap so the budget goes to the fixed file.
+    if "gpt-oss" in _get_model():
+        payload["reasoning_effort"] = "low"
 
     req = urllib.request.Request(
         GROQ_API_URL,
@@ -116,11 +123,44 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
 
 
 def _extract_code_block(response: str) -> str | None:
-    """Extract the first code block from a markdown response."""
-    # Match ```language\n...code...\n``` or ```\n...code...\n```
-    m = re.search(r"```(?:\w+)?\n(.*?)```", response, re.DOTALL)
+    """Extract the first fenced code block from a model response.
+
+    Tolerates a missing closing fence (the response was cut off): returns
+    everything after the opening fence so the caller can validate it.
+    Validation must reject incomplete output — never write it blindly.
+    """
+    # Match ```language\n...code...\n``` (tolerant of trailing spaces/CR).
+    m = re.search(r"```[ \t]*(?:\w+)?[ \t]*\r?\n(.*?)```", response, re.DOTALL)
     if m:
         return m.group(1).strip()
+    # Fallback: opening fence with no closing fence — truncated response.
+    m = re.search(r"```[ \t]*(?:\w+)?[ \t]*\r?\n(.*)$", response, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def _validate_fix(fixed: str, original: str, file_path: str) -> str | None:
+    """Return an error message if the fix must NOT be applied, else None.
+
+    This is the last line of defense before overwriting a user's file:
+    reject empty output, code that does not parse, and output that is far
+    shorter than the original (a cut-off response masquerading as a fix).
+    """
+    if not fixed.strip():
+        return "Groq returned an empty fix"
+    if file_path.endswith(".py"):
+        try:
+            ast.parse(fixed)
+        except SyntaxError as exc:
+            return f"Groq returned code that does not parse ({exc}); not applied"
+    # A full-file rewrite should be roughly the original size. Much shorter
+    # means the response was cut off mid-file.
+    if len(fixed) < 0.5 * len(original):
+        return (
+            "Groq's response was cut off before the complete file "
+            f"({len(fixed)} chars vs {len(original)} in the original); not applied"
+        )
     return None
 
 
@@ -217,8 +257,15 @@ class GroqRemediationExecutor:
             f"Output the complete corrected file in a code block."
         )
 
+        # The model must return the WHOLE file: size the token budget from the
+        # input (~1 token per 3 chars of code, plus headroom). A fixed 4000
+        # budget cannot hold a large file, so the response gets cut off and
+        # there is no usable fix to extract.
+        needed_tokens = int(len(code_for_prompt) / 3 * 1.3) + 500
+        max_tokens = min(max(4000, needed_tokens), 16000)
+
         try:
-            response = _call_groq(prompt, system=system)
+            response = _call_groq(prompt, system=system, max_tokens=max_tokens)
         except RuntimeError as exc:
             return RemediationExecutionResult(
                 request_id=request.request_id,
@@ -238,6 +285,20 @@ class GroqRemediationExecutor:
                 summary=(
                     "Groq did not return a usable fix. "
                     f"Raw response preview: {response[:200]}..."
+                ),
+            )
+
+        # Never overwrite the user's file with a broken or cut-off fix.
+        problem = _validate_fix(fixed, original, file_path)
+        if problem:
+            return RemediationExecutionResult(
+                request_id=request.request_id,
+                executor_name=self.executor_name,
+                state=RemediationExecutionState.FAILED,
+                error=problem,
+                summary=(
+                    f"Groq did not return a usable fix. {problem}. "
+                    "Nothing was changed."
                 ),
             )
 

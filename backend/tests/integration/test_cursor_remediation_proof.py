@@ -46,11 +46,8 @@ def _scan_findings(repository: Path):
     return list(result.findings)
 
 
-def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH", "1")
+def _create_proof_repository(tmp_path: Path) -> tuple[Path, Path]:
+    """Create the fixture git repository; return (repository, source)."""
     repository = tmp_path / "active"
     repository.mkdir()
     (repository / "src").mkdir()
@@ -75,11 +72,17 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
     _run(["git", "config", "user.email", "proof@code-sonar.local"], repository)
     _run(["git", "add", "."], repository)
     _run(["git", "commit", "-m", "proof baseline"], repository)
+    return repository, source
 
-    active_head_before = _run(["git", "rev-parse", "HEAD"], repository).stdout.strip()
-    active_status_before = _run(["git", "status", "--porcelain"], repository).stdout
-    active_source_before = source.read_bytes()
 
+def _capture_active_state(repository: Path, source: Path) -> tuple[str, str, bytes]:
+    head = _run(["git", "rev-parse", "HEAD"], repository).stdout.strip()
+    status = _run(["git", "status", "--porcelain"], repository).stdout
+    return head, status, source.read_bytes()
+
+
+def _scan_before_state(repository: Path):
+    """Run the before scan and record it; return (target, history)."""
     before_findings = _scan_findings(repository)
     target = next(
         finding
@@ -98,10 +101,10 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
             scanned_at="2026-09-08T00:00:00+00:00",
         )
     )
+    return target, history
 
-    worktree_root = tmp_path / "remediation-worktrees"
-    workspace_manager = GitWorktreeManager(root=worktree_root)
 
+def _cursor_runner_for(target):
     def cursor_runner(args: list[str], cwd: Path, timeout: float) -> ProcessResult:
         assert timeout > 0
         if args[0] == "cursor-proof-agent":
@@ -125,39 +128,26 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
         )
         return ProcessResult(completed.returncode, completed.stdout, completed.stderr)
 
-    def validation_runner(
-        args: list[str], cwd: Path, timeout: float
-    ) -> ValidationProcessResult:
-        completed = subprocess.run(
-            args,
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return ValidationProcessResult(
-            completed.returncode, completed.stdout, completed.stderr
-        )
+    return cursor_runner
 
-    executor = CursorRemediationExecutor(
-        ("cursor-proof-agent", "{workspace}", "{instruction}"),
-        workspace_root=worktree_root,
-        runner=cursor_runner,
+
+def _validation_runner(
+    args: list[str], cwd: Path, timeout: float
+) -> ValidationProcessResult:
+    completed = subprocess.run(
+        args,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
-    validator = RemediationValidationService(
-        commands=(
-            ValidationCommand(
-                name="proof-tests",
-                kind="tests",
-                argv=(sys.executable, "-m", "pytest", "-q"),
-            ),
-        ),
-        history_store=history,
-        outcome_store=JsonlOutcomeStore(tmp_path / "outcomes.jsonl"),
-        workspace_root=worktree_root,
-        runner=validation_runner,
+    return ValidationProcessResult(
+        completed.returncode, completed.stdout, completed.stderr
     )
+
+
+def _issue_authorization(repository: Path, target):
     authorization_service = RemediationAuthorizationService(
         secret="cursor-proof-secret",
         ttl_seconds=300,
@@ -172,18 +162,47 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
         remediation_kind="automated_patch",
         instruction=f"Resolve Code Sonar finding {target.id} without changing behavior.",
     )
+    return authorization_service, authorization
+
+
+def _build_services(tmp_path: Path, worktree_root: Path, history, target, repository: Path):
+    """Build the orchestrator stack; return (manager, orchestrator, authorization)."""
+    workspace_manager = GitWorktreeManager(root=worktree_root)
+    executor = CursorRemediationExecutor(
+        ("cursor-proof-agent", "{workspace}", "{instruction}"),
+        workspace_root=worktree_root,
+        runner=_cursor_runner_for(target),
+    )
+    validator = RemediationValidationService(
+        commands=(
+            ValidationCommand(
+                name="proof-tests",
+                kind="tests",
+                argv=(sys.executable, "-m", "pytest", "-q"),
+            ),
+        ),
+        history_store=history,
+        outcome_store=JsonlOutcomeStore(tmp_path / "outcomes.jsonl"),
+        workspace_root=worktree_root,
+        runner=_validation_runner,
+    )
+    authorization_service, authorization = _issue_authorization(repository, target)
     orchestrator = RemediationOrchestrator(
         workspace_manager=workspace_manager,
         executor=executor,
         validation_service=validator,
         authorization_service=authorization_service,
     )
+    return workspace_manager, orchestrator, authorization
 
-    result = orchestrator.run_authorized(authorization)
 
+def _verify_execution(result) -> None:
     assert result.execution is not None
     assert result.execution.executor_name == "cursor"
     assert result.execution.changed_files == ("src/app.py",)
+
+
+def _verify_validation(result) -> None:
     assert result.validation is not None
     assert result.validation.tests_passed is True
     assert result.validation.finding_resolved is True
@@ -192,6 +211,10 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
     assert result.validation.debt_points_delta < 0
     assert result.validation.training_label_value == "1"
 
+
+def _verify_workspace_cleanup(
+    result, workspace_manager: GitWorktreeManager, repository: Path
+) -> None:
     assert result.workspace is not None
     assert result.workspace.branch_name.startswith("code-sonar/remediation/")
     assert not Path(result.workspace.workspace_path).exists()
@@ -201,6 +224,59 @@ def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
     ).stdout
     assert branch.strip() == ""
 
+
+def _verify_active_repo_unchanged(
+    repository: Path,
+    source: Path,
+    active_head_before: str,
+    active_status_before: str,
+    active_source_before: bytes,
+) -> None:
     assert _run(["git", "rev-parse", "HEAD"], repository).stdout.strip() == active_head_before
     assert _run(["git", "status", "--porcelain"], repository).stdout == active_status_before
     assert source.read_bytes() == active_source_before
+
+
+def _verify_outcome(
+    result,
+    workspace_manager: GitWorktreeManager,
+    repository: Path,
+    active_head_before: str,
+    active_status_before: str,
+    source: Path,
+    active_source_before: bytes,
+) -> None:
+    _verify_execution(result)
+    _verify_validation(result)
+    _verify_workspace_cleanup(result, workspace_manager, repository)
+    _verify_active_repo_unchanged(
+        repository, source, active_head_before, active_status_before, active_source_before
+    )
+
+
+def test_cursor_workflow_proves_isolation_tests_rescan_and_improvement(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH", "1")
+    repository, source = _create_proof_repository(tmp_path)
+    active_head_before, active_status_before, active_source_before = (
+        _capture_active_state(repository, source)
+    )
+    target, history = _scan_before_state(repository)
+    worktree_root = tmp_path / "remediation-worktrees"
+    workspace_manager, orchestrator, authorization = _build_services(
+        tmp_path, worktree_root, history, target, repository
+    )
+
+    result = orchestrator.run_authorized(authorization)
+
+    _verify_outcome(
+        result,
+        workspace_manager,
+        repository,
+        active_head_before,
+        active_status_before,
+        source,
+        active_source_before,
+    )

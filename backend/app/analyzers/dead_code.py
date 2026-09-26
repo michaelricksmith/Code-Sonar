@@ -172,6 +172,13 @@ def _collect_definitions(
         def visit_Name(self, node: ast.Name) -> None:
             analysis.all_names_referenced.add(node.id)
 
+        def visit_Attribute(self, node: ast.Attribute) -> None:
+            # `self._helper()` and `obj._helper` reference `_helper`;
+            # without this, private methods called through an attribute
+            # are falsely flagged as unused.
+            analysis.all_names_referenced.add(node.attr)
+            self.generic_visit(node)
+
         def visit_Import(self, node: ast.Import) -> None:
             for alias in node.names:
                 # Treat `import foo` as referencing `foo`.
@@ -203,6 +210,9 @@ def _collect_definitions(
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Name):
                     analysis.all_names_referenced.add(inner.id)
+                elif isinstance(inner, ast.Attribute):
+                    # `self._helper()` references `_helper`.
+                    analysis.all_names_referenced.add(inner.attr)
                 elif isinstance(inner, ast.Import):
                     for alias in inner.names:
                         analysis.all_names_referenced.add(alias.asname or alias.name.split(".")[0])

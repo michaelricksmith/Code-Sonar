@@ -1,5 +1,17 @@
 ## Unreleased — Prompt-first remediation
 
+- **Fixed: score now responds to fixes.** The per-category penalty hard cap
+  created dead zones where fixing issues didn't move the score (80 fixed,
+  score stuck at 540). Now linear up to the cap, then logarithmic growth
+  above it — every fix moves the score, while huge finding counts still
+  can't linearly explode the penalty.
+- **Fixed: `dead_code:unused-private` false positives on methods called via
+  `self`.** The rule only tracked `ast.Name` references, so private methods
+  invoked as `self._helper()` (an `ast.Attribute`) were flagged as unused.
+  Refactoring a large function by extracting methods produced bogus "unused"
+  findings — a fix looked like it created new issues (363 → 366 on a real
+  refactor). Both reference-collection passes in
+  `backend/app/analyzers/dead_code.py` now track `Attribute.attr`.
 - The issue detail page no longer offers server-side auto-fix. The primary
   action is now "Generate fix prompt": a deterministic, copyable prompt
   grounded in the finding (repo, file/lines, evidence, rule, requested

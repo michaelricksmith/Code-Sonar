@@ -1,5 +1,12 @@
 ## Unreleased — Prompt-first remediation
 
+- **Fixed: `dead_code:unused-private` false positives on methods called via
+  `self`.** The rule only tracked `ast.Name` references, so private methods
+  invoked as `self._helper()` (an `ast.Attribute`) were flagged as unused.
+  Refactoring a large function by extracting methods produced bogus "unused"
+  findings — a fix looked like it created new issues (363 → 366 on a real
+  refactor). Both reference-collection passes in
+  `backend/app/analyzers/dead_code.py` now track `Attribute.attr`.
 - The issue detail page no longer offers server-side auto-fix. The primary
   action is now "Generate fix prompt": a deterministic, copyable prompt
   grounded in the finding (repo, file/lines, evidence, rule, requested

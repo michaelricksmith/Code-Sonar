@@ -751,21 +751,32 @@ async def get_webhook_deliveries() -> dict[str, Any]:
     return {"count": len(records), "deliveries": [item.to_public_dict() for item in records]}
 
 
-@router.post("/webhook")
-async def github_webhook(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    x_github_event: str | None = Header(default=None),
-    x_github_delivery: str | None = Header(default=None),
-    x_hub_signature_256: str | None = Header(default=None),
-) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class _WebhookContext:
+    """Values extracted from a webhook delivery before any side effects run."""
+
+    event: str
+    delivery: str
+    action: Any
+    installation: GitHubInstallation | None
+    installation_id: int | None
+    full_name: str | None
+    project_id: str | None
+
+
+async def _parse_webhook_payload(
+    request: Request, signature: str | None
+) -> tuple[bytes, Any]:
     body = await request.body()
-    _verify_signature(body, x_hub_signature_256)
+    _verify_signature(body, signature)
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid GitHub webhook payload") from exc
+    return body, payload
 
+
+def _bind_webhook_tenant(payload: Any) -> tuple[int | None, str | None]:
     raw_installation = payload.get("installation") if isinstance(payload, dict) else None
     raw_installation_id = (
         int(raw_installation["id"])
@@ -780,7 +791,15 @@ async def github_webhook(
     # The verified installation ID is the only tenant selector for webhooks.
     # Payload tenant fields and request headers are never consulted.
     bind_tenant(webhook_tenant or _UNASSIGNED_WEBHOOK_TENANT)
+    return raw_installation_id, webhook_tenant
 
+
+def _webhook_event_context(
+    payload: Any,
+    body: bytes,
+    x_github_event: str | None,
+    x_github_delivery: str | None,
+) -> _WebhookContext:
     event = x_github_event or "unknown"
     delivery = x_github_delivery or hashlib.sha256(body).hexdigest()[:24]
     action = payload.get("action") if isinstance(payload, dict) else None
@@ -791,53 +810,72 @@ async def github_webhook(
     project_id = (
         _project_for_repository(full_name, installation_id) if full_name is not None else None
     )
-
-    audit = WebhookAuditRecord(
-        delivery_id=delivery,
+    return _WebhookContext(
         event=event,
-        action=str(action) if action is not None else None,
-        repository_full_name=full_name,
+        delivery=delivery,
+        action=action,
+        installation=installation,
         installation_id=installation_id,
+        full_name=full_name,
         project_id=project_id,
+    )
+
+
+def _build_webhook_audit(context: _WebhookContext) -> WebhookAuditRecord:
+    return WebhookAuditRecord(
+        delivery_id=context.delivery,
+        event=context.event,
+        action=str(context.action) if context.action is not None else None,
+        repository_full_name=context.full_name,
+        installation_id=context.installation_id,
+        project_id=context.project_id,
         accepted=True,
         scan_triggered=False,
         received_at=_utcnow(),
     )
-    if not get_webhook_audit_store().claim(audit):
-        return {
-            "accepted": True,
-            "duplicate": True,
-            "delivery_id": delivery,
-            "scan_triggered": False,
-        }
 
+
+def _sync_webhook_installation(
+    context: _WebhookContext, webhook_tenant: str | None
+) -> None:
+    installation = context.installation
     if installation is not None and webhook_tenant is not None:
-        if event == "installation" and action == "deleted":
+        if context.event == "installation" and context.action == "deleted":
             get_installation_store().remove(installation.installation_id)
             if get_active_installation_id() == installation.installation_id:
                 set_active_installation_id(None)
         else:
             get_installation_store().upsert(installation)
 
-    trigger = False
-    if project_id is not None and event == "push":
-        ref = str(payload.get("ref") or "")
-        project = get_project_store().get(project_id)
-        trigger = project is not None and ref == f"refs/heads/{project.default_branch}"
-    elif project_id is not None and event == "pull_request":
-        pull_request = payload.get("pull_request") or {}
-        trigger = action == "closed" and bool(pull_request.get("merged"))
 
+def _webhook_scan_trigger(context: _WebhookContext, payload: Any) -> bool:
+    if context.project_id is not None and context.event == "push":
+        ref = str(payload.get("ref") or "")
+        project = get_project_store().get(context.project_id)
+        return project is not None and ref == f"refs/heads/{project.default_branch}"
+    if context.project_id is not None and context.event == "pull_request":
+        pull_request = payload.get("pull_request") or {}
+        return context.action == "closed" and bool(pull_request.get("merged"))
+    return False
+
+
+def _dispatch_webhook_scan(
+    context: _WebhookContext,
+    trigger: bool,
+    raw_installation_id: int | None,
+    webhook_tenant: str | None,
+    background_tasks: BackgroundTasks,
+) -> str | None:
     job_id: str | None = None
-    if trigger and project_id is not None:
+    if trigger and context.project_id is not None:
         job = get_webhook_job_store().enqueue(
-            delivery_id=delivery,
-            project_id=project_id,
-            installation_id=installation_id,
+            delivery_id=context.delivery,
+            project_id=context.project_id,
+            installation_id=context.installation_id,
         )
         job_id = job.job_id
         get_webhook_audit_store().update(
-            delivery,
+            context.delivery,
             scan_triggered=True,
             outcome="scan_queued",
             job_id=job_id,
@@ -848,17 +886,45 @@ async def github_webhook(
             "unknown_installation"
             if raw_installation_id is not None and webhook_tenant is None
             else "installation_updated"
-            if event == "installation"
+            if context.event == "installation"
             else "ignored"
         )
-        get_webhook_audit_store().update(delivery, outcome=outcome)
+        get_webhook_audit_store().update(context.delivery, outcome=outcome)
+    return job_id
+
+
+@router.post("/webhook")
+async def github_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_github_event: str | None = Header(default=None),
+    x_github_delivery: str | None = Header(default=None),
+    x_hub_signature_256: str | None = Header(default=None),
+) -> dict[str, Any]:
+    body, payload = await _parse_webhook_payload(request, x_hub_signature_256)
+    raw_installation_id, webhook_tenant = _bind_webhook_tenant(payload)
+    context = _webhook_event_context(payload, body, x_github_event, x_github_delivery)
+
+    if not get_webhook_audit_store().claim(_build_webhook_audit(context)):
+        return {
+            "accepted": True,
+            "duplicate": True,
+            "delivery_id": context.delivery,
+            "scan_triggered": False,
+        }
+
+    _sync_webhook_installation(context, webhook_tenant)
+    trigger = _webhook_scan_trigger(context, payload)
+    job_id = _dispatch_webhook_scan(
+        context, trigger, raw_installation_id, webhook_tenant, background_tasks
+    )
 
     return {
         "accepted": True,
         "duplicate": False,
-        "delivery_id": delivery,
-        "event": event,
-        "project_id": project_id,
+        "delivery_id": context.delivery,
+        "event": context.event,
+        "project_id": context.project_id,
         "scan_triggered": trigger,
         "job_id": job_id,
         "deterministic_score_authority": "code_sonar",

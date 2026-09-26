@@ -6,7 +6,7 @@ refactors, etc.).
 
 Requires:
 - GROQ_API_KEY (or OPENAI_API_KEY) environment variable
-- CODE_SONAR_GROQ_MODEL (optional, defaults to llama-3.3-70b-versatile)
+- CODE_SONAR_GROQ_MODEL (optional, defaults to openai/gpt-oss-120b)
 
 The executor:
 1. Reads the target file
@@ -33,12 +33,16 @@ from app.remediation.contracts import (
 )
 from app.remediation.deterministic import (
     SUPPORTED_RULES as DETERMINISTIC_RULES,
+)
+from app.remediation.deterministic import (
     DeterministicRemediationExecutor,
     _parse_instruction,
 )
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16;
+# openai/gpt-oss-120b is Groq's recommended replacement.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 # Maximum file size to send to the API (characters). Larger files are
 # truncated with a notice to avoid excessive token usage.
@@ -85,6 +89,10 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            # Groq sits behind Cloudflare, which 403s (error code 1010)
+            # requests carrying urllib's default User-Agent before auth
+            # is even checked. Identify the client explicitly.
+            "User-Agent": "Code-Sonar/1.0",
         },
         method="POST",
     )
@@ -99,9 +107,12 @@ def _call_groq(prompt: str, system: str | None = None) -> str:
         raise RuntimeError(f"Groq API connection failed: {exc}") from exc
 
     try:
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"Unexpected Groq API response format: {exc}") from exc
+    if not isinstance(content, str):
+        raise RuntimeError(f"Unexpected Groq API response format: {type(content).__name__}")
+    return content
 
 
 def _extract_code_block(response: str) -> str | None:

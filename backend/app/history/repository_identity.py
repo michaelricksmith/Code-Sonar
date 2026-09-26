@@ -59,6 +59,21 @@ def compute_repository_id(path: Path) -> str:
     return digest[:16]
 
 
+def compute_repository_id_for_slug(slug: str) -> str:
+    """Return a stable 16-char hex repository identity for a repo slug.
+
+    Hosted scans run in a throwaway per-job workspace, so hashing the
+    workspace path would give every scan its own identity and history
+    would never accumulate. The ``owner/name`` slug is stable across
+    scans of the same repository, so it is the right identity key for
+    hosted scan history. Normalized (trimmed, lower-cased) so
+    ``Owner/Name`` and ``owner/name`` resolve to the same history.
+    """
+    canonical = slug.strip().lower()
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
 def display_name(path: Path) -> str:
     """Return a human-readable path for API responses."""
     return _canonicalize_path(path)

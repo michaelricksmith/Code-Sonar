@@ -37,6 +37,21 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+def _error_body(exc: error.HTTPError) -> str:
+    """Best-effort upstream error body, truncated; never contains the key."""
+    try:
+        raw = exc.read(512)
+    except Exception:
+        return "no error body"
+    if not raw:
+        return "no error body"
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return "undecodable error body"
+    return " ".join(text.split())
+
+
 def _single_post(
     url: str, payload: bytes, timeout: float, headers: Mapping[str, str]
 ) -> bytes:
@@ -58,16 +73,20 @@ def _default_transport(
         try:
             return _single_post(url, payload, timeout, headers)
         except error.HTTPError as exc:
-            # Surface the upstream status (401 = bad key, 429 = no credit/quota,
-            # 404 = bad model/base URL) without ever including the key itself.
-            # Transient failures get retried with backoff; auth/config errors
-            # fail fast since another identical attempt cannot succeed.
+            # Surface the upstream status and its error body (401 = bad key,
+            # 403 = revoked key or plan restriction, 404 = bad model/base URL,
+            # 429 = no credit/quota) without ever including the key itself.
+            # The body is provider JSON (e.g. Groq's {"error": {...}}); it
+            # never contains the key. Transient failures get retried with
+            # backoff; auth/config errors fail fast since another identical
+            # attempt cannot succeed.
             if exc.code in _TRANSIENT_STATUS_CODES and attempt < _MAX_ATTEMPTS:
                 last_error = exc
                 time.sleep(2 ** (attempt - 1))
                 continue
             raise RuntimeError(
-                f"OpenAI-compatible request failed (HTTP {exc.code})"
+                f"OpenAI-compatible request failed (HTTP {exc.code}): "
+                f"{_error_body(exc)}"
             ) from exc
         except (error.URLError, TimeoutError) as exc:
             if attempt < _MAX_ATTEMPTS:
@@ -116,6 +135,10 @@ class OpenAICompatibleProvider:
             {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                # Groq sits behind Cloudflare, which 403s (error code 1010)
+                # requests carrying urllib's default User-Agent before auth
+                # is even checked. Identify the client explicitly.
+                "User-Agent": "Code-Sonar/1.0",
             },
         )
 

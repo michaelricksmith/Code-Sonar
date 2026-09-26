@@ -28,11 +28,12 @@ class PersistenceConfig:
 
     @property
     def is_postgresql(self) -> bool:
-        # Render issues postgres:// URLs; both spellings are PostgreSQL.
+        # Render issues postgres:// URLs; SQLAlchemy dialect qualifiers
+        # (postgresql+psycopg:// and friends) are PostgreSQL too.
         return bool(
             self.database_url
             and (
-                self.database_url.startswith("postgresql://")
+                self.database_url.startswith("postgresql")
                 or self.database_url.startswith("postgres://")
             )
         )

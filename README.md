@@ -551,7 +551,7 @@ variables — no secrets are ever committed to the repo:
 | `OPENAI_API_KEY` / `GROQ_API_KEY` / `ANTHROPIC_API_KEY` | Hosted provider keys (server default) |
 | `ASK_SONAR_BASE_URL` / `ASK_SONAR_MODEL` | Override hosted endpoint/model (e.g. Groq: `https://api.groq.com/openai/v1`) |
 | `CODE_SONAR_REMEDIATION_EXECUTOR` | `deterministic` (default, free), `groq` (AI fixes via Groq API), or `cursor` (Cursor Agent CLI) |
-| `CODE_SONAR_GROQ_MODEL` | Model for Groq remediation (default `llama-3.3-70b-versatile`) |
+| `CODE_SONAR_GROQ_MODEL` | Model for Groq remediation (default `openai/gpt-oss-120b`) |
 | `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth

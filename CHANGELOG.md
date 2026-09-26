@@ -1,3 +1,36 @@
+## 2026-09-25 — Groq model swap: llama-3.3-70b-versatile decommissioned
+
+- Root cause of the Ask Sonar / guided-remediation 403s: Groq shut down
+  `llama-3.3-70b-versatile` on 2026-08-16. The key was fine; the model ID
+  was dead, so Groq rejected every call.
+- `ASK_SONAR_MODEL` and new `CODE_SONAR_GROQ_MODEL` on Render now point to
+  `openai/gpt-oss-120b` (Groq's recommended replacement). Production
+  redeployed with the new values.
+- Repo default in `backend/app/remediation/groq.py` updated to match, so
+  future deploys don't inherit the dead model.
+- Score history ("first scan" stuck): hosted scans hashed the throwaway
+  per-job workspace path as the history key, so every scan looked like a
+  first scan and `/api/drift` (which needs a local path) always failed
+  from the hosted UI. Scan jobs now key history by the stable
+  `owner/name` slug, and `/api/drift` falls back to the slug identity
+  when no local path exists. Repeat scans now show a real score delta.
+
+---
+
+## 2026-09-25 — Backend CI green again
+
+- Fixed the `Backend tests + lint` job: ruff import sorting, 7 mypy-strict
+  errors, and 2 failing tests.
+- `is_postgresql` recognizes `postgresql+` dialect qualifiers again
+  (e.g. `postgresql+psycopg://`) — a prior Postgres-wiring change had
+  narrowed it to `postgresql://` and broken shared-mode validation for
+  already-qualified URLs.
+- Default remediation executor is deterministic (free structural fixes);
+  the stale dry-run default assertion in the cursor runtime test was
+  updated.
+
+---
+
 ## 2026-09-25 (late) — Groq key live on production
 
 - `GROQ_API_KEY` is now set in the Render dashboard (key verified working

@@ -11,7 +11,7 @@ OpenAI-compatible API, no local binary so it runs on Render's free tier;
 production env set to `CODE_SONAR_REMEDIATION_EXECUTOR=groq` with
 `ASK_SONAR_PROVIDER=openai`,
 `ASK_SONAR_BASE_URL=https://api.groq.com/openai/v1`,
-`ASK_SONAR_MODEL=llama-3.3-70b-versatile`, and `GROQ_API_KEY` now set in
+`ASK_SONAR_MODEL=openai/gpt-oss-120b`, and `GROQ_API_KEY` now set in
 the Render dashboard — deploy `dep-dar0cph42hec73ch645g` live on commit
 `961c97f`, `/health` ok), and `cursor` (legacy CLI path;
 installed-Cursor host proof still outstanding). Ask Sonar's

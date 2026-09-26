@@ -184,7 +184,12 @@ def _run_job(
     # Deferred imports avoid a circular import with app.main at module load.
     from datetime import datetime, timezone
 
-    from app.history import build_scan_record, compute_repository_id, display_name
+    from app.history import (
+        build_scan_record,
+        compute_repository_id,
+        compute_repository_id_for_slug,
+        display_name,
+    )
     from app.main import _build_scan_response, get_history_store
     from app.scoring.engine import calculate_score
     from app.security import RepositoryValidationError, validate_repo_path
@@ -217,8 +222,17 @@ def _run_job(
 
         persisted_scan_id: str | None = None
         try:
+            # Hosted scans run in a throwaway per-job workspace, so the
+            # workspace path is unique per scan. Key history by the stable
+            # repository slug instead, so repeat scans of the same repo
+            # accumulate and drift/score-delta works.
+            repository_id = (
+                compute_repository_id_for_slug(repository_slug)
+                if repository_slug
+                else compute_repository_id(repo_path)
+            )
             record = build_scan_record(
-                repository_id=compute_repository_id(repo_path),
+                repository_id=repository_id,
                 repository_path=display_name(repo_path),
                 findings=findings,
                 scoring=scoring_result,

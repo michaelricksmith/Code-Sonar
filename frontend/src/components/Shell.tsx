@@ -102,7 +102,14 @@ export function Shell({
                   </div>
                 )}
                 {promptActivity.resolved > 0 && (
-                  <div className="side-detail-row">
+                  <div
+                    className="side-detail-row side-win"
+                    style={{
+                      fontWeight: 700,
+                      color: "var(--good)",
+                      fontSize: 14,
+                    }}
+                  >
                     <span>✓</span>
                     <span>{promptActivity.resolved} verified fixed</span>
                   </div>

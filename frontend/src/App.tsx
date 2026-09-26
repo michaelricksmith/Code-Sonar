@@ -84,6 +84,14 @@ export default function App() {
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [repoLabel, setRepoLabel] = useState<string | null>(null);
   const [drift, setDrift] = useState<DriftResult | null>(null);
+  /** Local scan-over-scan diff (score delta + fixed/new counts), computed
+   *  from the previous in-memory scan. Used when the backend drift API has
+   *  no history to compare (e.g. after a server-side data reset). */
+  const [scanDiff, setScanDiff] = useState<{
+    scoreDelta: number;
+    fixedCount: number;
+    newCount: number;
+  } | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [sonarOpen, setSonarOpen] = useState(false);
@@ -225,12 +233,31 @@ export default function App() {
     if (!repoLabel || rescanning) return;
     setRescanning(true);
     setScanNotice(null);
+    // Capture the previous scan before it is replaced, so we can show a
+    // local score-delta + fixed/new breakdown even when the backend has no
+    // history to compare (e.g. after a server-side data reset).
+    const previous = result;
     try {
       const jobId = await createScanJob(repoLabel);
       const { done } = pollScanJob(jobId, () => undefined);
       const final = await done;
       if (final.status === "error") throw new Error(final.error ?? "Re-scan failed.");
       if (!final.result) throw new Error("Re-scan finished without a result.");
+      if (previous) {
+        const prevIds = new Set(previous.findings.map((f) => f.id));
+        const nextIds = new Set(final.result.findings.map((f) => f.id));
+        let fixedCount = 0;
+        for (const id of prevIds) if (!nextIds.has(id)) fixedCount++;
+        let newCount = 0;
+        for (const id of nextIds) if (!prevIds.has(id)) newCount++;
+        setScanDiff({
+          scoreDelta: final.result.score - previous.score,
+          fixedCount,
+          newCount,
+        });
+      } else {
+        setScanDiff(null);
+      }
       persistScan(final.result, repoLabel);
       setScanNotice(`Re-scanned just now — score ${final.result.score}.`);
       void refreshDrift(repoLabel);
@@ -239,12 +266,13 @@ export default function App() {
     } finally {
       setRescanning(false);
     }
-  }, [repoLabel, rescanning, persistScan, refreshDrift]);
+  }, [repoLabel, rescanning, result, persistScan, refreshDrift]);
 
   const handleAddRepo = useCallback(() => {
     setResult(null);
     setRepoLabel(null);
     setDrift(null);
+    setScanDiff(null);
     try {
       window.localStorage.removeItem(LAST_SCAN_KEY);
     } catch {
@@ -337,6 +365,7 @@ export default function App() {
             result={result}
             repoLabel={repoLabel ?? result.repository}
             drift={drift}
+            scanDiff={scanDiff}
             onOpenIssue={openIssue}
             onOpenSonar={openSonar}
             onRescan={() => void handleRescan()}

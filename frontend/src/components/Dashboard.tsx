@@ -35,6 +35,9 @@ interface DashboardProps {
   result: ScanResponse;
   repoLabel: string;
   drift: DriftResult | null;
+  /** Local scan-over-scan diff, used when the backend drift API has no
+   *  history to compare. Takes precedence only when drift is unavailable. */
+  scanDiff: { scoreDelta: number; fixedCount: number; newCount: number } | null;
   onOpenIssue: (finding: Finding) => void;
   onOpenSonar: (question: string) => void;
   onRescan: () => void;
@@ -133,11 +136,14 @@ function HealthByArea({ result }: { result: ScanResponse }) {
   );
 }
 
-export function Dashboard({ result, repoLabel, drift, onOpenIssue, onOpenSonar, onRescan, onAddRepo, onShowAllIssues }: DashboardProps) {
+export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onOpenSonar, onRescan, onAddRepo, onShowAllIssues }: DashboardProps) {
   const ranked = useMemo(() => rankIssues(result.findings), [result]);
   const top = ranked[0] ?? null;
   const grade = gradeForScore(result.score);
-  const delta = drift?.summary.score_delta ?? null;
+  // Prefer backend drift; fall back to the locally computed scan diff so the
+  // score delta still shows when server history was wiped (e.g. redeploy).
+  const delta = drift?.summary.score_delta ?? scanDiff?.scoreDelta ?? null;
+  const fixedNew = drift == null ? scanDiff : null;
   const files = useMemo(() => riskiestFiles(result.findings), [result]);
   const maxRisk = Math.max(1, ...files.map((f) => f.risk));
   const dist = result.severity_distribution;
@@ -179,6 +185,21 @@ export function Dashboard({ result, repoLabel, drift, onOpenIssue, onOpenSonar, 
           <div className={`score-delta ${delta == null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat"}`}>
             {delta == null ? "First scan — no previous score yet" : deltaText(delta)}
           </div>
+          {fixedNew != null && (fixedNew.fixedCount > 0 || fixedNew.newCount > 0) && (
+            <div className="scan-diff-line" style={{ marginTop: 4, fontSize: 13 }}>
+              {fixedNew.fixedCount > 0 && (
+                <span style={{ color: "var(--good)", fontWeight: 600 }}>
+                  ✓ {fixedNew.fixedCount} fixed
+                </span>
+              )}
+              {fixedNew.fixedCount > 0 && fixedNew.newCount > 0 && <span style={{ color: "var(--muted)" }}> · </span>}
+              {fixedNew.newCount > 0 && (
+                <span style={{ color: "var(--muted)" }}>
+                  {fixedNew.newCount} new
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="score-hero-body">
           <h2>

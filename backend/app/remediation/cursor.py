@@ -12,6 +12,7 @@ from app.remediation.contracts import (
     RemediationExecutionState,
     RemediationRequest,
 )
+from app.security import REMEDIATION_WORKTREES_DIR
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +69,7 @@ class CursorRemediationExecutor:
             )
         self.command_template = command_template
         self.workspace_root = (
-            workspace_root or (Path.home() / ".code-sonar" / "remediation-worktrees")
+            workspace_root or REMEDIATION_WORKTREES_DIR
         ).expanduser().resolve()
         self.runner = runner
         self.timeout_seconds = timeout_seconds

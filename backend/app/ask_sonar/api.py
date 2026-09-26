@@ -7,7 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.ask_sonar.answering import AnswerProviderProtocol, validate_grounded_answer
+from app.ask_sonar.answering import (
+    AnswerProviderProtocol,
+    deterministic_answer,
+    validate_grounded_answer,
+)
 from app.ask_sonar.context import build_grounding_context
 from app.ask_sonar.remediation import build_remediation_plan
 from app.ask_sonar.runtime import (
@@ -138,20 +142,6 @@ async def ask_sonar(
     configured provider answers.
     """
     provider = _resolve_provider(x_ai_provider, x_ai_api_key)
-    if provider is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "ask_sonar_provider_unavailable",
-                "message": (
-                    "No Ask Sonar answer provider is configured. Set "
-                    "ASK_SONAR_PROVIDER=ollama for the self-hosted option, "
-                    "ASK_SONAR_PROVIDER=openai with OPENAI_API_KEY, "
-                    "ASK_SONAR_PROVIDER=anthropic with ANTHROPIC_API_KEY, "
-                    "or pass X-AI-Provider and X-AI-API-Key headers."
-                ),
-            },
-        )
 
     record = _require_scan(request.scan_id)
     context = build_grounding_context(
@@ -161,27 +151,20 @@ async def ask_sonar(
         similar_limit=request.similar_limit,
     )
 
-    try:
-        result = provider.answer(request.question, context)
-        result = validate_grounded_answer(result, context)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "ask_sonar_grounding_violation",
-                "message": str(exc),
-            },
-        ) from exc
-    except Exception as exc:
-        # Include the provider's own error text (upstream HTTP status, never
-        # the API key) so a failed answer is diagnosable from the UI.
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "ask_sonar_provider_failed",
-                "message": f"The configured Ask Sonar provider failed: {exc}",
-            },
-        ) from exc
+    # Ask Sonar never feels broken: if the LLM provider is missing or fails,
+    # answer deterministically from the scan data instead of surfacing a
+    # raw provider error.
+    answer_source = "ai"
+    if provider is None:
+        result = deterministic_answer(request.question, context)
+        answer_source = "deterministic"
+    else:
+        try:
+            result = provider.answer(request.question, context)
+            result = validate_grounded_answer(result, context)
+        except Exception:
+            result = deterministic_answer(request.question, context)
+            answer_source = "deterministic"
 
     return {
         "scan_id": request.scan_id,
@@ -189,6 +172,7 @@ async def ask_sonar(
         "deterministic_score": record.score,
         "deterministic_grade": record.grade,
         "deterministic_score_unchanged": True,
+        "answer_source": answer_source,
         "answer": result.to_dict(),
         "grounding": {
             "context_schema_version": context["context_schema_version"],

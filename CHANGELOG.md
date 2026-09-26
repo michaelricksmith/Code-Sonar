@@ -1,5 +1,9 @@
 ## Unreleased — Prompt-first remediation
 
+- **Ask Sonar never feels broken.** When the LLM provider is missing or fails
+  (e.g. bad API key), Ask Sonar now answers from the deterministic scan data
+  instead of showing a raw error like "Unauthorized". Intent-matched answers
+  for next-steps, break-risk, and summary questions.
 - **Fixed: score now responds to fixes.** The per-category penalty hard cap
   created dead zones where fixing issues didn't move the score (80 fixed,
   score stuck at 540). Now linear up to the cap, then logarithmic growth

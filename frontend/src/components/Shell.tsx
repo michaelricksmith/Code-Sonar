@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 
 import type { User } from "../api/auth";
 
-export type ShellView = "overview" | "issues";
+export type ShellView = "overview" | "issues" | "fixes";
 
 interface ShellProps {
   user: User;
@@ -15,6 +15,7 @@ interface ShellProps {
   repoSub: string | null;
   view: ShellView;
   issueCount: number | null;
+  fixCount: number | null;
   onNavigate: (view: ShellView) => void;
   onSignOut: () => void;
   onOpenSonar: () => void;
@@ -27,6 +28,7 @@ export function Shell({
   repoSub,
   view,
   issueCount,
+  fixCount,
   onNavigate,
   onSignOut,
   onOpenSonar,
@@ -61,6 +63,9 @@ export function Shell({
           </button>
 
           <div className="side-label">Progress</div>
+          <button className={`side-item ${view === "fixes" ? "active" : ""}`} onClick={() => onNavigate("fixes")}>
+            ✓ Fixes{fixCount != null && fixCount > 0 && <span className="count">{fixCount}</span>}
+          </button>
           <button className="side-item" onClick={onOpenSonar}>↗ History</button>
         </div>
 

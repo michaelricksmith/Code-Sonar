@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.history import compute_repository_id_for_slug
 from app.ml.outcomes.labels import remediation_success_label
 from app.ml.outcomes.runtime import get_outcome_store
 from app.ml.outcomes.schema import RemediationOutcome
@@ -30,6 +31,27 @@ class RemediationOutcomeRequest(BaseModel):
     regression_detected: bool = False
     score_delta: int = 0
     debt_points_delta: int = 0
+
+
+@router.get("")
+async def list_remediation_outcomes(
+    repo: str = Query(description="Repository slug (owner/name) or path whose fix log to list"),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Return the newest-first fix log for a repository (read-only).
+
+    The ``repo`` value resolves to the same repository identity that hosted
+    scan jobs persist outcomes under, mirroring ``GET /api/drift``.
+    """
+    repository_id = compute_repository_id_for_slug(repo)
+    outcomes = get_outcome_store().load_all(repository_id)
+    total = len(outcomes)
+    outcomes = sorted(outcomes, key=lambda o: o.attempted_at, reverse=True)[:limit]
+    return {
+        "repository_id": repository_id,
+        "outcomes": [o.to_dict() for o in outcomes],
+        "count": total,
+    }
 
 
 @router.post("")

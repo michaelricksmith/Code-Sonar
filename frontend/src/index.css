@@ -502,3 +502,76 @@ button { font-family: inherit; }
   .cta-band { padding: 52px 28px; }
   .cta-band h2 { font-size: 30px; }
 }
+
+/* ---------- fix log (sidebar "Fixes" view) ---------- */
+
+.fixlog-list { display: grid; gap: 10px; margin-top: 18px; }
+.fixlog-row {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px;
+  animation: fixlog-in 0.35s ease-out backwards;
+}
+.fixlog-row:nth-child(2) { animation-delay: 0.05s; }
+.fixlog-row:nth-child(3) { animation-delay: 0.1s; }
+.fixlog-row:nth-child(4) { animation-delay: 0.15s; }
+.fixlog-row:nth-child(5) { animation-delay: 0.2s; }
+@keyframes fixlog-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.fixlog-badge {
+  width: 34px; height: 34px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: 16px; font-weight: 800;
+}
+.fixlog-badge.ok { background: var(--good-bg); color: #166534; animation: pop 0.4s ease-out; }
+.fixlog-badge.miss { background: var(--bad-bg); color: var(--bad); }
+.fixlog-body { flex: 1; min-width: 0; }
+.fixlog-title { font-weight: 700; font-size: 14.5px; margin-bottom: 5px; }
+.fixlog-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.fixlog-delta { text-align: right; flex: none; }
+.fixlog-delta .delta { display: block; font-size: 20px; font-weight: 800; }
+.fixlog-delta .delta.up { color: #166534; }
+.fixlog-delta .delta.down { color: var(--bad); }
+.fixlog-delta .delta.flat { color: var(--muted); }
+.fixlog-delta .cap { font-size: 11.5px; color: var(--muted); }
+.fixlog-stats { display: flex; gap: 12px; margin-top: 18px; }
+.fixlog-stat {
+  flex: 1; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px; text-align: center;
+}
+.fixlog-stat .num { display: block; font-size: 26px; font-weight: 800; }
+.fixlog-stat .num.good { color: #166534; }
+.fixlog-stat .num.bad { color: var(--bad); }
+.fixlog-stat .cap { font-size: 12px; color: var(--muted); }
+.loading-inline { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; margin: 18px 0; }
+
+/* ---------- remediation run animations ---------- */
+
+@keyframes pop { 0% { transform: scale(0.4); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes ellipsis { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+.track-step.finished .tdot { animation: pop 0.4s ease-out; }
+.track-step.doing .tdot::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 50%;
+  border: 2px solid var(--teal); animation: ripple 1.6s ease-out infinite;
+}
+.track-step { transition: color 0.3s ease; }
+.track-step .tdot { transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
+
+.run-progress {
+  height: 6px; border-radius: 999px; background: #e8e2d4;
+  margin-top: 18px; overflow: hidden;
+}
+.run-progress span {
+  display: block; height: 100%; width: 40%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--teal), #5bd6a0, var(--teal));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite, run-slide 2.2s ease-in-out infinite;
+}
+@keyframes run-slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+
+.run-status { margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.dots::after { content: ""; animation: ellipsis 1.2s steps(1) infinite; }

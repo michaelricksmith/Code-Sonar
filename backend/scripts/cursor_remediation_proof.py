@@ -68,14 +68,18 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
+def _resolve_evidence_path() -> Path:
+    """Parse CLI args and prepare the evidence path (existing files are never overwritten)."""
     args = _parse_args()
     evidence_path = args.evidence.expanduser().resolve()
     if evidence_path.exists():
         raise FileExistsError(f"Evidence file already exists: {evidence_path}")
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    return evidence_path
 
-    code_sonar_root = Path(__file__).resolve().parents[2]
+
+def _verify_clean_checkout(code_sonar_root: Path) -> str:
+    """Verify the Code Sonar checkout is clean and return its commit."""
     code_sonar_commit = _run(
         ["git", "rev-parse", "HEAD"], code_sonar_root
     ).stdout.strip()
@@ -84,15 +88,21 @@ def main() -> int:
     ).stdout
     if code_sonar_status:
         raise RuntimeError("Code Sonar proof checkout must be clean")
+    return code_sonar_commit
 
-    agent_prefix = _cursor_agent_prefix()
+
+def _verify_cursor_version(code_sonar_root: Path, agent_prefix: tuple[str, ...]) -> str:
+    """Verify the Cursor Agent CLI is runnable and return its version."""
     cursor_version = _run(
         [*agent_prefix, "--version"], code_sonar_root
     ).stdout.strip()
     if not cursor_version:
         raise RuntimeError("Cursor Agent CLI version could not be verified")
+    return cursor_version
 
-    proof_root = Path(tempfile.mkdtemp(prefix="code-sonar-cursor-host-proof-"))
+
+def _create_fixture_repository(proof_root: Path) -> tuple[Path, Path]:
+    """Create and commit the minimal fixture repo; return (repository, source)."""
     repository = proof_root / "active"
     repository.mkdir()
     (repository / "src").mkdir()
@@ -116,11 +126,19 @@ def main() -> int:
     _run(["git", "config", "user.email", "proof@code-sonar.local"], repository)
     _run(["git", "add", "."], repository)
     _run(["git", "commit", "-m", "proof baseline"], repository)
+    return repository, source
 
-    active_head_before = _run(["git", "rev-parse", "HEAD"], repository).stdout.strip()
-    active_status_before = _run(["git", "status", "--porcelain"], repository).stdout
-    active_hash_before = hashlib.sha256(source.read_bytes()).hexdigest()
 
+def _capture_active_state(repository: Path, source: Path) -> tuple[str, str, str]:
+    """Snapshot the fixture checkout: git HEAD, git status, and source hash."""
+    head = _run(["git", "rev-parse", "HEAD"], repository).stdout.strip()
+    status = _run(["git", "status", "--porcelain"], repository).stdout
+    file_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    return head, status, file_hash
+
+
+def _run_before_scan(repository: Path, active_head_before: str):
+    """Scan the fixture, locate the TODO target, and record the before state."""
     os.environ["CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH"] = "1"
     before_findings = _scan(repository)
     target = next(
@@ -140,8 +158,16 @@ def main() -> int:
             scan_id="cursor-host-proof-before",
         )
     )
+    return target, history
 
-    worktree_root = proof_root / "remediation-worktrees"
+
+def _build_services(
+    proof_root: Path,
+    worktree_root: Path,
+    agent_prefix: tuple[str, ...],
+    history: InMemoryHistoryStore,
+):
+    """Build the worktree manager, executor, validator, and auth service."""
     workspace_manager = GitWorktreeManager(root=worktree_root)
     executor = CursorRemediationExecutor(
         (
@@ -175,7 +201,12 @@ def main() -> int:
         secret="ephemeral-host-proof-secret",
         ttl_seconds=300,
     )
-    authorization = authorization_service.issue(
+    return workspace_manager, executor, validator, authorization_service
+
+
+def _issue_authorization(authorization_service, repository: Path, target):
+    """Issue the scoped authorization for the fixture's TODO finding."""
+    return authorization_service.issue(
         request_id="cursor-host-proof-request",
         repository_path=str(repository),
         scan_id="cursor-host-proof-before",
@@ -189,28 +220,21 @@ def main() -> int:
             "configuration, dependencies, Git state, or any other file."
         ),
     )
-    orchestrator = RemediationOrchestrator(
-        workspace_manager=workspace_manager,
-        executor=executor,
-        validation_service=validator,
-        authorization_service=authorization_service,
-    )
-    result = orchestrator.run_authorized(authorization)
-    if result.workspace is None or result.execution is None or result.validation is None:
-        raise RuntimeError("Cursor remediation workflow did not reach validation")
 
-    active_head_after = _run(["git", "rev-parse", "HEAD"], repository).stdout.strip()
-    active_status_after = _run(["git", "status", "--porcelain"], repository).stdout
-    active_hash_after = hashlib.sha256(source.read_bytes()).hexdigest()
+
+def _verify_outcome(repository, source, result, workspace_manager, before):
+    """Capture post-remediation state and evaluate isolation, cleanup, success."""
+    before_head, before_status, before_hash = before
+    after_head, after_status, after_hash = _capture_active_state(repository, source)
     branch_remaining = _run(
         ["git", "branch", "--list", result.workspace.branch_name], repository
     ).stdout.strip()
 
     validation = result.validation
     checkout_isolated = (
-        active_head_after == active_head_before
-        and active_status_after == active_status_before
-        and active_hash_after == active_hash_before
+        after_head == before_head
+        and after_status == before_status
+        and after_hash == before_hash
     )
     cleanup_completed = (
         not Path(result.workspace.workspace_path).exists()
@@ -231,14 +255,35 @@ def main() -> int:
             cleanup_completed,
         )
     )
+    return {
+        "validation": validation,
+        "successful": successful,
+        "branch_remaining": branch_remaining,
+        "after": (after_head, after_status, after_hash),
+    }
 
-    evidence = {
+
+def _build_evidence(
+    code_sonar_commit: str,
+    cursor_version: str,
+    before: tuple[str, str, str],
+    result,
+    outcome: dict,
+    workspace_manager: GitWorktreeManager,
+) -> dict:
+    """Assemble the sanitized evidence payload for the proof run."""
+    before_head, before_status, before_hash = before
+    after_head, after_status, after_hash = outcome["after"]
+    validation = outcome["validation"]
+    branch_remaining = outcome["branch_remaining"]
+    repository_id = hashlib.sha256(before_head.encode("utf-8")).hexdigest()[:16]
+    return {
         "schema_version": "1.0",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "code_sonar_commit": code_sonar_commit,
         "cursor_version": cursor_version,
         "executor": result.execution.executor_name,
-        "repository_id": hashlib.sha256(active_head_before.encode("utf-8")).hexdigest()[:16],
+        "repository_id": repository_id,
         "before_scan_id": validation.before_scan_id,
         "after_scan_id": validation.after_scan_id,
         "branch_name": result.workspace.branch_name,
@@ -253,9 +298,9 @@ def main() -> int:
         "debt_points_delta": validation.debt_points_delta,
         "training_label_value": validation.training_label_value,
         "active_checkout": {
-            "head_unchanged": active_head_after == active_head_before,
-            "status_unchanged": active_status_after == active_status_before,
-            "target_hash_unchanged": active_hash_after == active_hash_before,
+            "head_unchanged": after_head == before_head,
+            "status_unchanged": after_status == before_status,
+            "target_hash_unchanged": after_hash == before_hash,
         },
         "cleanup": {
             "worktree_removed": not Path(result.workspace.workspace_path).exists(),
@@ -264,15 +309,53 @@ def main() -> int:
                 workspace_manager.get(result.workspace.workspace_id) is None
             ),
         },
-        "successful": successful,
+        "successful": outcome["successful"],
     }
+
+
+def main() -> int:
+    evidence_path = _resolve_evidence_path()
+    code_sonar_root = Path(__file__).resolve().parents[2]
+    code_sonar_commit = _verify_clean_checkout(code_sonar_root)
+    agent_prefix = _cursor_agent_prefix()
+    cursor_version = _verify_cursor_version(code_sonar_root, agent_prefix)
+
+    proof_root = Path(tempfile.mkdtemp(prefix="code-sonar-cursor-host-proof-"))
+    repository, source = _create_fixture_repository(proof_root)
+    before = _capture_active_state(repository, source)
+    target, history = _run_before_scan(repository, before[0])
+
+    worktree_root = proof_root / "remediation-worktrees"
+    workspace_manager, executor, validator, authorization_service = _build_services(
+        proof_root, worktree_root, agent_prefix, history
+    )
+    authorization = _issue_authorization(authorization_service, repository, target)
+    orchestrator = RemediationOrchestrator(
+        workspace_manager=workspace_manager,
+        executor=executor,
+        validation_service=validator,
+        authorization_service=authorization_service,
+    )
+    result = orchestrator.run_authorized(authorization)
+    if result.workspace is None or result.execution is None or result.validation is None:
+        raise RuntimeError("Cursor remediation workflow did not reach validation")
+
+    outcome = _verify_outcome(repository, source, result, workspace_manager, before)
+    evidence = _build_evidence(
+        code_sonar_commit=code_sonar_commit,
+        cursor_version=cursor_version,
+        before=before,
+        result=result,
+        outcome=outcome,
+        workspace_manager=workspace_manager,
+    )
     evidence_path.write_text(
         json.dumps(evidence, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print(json.dumps(evidence, indent=2, sort_keys=True))
     print(f"Sanitized evidence written to: {evidence_path}")
-    return 0 if successful else 1
+    return 0 if outcome["successful"] else 1
 
 
 if __name__ == "__main__":

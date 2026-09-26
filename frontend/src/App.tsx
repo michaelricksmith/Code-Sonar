@@ -317,6 +317,8 @@ export default function App() {
         onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : view === "fixes" ? "/app/fixes" : "/app")}
         onSignOut={() => void handleSignOut()}
         onOpenSonar={() => openSonar()}
+        onRescan={() => void handleRescan()}
+        rescanning={rescanning}
       >
         {scanNotice && (
           <div className="page" style={{ marginBottom: 4 }}>

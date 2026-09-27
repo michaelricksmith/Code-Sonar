@@ -170,8 +170,8 @@ export function Shell({
           <div className="user-chip" style={{ padding: "0 0 10px" }}>
             {user.avatar_url ? <img src={user.avatar_url} alt="" /> : <span className="brand-mark" style={{ width: 32, height: 32 }} />}
             <span className="who">
-              <b>{user.name}</b>
-              <span>{user.email}</span>
+              <b title={user.name}>{user.name}</b>
+              <span title={user.email}>{user.email}</span>
             </span>
             <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
           </div>

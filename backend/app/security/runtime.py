@@ -32,7 +32,15 @@ DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 )
-WEBHOOK_PATH = "/api/github-app/webhook"
+# Webhook receivers authenticate via their provider's HMAC signature (GitHub
+# hub signature / Stripe webhook signature), not via the app session — they
+# must stay reachable without a Bearer <redacted> or session cookie.
+WEBHOOK_PATHS = frozenset(
+    {
+        "/api/github-app/webhook",
+        "/api/billing/webhook",
+    }
+)
 
 
 def local_dev_enabled() -> bool:
@@ -131,7 +139,7 @@ class ApiBoundaryMiddleware(BaseHTTPMiddleware):
         if (
             request.method != "OPTIONS"
             and request.url.path.startswith("/api/")
-            and request.url.path != WEBHOOK_PATH
+            and request.url.path not in WEBHOOK_PATHS
             and request.url.path not in PUBLIC_AUTH_PATHS
         ):
             credentials = configured_tenant_credentials()

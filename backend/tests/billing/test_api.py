@@ -202,6 +202,24 @@ class TestWebhook:
         )
         assert response.status_code == 400
 
+    def test_webhook_reachable_without_app_auth_in_fail_closed_mode(
+        self, client: TestClient, billing_env: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stripe's servers carry no app session: the webhook must stay
+        reachable when the middleware fails closed (production), or no
+        subscription would ever activate."""
+        monkeypatch.setenv("CODESONAR_LOCAL_DEV", "0")
+        monkeypatch.delenv("CODESONAR_API_TOKEN", raising=False)
+        raw = json.dumps(_event("checkout.session.completed", {})).encode()
+        response = client.post(
+            "/api/billing/webhook",
+            content=raw,
+            headers={"stripe-signature": "t=123,v1=deadbeef"},
+        )
+        assert response.status_code == 400
+        # ...while authenticated-only routes still fail closed.
+        assert client.get("/api/billing/status").status_code == 401
+
     def test_checkout_completed_sets_plan_and_customer(
         self,
         client: TestClient,

@@ -2,6 +2,28 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
+## 2026-09-26 — Stripe billing is live (test mode)
+
+Billing backend (#77) plus two deploy fixes (#78, #79) are merged and
+live on production (deploy `dep-das7h53tqb8s739hojeg`, `/health` 200).
+`#/pricing` serves the $0/$7/$14 tiers; checkout → Stripe → webhook →
+plan flip is wired in test mode with all four `STRIPE_*` env vars set.
+
+Two real bugs were caught by the failed deploys, not the test suite:
+(1) #77's deploy died at startup — `runtime.py` fail-closed on Alembic
+revision `20260926_0003` while the DB had migrated to `20260926_0004`
+(`#78` bumps the pin; every future migration must bump it too, and
+`20260926_0004` is now idempotent/portable across fresh and migrated
+DBs). (2) `ApiBoundaryMiddleware` 401'd Stripe's webhook deliveries
+(they carry no app session), so no subscription would ever activate —
+`/api/billing/webhook` is now exempt alongside the GitHub webhook
+(`#79`, with a fail-closed-mode regression test). Lesson: billing tests
+run in local-dev mode where the middleware passes everything through;
+prod-parity auth behavior needs explicit fail-closed tests.
+
+**Still unverified:** end-to-end test purchase (sign in → pick Hobby/Plus
+→ 4242 card → webhook flips plan → portal → cancel/downgrade to free).
+
 > **Current handoff — 2026-09-25 PDT (late)**
 
 Remediation now has three executors: `deterministic` (default, free

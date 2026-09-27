@@ -1,5 +1,16 @@
 ## Unreleased — Prompt-first remediation
 
+- **Stripe billing deploy fixes.** The #77 deploy failed at startup:
+  `runtime.py` fail-closed on Alembic revision `20260926_0003` after the
+  DB migrated to `20260926_0004` (#78 bumps the required-revision pin —
+  future migrations must bump it too — and makes `20260926_0004`
+  idempotent/portable: fresh DBs already carry `stripe_customer_id`
+  via the live Table definition, and batch mode keeps the add portable
+  across SQLite/PostgreSQL). Separately, `ApiBoundaryMiddleware`
+  401'd Stripe's webhook deliveries (no app session), which would have
+  silently prevented every subscription activation — `/api/billing/webhook`
+  is now exempt as a signature-authenticated webhook path (#79, with a
+  fail-closed-mode regression test).
 - **Stripe billing backend (test-mode ready).** New `/api/billing` surface:
   checkout sessions for the hobby/plus tiers (`POST /checkout`),
   a signature-verified Stripe webhook (`POST /webhook`) that sets the

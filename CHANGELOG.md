@@ -1,5 +1,32 @@
 ## Unreleased — Prompt-first remediation
 
+- **Stripe billing backend (test-mode ready).** New `/api/billing` surface:
+  checkout sessions for the hobby/plus tiers (`POST /checkout`),
+  a signature-verified Stripe webhook (`POST /webhook`) that sets the
+  user's plan + `stripe_customer_id` on `checkout.session.completed`,
+  maps subscription prices to plans on `customer.subscription.updated`,
+  and downgrades to free on `customer.subscription.deleted`
+  (idempotent; unknown events return 200), a customer portal
+  (`POST /portal`), and plan/limits/usage status (`GET /status`, works
+  even with billing disabled). Flat-rate tiers with monthly quotas —
+  free 5 scans / 25 Ask Sonar, hobby 50 / 500, plus 300 / 2000 —
+  enforced as HTTP 402 (`upgrade_required`) on scan-job creation and
+  Ask Sonar; anonymous callers meter against the free tier. Usage
+  counters live in the new `usage_counters` table (Alembic
+  `20260926_0004`, which also adds `users.stripe_customer_id`) with a
+  JSON-file fallback when SQL is not configured. `stripe>=10.0.0`
+  added to backend dependencies; the SDK is imported lazily so the app
+  boots without keys.
+- **Stripe billing frontend.** New `#/pricing` page with the three tier
+  cards ($0/$7/$14) and their exact offerings, upgrade buttons that
+  create a checkout session and redirect to Stripe, a "Manage billing"
+  portal link for paid users, and a friendly notice (not broken
+  buttons) while Stripe keys are unprovisioned. Sidebar "Plan" block
+  shows plan badge plus scans/Ask Sonar usage vs limits from
+  `/api/billing/status`; `?billing=success|cancelled` return URLs show
+  a confirmation banner. API errors now carry HTTP status (`ApiError`)
+  so HTTP 402 `upgrade_required` responses surface a dismissible
+  upgrade nudge on scan creation and Ask Sonar.
 - **OAuth token-exchange errors now surface the provider's real reason.**
   GitHub/Google token-exchange failures previously returned a bare
   `{"detail":"GitHub/Google token exchange failed"}` (HTTP 502), hiding the

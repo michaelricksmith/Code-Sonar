@@ -6,8 +6,10 @@
 import type { ReactNode } from "react";
 
 import type { User } from "../api/auth";
+import { isPaidPlan } from "../api/billing";
+import type { BillingStatus } from "../api/billing";
 
-export type ShellView = "overview" | "issues" | "fixes";
+export type ShellView = "overview" | "issues" | "fixes" | "pricing";
 
 export interface PromptActivity {
   inProgress: number;
@@ -29,6 +31,10 @@ interface ShellProps {
   /** Re-scan the current repo; exposed in the sidebar so it's one tap away on every page. */
   onRescan: () => void;
   rescanning: boolean;
+  /** Billing status for the compact plan/usage block (null while loading or signed out). */
+  billing?: BillingStatus | null;
+  /** Opens the Stripe customer portal; shown for paid plans. */
+  onManageBilling?: () => void;
   children: ReactNode;
 }
 
@@ -45,9 +51,12 @@ export function Shell({
   onOpenSonar,
   onRescan,
   rescanning,
+  billing,
+  onManageBilling,
   children,
 }: ShellProps) {
   const rescanLabel = rescanning ? "↻ Scanning…" : "↻ Re-scan";
+  const paid = isPaidPlan(billing?.plan);
   return (
     <div className="shell">
       <div className="mobile-topbar">
@@ -123,6 +132,38 @@ export function Shell({
               </div>
             )}
           <button className="side-item" onClick={onOpenSonar}>↗ History</button>
+
+          {billing && (
+            <>
+              <div className="side-label">Plan</div>
+              <div className="side-detail" aria-label="Plan usage">
+                <div className="side-detail-row">
+                  <span className={`plan-badge plan-${billing.plan}`}>
+                    {billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
+                  </span>
+                  <a className="side-link" href="#/pricing" title="See plans">
+                    {paid ? "Plans" : "Upgrade"}
+                  </a>
+                </div>
+                <div className="side-detail-row">
+                  <span>◈</span>
+                  <span>Scans {billing.usage.scans_used}/{billing.limits.scans_per_month}</span>
+                </div>
+                <div className="side-detail-row">
+                  <span>✦</span>
+                  <span>Ask Sonar {billing.usage.ask_sonar_used}/{billing.limits.ask_sonar_per_month}</span>
+                </div>
+                {paid && onManageBilling && (
+                  <div className="side-detail-row">
+                    <span>⚙</span>
+                    <button className="side-link-btn" onClick={onManageBilling}>
+                      Manage billing
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="side-foot">

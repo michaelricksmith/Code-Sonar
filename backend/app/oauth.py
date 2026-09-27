@@ -26,7 +26,7 @@ import secrets
 import sys
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
@@ -211,6 +211,7 @@ class OAuthUser:
     github_username: str = ""
     google_sub: str = ""
     plan: str = "free"
+    stripe_customer_id: str = ""
     status: str = "active"
     is_admin: bool = False
     last_login_at: str = ""
@@ -249,6 +250,13 @@ class UserStore(Protocol):
         github_access_token: str = "",
         github_username: str = "",
     ) -> OAuthUser: ...
+    def set_billing(self, user_id: str, *, plan: str, stripe_customer_id: str) -> OAuthUser | None:
+        """Update a user's billing plan (and Stripe customer id when given).
+
+        An empty ``stripe_customer_id`` preserves the existing value.
+        Returns the updated user, or None when the user does not exist.
+        """
+        ...
 
 
 class OAuthUserStore:
@@ -322,6 +330,7 @@ class OAuthUserStore:
                         if provider == "google"
                         else existing.google_sub,
                         plan=existing.plan,
+                        stripe_customer_id=existing.stripe_customer_id,
                         status=existing.status,
                         is_admin=existing.is_admin,
                         last_login_at=now,
@@ -347,6 +356,23 @@ class OAuthUserStore:
             records.append(user)
             self._save(records)
             return user
+
+    def set_billing(self, user_id: str, *, plan: str, stripe_customer_id: str) -> OAuthUser | None:
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(
+                        existing,
+                        plan=plan,
+                        stripe_customer_id=stripe_customer_id or existing.stripe_customer_id,
+                        updated_at=now,
+                    )
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
 
 
 _user_store: UserStore = OAuthUserStore()

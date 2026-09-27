@@ -9,6 +9,7 @@
  */
 
 import type { ScanResponse } from "./analyzers";
+import { decodeOrThrow } from "./errors";
 
 export type ScanJobStatus = "queued" | "running" | "done" | "error";
 
@@ -21,9 +22,7 @@ export interface ScanJobState {
 }
 
 async function decode(res: Response, fallback: string): Promise<any> {
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.detail ?? data?.error ?? `${fallback} (HTTP ${res.status})`);
-  return data;
+  return decodeOrThrow(res, fallback);
 }
 
 export async function createScanJob(repo: string, branch?: string): Promise<string> {

@@ -12,6 +12,7 @@ import { fetchAuthRepos, normalizeRepoInput } from "../api/auth";
 import type { RepoOption } from "../api/auth";
 import { createScanJob, pollScanJob } from "../api/scanJobs";
 import type { ScanJobState } from "../api/scanJobs";
+import { isQuotaError } from "../api/errors";
 import { GRADE_TONE, GRADE_WORDS, gradeForScore, timeAgo, verdictForScore } from "../copy";
 import { ScoreDial } from "./ScoreDial";
 
@@ -20,6 +21,8 @@ type Step = "pick" | "scanning" | "revealing";
 interface OnboardingWizardProps {
   userName: string;
   onComplete: (result: ScanResponse, repoLabel: string) => void;
+  /** Called with the error when the first scan hits a 402 quota limit. */
+  onQuotaExceeded?: (e: unknown) => void;
 }
 
 const HUMAN_STEPS = [
@@ -33,7 +36,7 @@ function shortRepoName(fullName: string): string {
   return parts[parts.length - 1] ?? fullName;
 }
 
-export function OnboardingWizard({ userName, onComplete }: OnboardingWizardProps) {
+export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: OnboardingWizardProps) {
   const [step, setStep] = useState<Step>("pick");
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [reposLoading, setReposLoading] = useState(true);
@@ -95,7 +98,11 @@ export function OnboardingWizard({ userName, onComplete }: OnboardingWizardProps
       setRevealResult(final.result);
       revealThenComplete(final.result, repo);
     } catch (e) {
-      setScanError(e instanceof Error ? e.message : String(e));
+      if (onQuotaExceeded && isQuotaError(e)) {
+        onQuotaExceeded(e);
+      } else {
+        setScanError(e instanceof Error ? e.message : String(e));
+      }
       setStep("pick");
     }
   }

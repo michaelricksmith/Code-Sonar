@@ -45,6 +45,14 @@
 - The Fixes log surfaces copied prompts as "Fix in progress" entries.
 - The server-side auto-apply machinery in `backend/app/remediation/` is
   parked, not deleted.
+- **Docs: working Google OAuth configuration recorded.** Following the
+  verified end-to-end browser login on 2026-09-26, the working OAuth setup
+  (client ID, redirect URI, Render env vars, and three durable lessons from
+  the `invalid_client` debug loop — one client per project, prefer the
+  Render API for env vars, verify a redeploy follows env changes) is
+  documented in `CODE_SONAR_HANDOFF.md`. This entry builds on PR #75's
+  provider-error surfacing, which named the mismatch that was hiding behind
+  the generic failure message.
 
 ---
 

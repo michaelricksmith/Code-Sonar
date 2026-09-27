@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import sys
@@ -37,6 +38,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 _SESSION_COOKIE = "sonar_session"
 _SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -412,6 +415,33 @@ async def google_login() -> RedirectResponse:
     return RedirectResponse(url=f"{_GOOGLE_AUTHORIZE_URL}?{params}", status_code=302)
 
 
+def _exchange_error_detail(
+    provider: str, status: int, payload: dict[str, Any]
+) -> str:
+    """Build an honest token-exchange failure detail from the provider's body.
+
+    OAuth token endpoints return ``error`` / ``error_description`` on failure
+    (RFC 6749 §5.2); surfacing them ends blind debugging loops. The client
+    secret is never logged or returned here.
+    """
+    base = f"{provider} token exchange failed"
+    error = str(payload.get("error") or "")[:80]
+    description = str(payload.get("error_description") or "")[:200]
+    if not error and not description:
+        return base
+    logger.warning(
+        "%s token exchange failed: http_status=%s error=%r description=%r",
+        provider,
+        status,
+        error,
+        description,
+    )
+    detail = f"{base}: {error}" if error else base
+    if description:
+        detail = f"{detail} ({description})"
+    return detail
+
+
 def _exchange_github_code(config: OAuthConfig, code: str) -> str:
     status, payload = _http_post(
         _GITHUB_TOKEN_URL,
@@ -425,7 +455,9 @@ def _exchange_github_code(config: OAuthConfig, code: str) -> str:
     )
     token = str(payload.get("access_token", ""))
     if status != 200 or not token:
-        raise HTTPException(status_code=502, detail="GitHub token exchange failed")
+        raise HTTPException(
+            status_code=502, detail=_exchange_error_detail("GitHub", status, payload)
+        )
     return token
 
 
@@ -456,7 +488,9 @@ def _exchange_google_code(config: OAuthConfig, code: str) -> str:
     )
     token = str(payload.get("access_token", ""))
     if status != 200 or not token:
-        raise HTTPException(status_code=502, detail="Google token exchange failed")
+        raise HTTPException(
+            status_code=502, detail=_exchange_error_detail("Google", status, payload)
+        )
     return token
 
 

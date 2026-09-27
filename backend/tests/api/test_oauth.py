@@ -197,6 +197,84 @@ class TestGoogleFlow:
         assert stored.github_access_token == ""
 
 
+class TestTokenExchangeErrorSurfacing:
+    @pytest.fixture
+    def failing_token_http(self, oauth_env: None):
+        """Fake transport whose token endpoints fail with a provider error body."""
+
+        def fake_post(url: str, body: dict[str, Any], headers: dict[str, str]):
+            if "oauth2.googleapis.com/token" in url or "github.com/login/oauth/access_token" in url:
+                return 401, {
+                    "error": "invalid_client",
+                    "error_description": "Unauthorized",
+                }
+            raise AssertionError(f"unexpected POST {url}")
+
+        def fake_get(url: str, headers: dict[str, str]):
+            raise AssertionError(f"unexpected GET {url}")
+
+        previous_post, previous_get = oauth._http_post, oauth._http_get
+        set_oauth_transport(fake_post, fake_get)
+        yield
+        set_oauth_transport(previous_post, previous_get)
+
+    @pytest.fixture
+    def empty_token_http(self, oauth_env: None):
+        """Fake transport whose token endpoints fail with an empty body."""
+
+        def fake_post(url: str, body: dict[str, Any], headers: dict[str, str]):
+            if "oauth2.googleapis.com/token" in url or "github.com/login/oauth/access_token" in url:
+                return 401, {}
+            raise AssertionError(f"unexpected POST {url}")
+
+        def fake_get(url: str, headers: dict[str, str]):
+            raise AssertionError(f"unexpected GET {url}")
+
+        previous_post, previous_get = oauth._http_post, oauth._http_get
+        set_oauth_transport(fake_post, fake_get)
+        yield
+        set_oauth_transport(previous_post, previous_get)
+
+    def test_google_exchange_surfaces_provider_error(
+        self, client, failing_token_http, oauth_store
+    ):
+        state = new_state(_TEST_SECRET)
+        response = client.get(
+            "/api/auth/google/callback",
+            params={"code": "google-code", "state": state},
+            follow_redirects=False,
+        )
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        assert "invalid_client" in detail
+        assert detail == "Google token exchange failed: invalid_client (Unauthorized)"
+
+    def test_github_exchange_surfaces_provider_error(
+        self, client, failing_token_http, oauth_store
+    ):
+        state = new_state(_TEST_SECRET)
+        response = client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            follow_redirects=False,
+        )
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        assert detail == "GitHub token exchange failed: invalid_client (Unauthorized)"
+
+    def test_google_exchange_falls_back_on_empty_body(
+        self, client, empty_token_http, oauth_store
+    ):
+        state = new_state(_TEST_SECRET)
+        response = client.get(
+            "/api/auth/google/callback",
+            params={"code": "google-code", "state": state},
+            follow_redirects=False,
+        )
+        assert response.status_code == 502
+        assert response.json()["detail"] == "Google token exchange failed"
+
+
 class TestSession:
     def test_me_returns_public_profile(self, client, oauth_http, oauth_store):
         state = new_state(_TEST_SECRET)

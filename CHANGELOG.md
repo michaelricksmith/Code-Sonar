@@ -1,5 +1,12 @@
 ## Unreleased — Prompt-first remediation
 
+- **OAuth token-exchange errors now surface the provider's real reason.**
+  GitHub/Google token-exchange failures previously returned a bare
+  `{"detail":"GitHub/Google token exchange failed"}` (HTTP 502), hiding the
+  upstream `error` / `error_description` (e.g. `invalid_client`). Both
+  exchange functions now log the provider's error and include it in the
+  response detail, falling back to the plain message when the provider
+  gives none. No secrets are logged.
 - **Database-backed user accounts.** OAuth sign-in now stores accounts in
   the `users` table (Alembic `20260926_0003`) instead of only the ephemeral
   JSON file: GitHub/Google identities link to one account by normalized

@@ -57,21 +57,30 @@ export function PricingView({ user, billing, billingLoading }: PricingViewProps)
       return;
     }
     if (!isCheckoutTier(pending)) return;
+    // Wait for billing status before deciding: billing starts null with
+    // loading=false on first paint, and consuming the key before the plan
+    // is known would silently drop the checkout. The key stays put until
+    // the plan is known, so a slow billing fetch can't swallow it.
+    if (billing === null) return;
     try {
       window.sessionStorage.removeItem(PENDING_CHECKOUT_TIER_KEY);
     } catch {
       // best-effort
     }
-    // Already on a paid plan (or billing status unknown): don't auto-start
-    // anything — just show the tiers and let the visitor choose.
-    if (billing?.plan !== "free") return;
+    // Already on a paid plan: nothing to buy, just show the tiers.
+    if (billing.plan !== "free") return;
     void handleUpgrade(pending);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, billingLoading]);
+  }, [user, billingLoading, billing]);
 
   async function handleUpgrade(tier: CheckoutTier): Promise<void> {
     setNotice(null);
     setCheckingOut(tier);
+    try {
+      // An explicit upgrade click supersedes any remembered one.
+      window.sessionStorage.removeItem(PENDING_CHECKOUT_TIER_KEY);
+    } catch {
+      // best-effort
+    }
     try {
       window.location.href = await createCheckout(tier);
     } catch (e) {

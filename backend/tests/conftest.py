@@ -19,6 +19,22 @@ def explicit_test_development_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CODESONAR_API_TENANT_TOKENS", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def isolated_usage_store(tmp_path: Path) -> Generator[None, None, None]:
+    """Give every test a fresh billing usage store (JSON in tmp_path).
+
+    Scan-job and Ask Sonar endpoints meter usage into the process-wide
+    store; without isolation, counters would leak between tests (and
+    across runs via ~/.code-sonar/) and quota tests would be order
+    dependent. Billing tests override this with their own store.
+    """
+    from app.billing.usage import UsageStore, set_usage_store
+
+    set_usage_store(UsageStore(path=tmp_path / "usage-counters.json"))
+    yield
+    set_usage_store(None)
+
+
 @pytest.fixture
 def test_repo_fixture() -> Generator[Path, None, None]:
     """Create a temporary test repository with known files.

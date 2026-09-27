@@ -598,6 +598,7 @@ class SqlUserStore:
             github_username=row["github_username"] or "",
             google_sub=row["google_sub"] or "",
             plan=row["plan"] or PLAN_FREE,
+            stripe_customer_id=row["stripe_customer_id"] or "",
             status=row["status"] or STATUS_ACTIVE,
             is_admin=bool(row["is_admin"]),
             last_login_at=row["last_login_at"] or "",
@@ -804,6 +805,24 @@ class SqlUserStore:
                 raise LookupError("User not found")
             return self._get_or_raise(connection, user_id)
 
+    def set_billing(self, user_id: str, *, plan: str, stripe_customer_id: str) -> OAuthUser | None:
+        """Update a user's billing plan (and Stripe customer id when given).
+
+        An empty ``stripe_customer_id`` preserves the existing value.
+        Returns the updated user, or None when the user does not exist.
+        """
+        with self.engine.begin() as connection:
+            exists = connection.execute(
+                select(users.c.id).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+            if exists is None:
+                return None
+            values: dict[str, Any] = {"plan": plan, "updated_at": _utcnow_iso()}
+            if stripe_customer_id:
+                values["stripe_customer_id"] = stripe_customer_id
+            connection.execute(update(users).where(users.c.id == user_id).values(**values))
+            return self._get_or_raise(connection, user_id)
+
     # -- legacy import ------------------------------------------------
 
     def import_legacy_json(self, path: Path) -> int:
@@ -852,6 +871,7 @@ class SqlUserStore:
                         avatar_url=record.avatar_url,
                         provider=record.provider,
                         plan=record.plan or PLAN_FREE,
+                        stripe_customer_id=record.stripe_customer_id or None,
                         status=record.status or STATUS_ACTIVE,
                         is_admin=bool(record.is_admin),
                         github_token_ciphertext=self._encrypt_token(

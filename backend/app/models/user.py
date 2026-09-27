@@ -45,6 +45,9 @@ users = Table(
     # columns are authoritative for login matching).
     Column("provider", String(32), nullable=False, default=""),
     Column("plan", String(32), nullable=False, default=PLAN_FREE),
+    # Stripe customer id for the billing subscription; NULL until the
+    # user checks out. Unique where present.
+    Column("stripe_customer_id", String(255), unique=True),
     Column("status", String(32), nullable=False, default=STATUS_ACTIVE),
     Column("is_admin", Boolean, nullable=False, default=False),
     # OAuth tokens are encrypted at rest; see app.persistence.crypto.

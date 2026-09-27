@@ -69,6 +69,23 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Google OAuth sign-in verified working end-to-end 2026-09-26 (browser
+  login by the owner; production `/health` 200). Working configuration:
+  Google Cloud project "Code sonar" (free tier, no billing), OAuth client
+  `64683181748-h1udg7k0qe10v10k5jue1tg9bgdf5la6.apps.googleusercontent.com`
+  (client ID is public-by-design — it appears in auth URLs — so it is
+  recorded here; the secret is not), authorized redirect URI
+  `https://code-sonar.onrender.com/api/auth/google/callback`, and Render
+  env vars `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` set via
+  the Render API (`~/workspace/skills/render/bin/render-env.py`).
+  Durable lessons from the debug loop that preceded it: (a) keep exactly
+  one OAuth client per Google Cloud project — a second client's secret
+  paired with the first client's ID produced a bare `invalid_client`
+  failure; if a spare client exists in the console, delete it; (b) Render
+  dashboard env-var edits can silently not save — prefer the Render API
+  and verify the stored value afterwards; (c) Render API env-var PUTs did
+  not visibly auto-trigger a redeploy in this session — always check the
+  deploy list afterwards and trigger a manual deploy if none appears.
 - Database-backed user accounts: `users` table (Alembic `20260926_0003`)
   with per-email cross-provider identity linking, AES-GCM-encrypted GitHub
   tokens, `last_login_at` tracking, suspended-account rejection at login and

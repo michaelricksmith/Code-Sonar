@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Finding } from "../api/analyzers";
 import { askSonar } from "../api/askSonar";
 import type { AiProvider } from "../api/askSonar";
+import { isQuotaError } from "../api/errors";
 import { copy } from "../copy";
 import { issueCardTitle } from "../copy/issues";
 
@@ -34,6 +35,10 @@ interface AskSonarDrawerProps {
   apiKey: string;
   onProviderChange: (name: string) => void;
   onApiKeyChange: (key: string) => void;
+  /** Called with the error when Ask Sonar answers 402 (quota exceeded). */
+  onQuotaExceeded?: (e: unknown) => void;
+  /** Called after an answer lands successfully (e.g. to refresh usage). */
+  onAnswered?: () => void;
 }
 
 const SUGGESTED = [
@@ -59,6 +64,8 @@ export function AskSonarDrawer({
   onOpenIssue,
   providerName,
   apiKey,
+  onQuotaExceeded,
+  onAnswered,
 }: AskSonarDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -113,8 +120,14 @@ export function AskSonarDrawer({
         ...m,
         { role: "sonar", text: res.answer.answer, citations: res.answer.used_sources },
       ]);
+      onAnswered?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (onQuotaExceeded && isQuotaError(e)) {
+        // Quota nudge modal carries the message; keep the drawer quiet.
+        onQuotaExceeded(e);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setAsking(false);
     }

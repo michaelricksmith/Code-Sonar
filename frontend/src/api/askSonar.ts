@@ -1,3 +1,5 @@
+import { ApiError, decodeOrThrow } from "./errors";
+
 export type RemediationRisk = "low" | "medium" | "high" | "critical";
 
 export interface AskSonarStatus {
@@ -118,14 +120,19 @@ const API_BASE = "/api/ask-sonar";
 
 async function decodeError(res: Response, fallback: string): Promise<Error> {
   try {
-    const data = await res.json();
-    const detail = data?.detail;
-    if (typeof detail === "string") return new Error(detail);
-    if (detail && typeof detail.message === "string") return new Error(detail.message);
-  } catch {
-    // Fall through to the stable fallback below.
+    return await decodeOrThrow(res, fallback);
+  } catch (e) {
+    // Preserve the old friendly message shape for plain Error consumers;
+    // ApiError still carries status + body for quota handling.
+    if (e instanceof ApiError) {
+      const body = e.body as { detail?: unknown } | null;
+      if (typeof body?.detail === "string") return new ApiError(e.status, body.detail, body);
+      if (body && typeof (body as { message?: unknown }).message === "string") {
+        return new ApiError(e.status, (body as { message: string }).message, body);
+      }
+    }
+    throw e;
   }
-  return new Error(`${fallback} (HTTP ${res.status})`);
 }
 
 export async function fetchAskSonarStatus(): Promise<AskSonarStatus> {

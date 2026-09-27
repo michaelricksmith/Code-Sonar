@@ -595,3 +595,66 @@ button { font-family: inherit; }
 
 .run-status { margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--ink); }
 .dots::after { content: ""; animation: ellipsis 1.2s steps(1) infinite; }
+
+/* ---------- Pricing page ---------- */
+.pricing-grid { margin-top: 30px; align-items: stretch; }
+.pricing-card { position: relative; display: flex; flex-direction: column; }
+.pricing-popular { border: 2px solid var(--teal); box-shadow: 0 12px 30px rgba(11, 124, 123, 0.12); }
+.pricing-flag {
+  position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+  background: var(--teal); color: #fff; font-size: 11.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 14px; border-radius: 999px;
+  white-space: nowrap;
+}
+.pricing-current {
+  align-self: flex-start; background: var(--teal-soft); color: var(--teal-deep);
+  border: 1px solid var(--teal-line); font-size: 11.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 12px; border-radius: 999px;
+  margin-bottom: 12px;
+}
+.pricing-price { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; margin: 6px 0 4px; }
+.pricing-price span { font-size: 14px; font-weight: 500; color: var(--muted); }
+.pricing-tagline { font-size: 14px; color: var(--muted); margin-bottom: 18px; }
+.pricing-features { list-style: none; margin: 0 0 24px; padding: 0; flex: 1; }
+.pricing-features li { display: flex; gap: 10px; font-size: 14px; padding: 6px 0; color: var(--ink); }
+.pricing-check {
+  flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--good-bg);
+  color: var(--good); font-size: 12px; font-weight: 700; display: grid; place-items: center;
+  margin-top: 2px;
+}
+
+/* ---------- Sidebar plan block ---------- */
+.plan-badge {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface-warm); color: var(--muted);
+}
+.plan-badge.plan-hobby { background: var(--teal-soft); border-color: var(--teal-line); color: var(--teal-deep); }
+.plan-badge.plan-plus { background: #fdf3e3; border-color: #f0dfc0; color: #92400e; }
+.side-link { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--teal); text-decoration: none; }
+.side-link:hover { text-decoration: underline; }
+.side-link-btn {
+  background: none; border: none; padding: 0; font-size: 12.5px; font-weight: 600;
+  color: var(--teal); cursor: pointer; font-family: inherit;
+}
+.side-link-btn:hover { text-decoration: underline; }
+
+/* ---------- Upgrade nudge modal ---------- */
+.modal-veil {
+  position: fixed; inset: 0; background: rgba(20, 26, 35, 0.45); z-index: 90;
+  display: grid; place-items: center; padding: 24px;
+  animation: modal-in 0.16s ease-out;
+}
+.modal-card {
+  background: var(--surface); border-radius: 20px; box-shadow: var(--shadow-lg);
+  max-width: 420px; width: 100%; padding: 32px 30px; text-align: center;
+  border: 1px solid var(--line);
+}
+.modal-ico {
+  width: 52px; height: 52px; border-radius: 16px; background: var(--ok-bg);
+  display: grid; place-items: center; font-size: 24px; margin: 0 auto 16px;
+}
+.modal-card h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 10px; }
+.modal-card p { font-size: 14.5px; color: var(--muted); line-height: 1.6; margin-bottom: 22px; }
+.modal-actions { display: flex; gap: 10px; justify-content: center; }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

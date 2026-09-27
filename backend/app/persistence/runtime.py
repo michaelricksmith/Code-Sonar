@@ -141,7 +141,9 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
             revision = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one_or_none()
-        if revision != "20260926_0003":
+        # Bump this revision pin every time a new Alembic migration ships:
+        # startup fails closed when the database is not exactly here.
+        if revision != "20260926_0004":
             raise RuntimeError("Database schema is not at required Alembic revision")
     persistence = PersistenceUnitOfWork(engine, encryption)
 

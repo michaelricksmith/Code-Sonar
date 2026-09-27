@@ -22,6 +22,10 @@ import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
+import { fetchBillingStatus, openPortal } from "./api/billing";
+import type { BillingStatus } from "./api/billing";
+import { isQuotaError } from "./api/errors";
+import type { ApiError, QuotaErrorBody } from "./api/errors";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
 import { fetchFixLog } from "./api/outcomes";
 import { fetchPromptStatus } from "./api/prompts";
@@ -32,6 +36,8 @@ import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
 import { LandingPage } from "./components/LandingPage";
 import { OnboardingWizard } from "./components/OnboardingWizard";
+import { PricingView } from "./components/PricingView";
+import { UpgradeNudge } from "./components/UpgradeNudge";
 import { Shell, SonarFab } from "./components/Shell";
 import type { ShellView } from "./components/Shell";
 import { timeAgo } from "./copy";
@@ -41,7 +47,8 @@ type Route =
   | { name: "app" }
   | { name: "issues" }
   | { name: "issue"; id: string }
-  | { name: "fixes" };
+  | { name: "fixes" }
+  | { name: "pricing" };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -51,6 +58,7 @@ function parseRoute(): Route {
     return { name: "app" };
   }
   if (hash === "" || hash === "/") return { name: "landing" };
+  if (hash === "/pricing") return { name: "pricing" };
   if (hash === "/app") return { name: "app" };
   if (hash === "/app/issues") return { name: "issues" };
   if (hash === "/app/fixes") return { name: "fixes" };
@@ -108,6 +116,21 @@ export default function App() {
   const [providersError, setProvidersError] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState("");
   const [aiKey, setAiKey] = useState("");
+  // Billing: plan + usage for the sidebar quota block and pricing page.
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  /** Bumped after scans/asks complete so the usage block refreshes. */
+  const [usageTick, setUsageTick] = useState(0);
+  /** Stripe redirect banner: billing=success|cancelled in the query string. */
+  const [billingBanner, setBillingBanner] = useState<"success" | "cancelled" | null>(null);
+  /** 402 quota nudge modal payload. */
+  const [quotaNudge, setQuotaNudge] = useState<{
+    kind: "scans" | "ask_sonar";
+    plan: string;
+    limit: number;
+    used: number;
+  } | null>(null);
+  const [portalError, setPortalError] = useState<string | null>(null);
 
   // Auth check on boot.
   useEffect(() => {
@@ -153,6 +176,44 @@ export default function App() {
       .catch((e) => setProvidersError(e instanceof Error ? e.message : String(e)));
   }, [user]);
 
+  // Billing status: plan + usage for the sidebar quota block and pricing.
+  // Refreshed on navigation and whenever usage may have changed (usageTick).
+  useEffect(() => {
+    if (!user) {
+      setBilling(null);
+      return;
+    }
+    let cancelled = false;
+    setBillingLoading(true);
+    fetchBillingStatus()
+      .then((status) => {
+        if (!cancelled) setBilling(status);
+      })
+      .catch(() => {
+        // Billing is informational; the app works without it.
+        if (!cancelled) setBilling(null);
+      })
+      .finally(() => {
+        if (!cancelled) setBillingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, route.name, usageTick]);
+
+  // Stripe redirect: {site}/app?billing=success (or /pricing?billing=cancelled).
+  // Hash routing is unaffected; read the query string once on mount and clear it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("billing");
+    if (result === "success" || result === "cancelled") {
+      setBillingBanner(result);
+      window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+      // A successful payment may have changed the plan — refresh usage.
+      if (result === "success") setUsageTick((t) => t + 1);
+    }
+  }, []);
+
   // Fix-log badge + prompt-first fix activity for the sidebar.
   useEffect(() => {
     if (!user || !repoLabel) {
@@ -197,7 +258,8 @@ export default function App() {
   // Route guards.
   useEffect(() => {
     if (!authChecked) return;
-    if (!user && route.name !== "landing") navigate("/");
+    // Pricing is public: signed-out visitors can read the tiers.
+    if (!user && route.name !== "landing" && route.name !== "pricing") navigate("/");
     if (user && route.name === "landing") navigate("/app");
   }, [authChecked, user, route.name]);
 
@@ -224,10 +286,44 @@ export default function App() {
       persistScan(scanResult, label);
       setDrift(null);
       void refreshDrift(label);
+      // The first scan consumed quota — refresh the sidebar usage block.
+      setUsageTick((t) => t + 1);
       navigate("/app");
     },
     [persistScan, refreshDrift],
   );
+
+  /**
+   * Opens the 402 upgrade nudge when `e` is a billing quota error.
+   * Returns true when the error was handled (callers should skip their
+   * own error display in that case).
+   */
+  const handleQuotaError = useCallback((e: unknown): boolean => {
+    if (!isQuotaError(e)) return false;
+    const err = e as ApiError;
+    const body = (err.body ?? {}) as QuotaErrorBody;
+    setQuotaNudge({
+      kind: err.quotaKind ?? "scans",
+      plan: typeof body.plan === "string" ? body.plan : "",
+      limit: typeof body.limit === "number" ? body.limit : 0,
+      used: typeof body.used === "number" ? body.used : 0,
+    });
+    return true;
+  }, []);
+
+  const handleManageBilling = useCallback(async () => {
+    setPortalError(null);
+    try {
+      window.location.href = await openPortal();
+    } catch (e) {
+      setPortalError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const handleAskAnswered = useCallback(() => {
+    // An answer consumed Ask Sonar quota — refresh the sidebar usage block.
+    setUsageTick((t) => t + 1);
+  }, []);
 
   const handleRescan = useCallback(async () => {
     if (!repoLabel || rescanning) return;
@@ -262,11 +358,15 @@ export default function App() {
       setScanNotice(`Re-scanned just now — score ${final.result.score}.`);
       void refreshDrift(repoLabel);
     } catch (e) {
-      setScanNotice(e instanceof Error ? e.message : String(e));
+      if (!handleQuotaError(e)) {
+        setScanNotice(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setRescanning(false);
+      // A scan consumed quota — refresh the sidebar usage block.
+      setUsageTick((t) => t + 1);
     }
-  }, [repoLabel, rescanning, result, persistScan, refreshDrift]);
+  }, [repoLabel, rescanning, result, persistScan, refreshDrift, handleQuotaError]);
 
   const handleAddRepo = useCallback(() => {
     setResult(null);
@@ -325,10 +425,27 @@ export default function App() {
     );
   }
 
-  if (!user) return <LandingPage />;
+  if (!user) {
+    // Pricing is public: signed-out visitors can read the tiers and are
+    // pointed at sign-in when they try to upgrade.
+    if (route.name === "pricing") {
+      return (
+        <div className="main">
+          <PricingView user={null} billing={null} billingLoading={false} />
+        </div>
+      );
+    }
+    return <LandingPage />;
+  }
 
   const shellView: ShellView =
-    route.name === "issues" || route.name === "issue" ? "issues" : route.name === "fixes" ? "fixes" : "overview";
+    route.name === "issues" || route.name === "issue"
+      ? "issues"
+      : route.name === "fixes"
+        ? "fixes"
+        : route.name === "pricing"
+          ? "pricing"
+          : "overview";
   const activeFinding =
     route.name === "issue" ? result?.findings.find((f) => f.id === route.id) ?? null : null;
 
@@ -347,8 +464,44 @@ export default function App() {
         onOpenSonar={() => openSonar()}
         onRescan={() => void handleRescan()}
         rescanning={rescanning}
+        billing={billing}
+        onManageBilling={() => void handleManageBilling()}
       >
-        {scanNotice && (
+        {billingBanner && (
+          <div className="page" style={{ marginBottom: 4 }}>
+            <div className={`notice ${billingBanner === "success" ? "warning" : "danger"}`} style={{ marginBottom: 18 }}>
+              <b>{billingBanner === "success" ? "Payment confirmed" : "Checkout cancelled"}</b>
+              {billingBanner === "success"
+                ? "Welcome to your new plan — your limits are already updated."
+                : "No charge was made. Your current plan is unchanged."}
+              <div style={{ marginTop: 10 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setBillingBanner(null)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {portalError && (
+          <div className="page" style={{ marginBottom: 4 }}>
+            <div className="notice danger" style={{ marginBottom: 18 }}>
+              <b>Couldn&rsquo;t open billing</b>
+              {portalError}
+              <div style={{ marginTop: 10 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setPortalError(null)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {route.name === "pricing" && (
+          <PricingView user={user} billing={billing} billingLoading={billingLoading} />
+        )}
+
+        {route.name !== "pricing" && scanNotice && (
           <div className="page" style={{ marginBottom: 4 }}>
             <div className={`notice ${scanNotice.startsWith("Re-scanned") ? "warning" : "danger"}`} style={{ marginBottom: 18 }}>
               {scanNotice}
@@ -356,8 +509,12 @@ export default function App() {
           </div>
         )}
 
-        {!result && (
-          <OnboardingWizard userName={user.name} onComplete={handleOnboardingComplete} />
+        {route.name !== "pricing" && !result && (
+          <OnboardingWizard
+            userName={user.name}
+            onComplete={handleOnboardingComplete}
+            onQuotaExceeded={handleQuotaError}
+          />
         )}
 
         {result && route.name === "app" && (
@@ -410,7 +567,7 @@ export default function App() {
           </div>
         )}
 
-        {rescanning && (
+        {route.name !== "pricing" && rescanning && (
           <div className="page">
             <div className="notice warning"><b>Re-scan running…</b>Sonar is reading your repo again. This page will update when it lands.</div>
           </div>
@@ -433,7 +590,22 @@ export default function App() {
         apiKey={aiKey}
         onProviderChange={setAiProvider}
         onApiKeyChange={setAiKey}
+        onQuotaExceeded={handleQuotaError}
+        onAnswered={handleAskAnswered}
       />
+      {quotaNudge && (
+        <UpgradeNudge
+          kind={quotaNudge.kind}
+          plan={quotaNudge.plan}
+          limit={quotaNudge.limit}
+          used={quotaNudge.used}
+          onDismiss={() => setQuotaNudge(null)}
+          onSeePlans={() => {
+            setQuotaNudge(null);
+            navigate("/pricing");
+          }}
+        />
+      )}
     </>
   );
 }

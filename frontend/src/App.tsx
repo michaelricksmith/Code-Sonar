@@ -22,7 +22,7 @@ import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
-import { fetchBillingStatus, openPortal } from "./api/billing";
+import { PENDING_CHECKOUT_TIER_KEY, fetchBillingStatus, isCheckoutTier, openPortal } from "./api/billing";
 import type { BillingStatus } from "./api/billing";
 import { isQuotaError } from "./api/errors";
 import type { ApiError, QuotaErrorBody } from "./api/errors";
@@ -261,6 +261,22 @@ export default function App() {
     // Pricing is public: signed-out visitors can read the tiers.
     if (!user && route.name !== "landing" && route.name !== "pricing") navigate("/");
     if (user && route.name === "landing") navigate("/app");
+  }, [authChecked, user, route.name]);
+
+  // Resume a pricing upgrade interrupted by sign-in. A signed-out visitor
+  // who clicked a paid tier went through OAuth (which always lands on
+  // /app); bring them back to #/pricing, where PricingView consumes the
+  // pending tier and resumes their checkout.
+  useEffect(() => {
+    if (!authChecked || !user || route.name === "pricing") return;
+    let pending: string | null = null;
+    try {
+      pending = window.sessionStorage.getItem(PENDING_CHECKOUT_TIER_KEY);
+    } catch {
+      return;
+    }
+    if (!isCheckoutTier(pending)) return;
+    navigate("/pricing");
   }, [authChecked, user, route.name]);
 
   const persistScan = useCallback((next: ScanResponse, label: string) => {

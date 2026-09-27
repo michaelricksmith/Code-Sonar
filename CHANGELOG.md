@@ -1,5 +1,15 @@
 ## Unreleased — Prompt-first remediation
 
+- **Pricing nav link fix.** The landing-page "Pricing" nav link pointed at
+  the `#features` on-page anchor, so clicking it never reached the
+  `#/pricing` route. It now navigates to the pricing view.
+- **Resume checkout after sign-in.** Clicking a paid tier while signed out
+  sent the visitor through GitHub OAuth, which always lands on `/app` —
+  the upgrade intent was lost and it looked like the price "just opens
+  the platform". The clicked tier is now remembered in `sessionStorage`;
+  after sign-in the app returns to `#/pricing` and starts Stripe Checkout
+  for that tier (card entry there is the confirmation step, so nothing is
+  purchased silently). Skipped when the account is already on a paid plan.
 - **Stripe billing deploy fixes.** The #77 deploy failed at startup:
   `runtime.py` fail-closed on Alembic revision `20260926_0003` after the
   DB migrated to `20260926_0004` (#78 bumps the required-revision pin —

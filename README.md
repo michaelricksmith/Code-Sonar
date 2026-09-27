@@ -557,6 +557,26 @@ variables — no secrets are ever committed to the repo:
 | `CODE_SONAR_REMEDIATION_EXECUTOR` | `deterministic` (default, free), `groq` (AI fixes via Groq API), or `cursor` (Cursor Agent CLI) |
 | `CODE_SONAR_GROQ_MODEL` | Model for Groq remediation (default `openai/gpt-oss-120b`) |
 | `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe API key + webhook signing secret (absent = billing disabled, free limits) |
+| `STRIPE_PRICE_HOBBY` / `STRIPE_PRICE_PLUS` | Stripe Price IDs for the $7/mo hobby and $14/mo plus tiers |
+
+### Billing (Stripe, test mode)
+
+Flat-rate tiers with monthly quotas — **free** ($0: 1 repo, 5 scans/mo,
+25 Ask Sonar questions/mo, 7-day history), **hobby** ($7/mo: 5 repos,
+50 scans/mo, 500 Ask Sonar/mo, 90-day history), **plus** ($14/mo:
+20 repos, 300 scans/mo, 2,000 Ask Sonar/mo, unlimited history,
+priority scans). Fix prompts are unlimited on every tier. Quotas are
+enforced as HTTP 402 (`upgrade_required`) on scan creation and Ask
+Sonar; the pricing page (`#/pricing`) handles checkout via Stripe
+Checkout, and paid users manage their subscription through the Stripe
+Customer Portal. Without the Stripe env vars the app runs on free
+limits and the billing endpoints return 503 `billing_disabled` — the
+app never crashes for missing keys. To go live: create the hobby/plus
+products in the Stripe Dashboard (test mode first), set the four
+`STRIPE_*` vars, and point a webhook at
+`<SONAR_PUBLIC_URL>/api/billing/webhook` for `checkout.session.completed`,
+`customer.subscription.updated`, and `customer.subscription.deleted`.
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth
 client**, then set each provider's authorized redirect URI to

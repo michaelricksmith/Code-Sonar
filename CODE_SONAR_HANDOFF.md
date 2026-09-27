@@ -69,6 +69,21 @@ context boundary and its live API behavior.
 
 ## Current verification
 
+- Stripe billing (test-mode ready, PR unmerged): flat-rate tiers with
+  monthly quotas — free ($0: 1 repo, 5 scans/mo, 25 Ask Sonar/mo, 7-day
+  history), hobby ($7/mo: 5 repos, 50 scans/mo, 500 Ask Sonar/mo, 90-day
+  history), plus ($14/mo: 20 repos, 300 scans/mo, 2,000 Ask Sonar/mo,
+  unlimited history, priority scans); fix prompts unlimited on every
+  tier. Backend: `PLAN_LIMITS` in `backend/app/billing/plans.py`,
+  `usage_counters` table + `users.stripe_customer_id` (Alembic
+  `20260926_0004`), `/api/billing` checkout/webhook/portal/status,
+  402 `upgrade_required` enforcement on scan creation and Ask Sonar
+  (anonymous callers metered on free limits), 503 `billing_disabled`
+  when Stripe keys are absent. Frontend: `#/pricing` page, sidebar
+  quota display, 402 upgrade nudges, portal link for paid users.
+  **62 new billing tests pass**; ruff + strict mypy clean; 4 Ask Sonar
+  failures confirmed pre-existing on `origin/main`. Stripe products,
+  price IDs, and keys still to be provisioned (test mode first).
 - Google OAuth sign-in verified working end-to-end 2026-09-26 (browser
   login by the owner; production `/health` 200). Working configuration:
   Google Cloud project "Code sonar" (free tier, no billing), OAuth client

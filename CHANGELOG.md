@@ -17,6 +17,16 @@
   JSON-file fallback when SQL is not configured. `stripe>=10.0.0`
   added to backend dependencies; the SDK is imported lazily so the app
   boots without keys.
+- **Stripe billing frontend.** New `#/pricing` page with the three tier
+  cards ($0/$7/$14) and their exact offerings, upgrade buttons that
+  create a checkout session and redirect to Stripe, a "Manage billing"
+  portal link for paid users, and a friendly notice (not broken
+  buttons) while Stripe keys are unprovisioned. Sidebar "Plan" block
+  shows plan badge plus scans/Ask Sonar usage vs limits from
+  `/api/billing/status`; `?billing=success|cancelled` return URLs show
+  a confirmation banner. API errors now carry HTTP status (`ApiError`)
+  so HTTP 402 `upgrade_required` responses surface a dismissible
+  upgrade nudge on scan creation and Ask Sonar.
 - **OAuth token-exchange errors now surface the provider's real reason.**
   GitHub/Google token-exchange failures previously returned a bare
   `{"detail":"GitHub/Google token exchange failed"}` (HTTP 502), hiding the

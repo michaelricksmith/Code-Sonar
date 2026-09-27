@@ -3,6 +3,16 @@
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
 > **Authoritative current snapshot — 2026-09-26 PDT**
+- **Stripe billing (test-mode ready, unmerged).** Flat-rate tiers with
+  monthly quotas — free ($0: 1 repo, 5 scans/mo, 25 Ask Sonar/mo),
+  hobby ($7/mo: 5 repos, 50 scans/mo, 500 Ask Sonar/mo), plus ($14/mo:
+  20 repos, 300 scans/mo, 2,000 Ask Sonar/mo); fix prompts unlimited
+  everywhere. New `/api/billing` surface (checkout, signature-verified
+  webhook → plan sync, customer portal, status) plus a pricing page
+  (`#/pricing`), sidebar quota display, and 402 upgrade nudges.
+  62 new billing tests pass; quotas enforced on scan creation and Ask
+  Sonar. Stripe keys not yet provisioned — billing runs disabled on
+  free limits until Michael provides test-mode keys.
 - **Database-backed user accounts (new).** OAuth sign-in now stores accounts
   in the `users` table (Alembic `20260926_0003`, 19 new tests passing): one
   account per normalized email across GitHub/Google, GitHub tokens encrypted

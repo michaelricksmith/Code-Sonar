@@ -61,7 +61,7 @@ export function LandingPage() {
           <div className="landing-links">
             <a href="#features">How it works</a>
             <a href="#features">What it checks</a>
-            <a href="#features">Pricing</a>
+            <a href="#/pricing">Pricing</a>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <a className="btn btn-ghost btn-sm" href={GITHUB_LOGIN_URL}>Sign in</a>

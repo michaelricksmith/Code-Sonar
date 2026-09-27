@@ -8,14 +8,16 @@
  * buttons are replaced with a friendly notice instead of a broken flow.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { User } from "../api/auth";
 import { GITHUB_LOGIN_URL } from "../api/auth";
 import {
   BILLING_TIERS,
+  PENDING_CHECKOUT_TIER_KEY,
   createCheckout,
   isBillingDisabledError,
+  isCheckoutTier,
   isPaidPlan,
   openPortal,
 } from "../api/billing";
@@ -38,6 +40,34 @@ export function PricingView({ user, billing, billingLoading }: PricingViewProps)
   const [billingDisabled, setBillingDisabled] = useState(false);
 
   const plan: BillingPlan | null = billing?.plan ?? null;
+
+  /**
+   * Resume a checkout that was interrupted by sign-in: the visitor clicked
+   * a paid tier while signed out, went through OAuth (which always lands
+   * on /app), and was routed back here. Honor the original click by
+   * starting Stripe Checkout — card entry there is the confirmation step,
+   * so nothing is purchased silently.
+   */
+  useEffect(() => {
+    if (!user || billingLoading) return;
+    let pending: string | null = null;
+    try {
+      pending = window.sessionStorage.getItem(PENDING_CHECKOUT_TIER_KEY);
+    } catch {
+      return;
+    }
+    if (!isCheckoutTier(pending)) return;
+    try {
+      window.sessionStorage.removeItem(PENDING_CHECKOUT_TIER_KEY);
+    } catch {
+      // best-effort
+    }
+    // Already on a paid plan (or billing status unknown): don't auto-start
+    // anything — just show the tiers and let the visitor choose.
+    if (billing?.plan !== "free") return;
+    void handleUpgrade(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, billingLoading]);
 
   async function handleUpgrade(tier: CheckoutTier): Promise<void> {
     setNotice(null);
@@ -144,7 +174,23 @@ export function PricingView({ user, billing, billingLoading }: PricingViewProps)
                 )
               ) : isPaid ? (
                 !user ? (
-                  <a className="btn btn-primary" style={{ width: "100%" }} href={GITHUB_LOGIN_URL}>
+                  <a
+                    className="btn btn-primary"
+                    style={{ width: "100%" }}
+                    href={GITHUB_LOGIN_URL}
+                    onClick={() => {
+                      // Remember the click across the OAuth round-trip so
+                      // sign-in returns here and resumes this checkout.
+                      try {
+                        window.sessionStorage.setItem(
+                          PENDING_CHECKOUT_TIER_KEY,
+                          tier.tier,
+                        );
+                      } catch {
+                        // best-effort; without it the visitor just lands on /app
+                      }
+                    }}
+                  >
                     Sign in to upgrade
                   </a>
                 ) : billingDisabled ? (

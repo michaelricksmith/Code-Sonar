@@ -19,6 +19,18 @@ import { ApiError, decodeOrThrow } from "./errors";
 export type BillingPlan = "free" | "hobby" | "plus";
 export type CheckoutTier = "hobby" | "plus";
 
+/**
+ * sessionStorage key remembering which paid tier a signed-out visitor
+ * clicked. The OAuth callback always lands on /app, so after sign-in the
+ * app reads this key, returns to #/pricing, and resumes the checkout the
+ * visitor originally asked for.
+ */
+export const PENDING_CHECKOUT_TIER_KEY = "code_sonar_pending_checkout_tier";
+
+export function isCheckoutTier(value: unknown): value is CheckoutTier {
+  return value === "hobby" || value === "plus";
+}
+
 export interface BillingLimits {
   repos: number;
   scans_per_month: number;

@@ -19,7 +19,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, HTTPException, Request
@@ -81,6 +81,36 @@ def _github_token_for_request(request: Request) -> str:
     if user is None or not user.github_access_token:
         return ""
     return user.github_access_token
+
+
+def _quota_user_id(request: Request) -> str | None:
+    """Resolve the caller's user id for quota metering, or None when anonymous.
+
+    Anonymous scans keep working: a missing session simply meters against
+    the free tier under the "anonymous" sentinel id.
+    """
+    try:
+        from app.oauth import current_user
+    except Exception:  # pragma: no cover - defensive
+        return None
+    user = current_user(request)
+    return user.id if user is not None else None
+
+
+def _enforce_quota(request: Request, kind: Literal["scans", "ask_sonar"]) -> None:
+    try:
+        from app.billing.quotas import check_quota
+    except Exception:  # pragma: no cover - defensive
+        return
+    check_quota(_quota_user_id(request), kind)
+
+
+def _record_usage(request: Request, kind: Literal["scans", "ask_sonar"]) -> None:
+    try:
+        from app.billing.usage import get_usage_store
+    except Exception:  # pragma: no cover - defensive
+        return
+    get_usage_store().increment(_quota_user_id(request), kind)
 
 
 def _parse_repo_input(repo: str) -> str:
@@ -280,10 +310,12 @@ async def create_scan_job(request: Request, body: ScanJobRequest) -> dict[str, s
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     token = _github_token_for_request(request)
+    _enforce_quota(request, "scans")
     job_id = uuid.uuid4().hex
     job = ScanJob(job_id=job_id, repo=body.repo.strip(), branch=body.branch)
     with _jobs_lock:
         _jobs[job_id] = job
+    _record_usage(request, "scans")
 
     repo_label = body.repo.strip().removesuffix(".git").split("github.com/")[-1]
     thread = threading.Thread(

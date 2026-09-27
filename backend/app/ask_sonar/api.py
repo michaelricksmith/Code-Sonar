@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -128,9 +128,36 @@ def _resolve_provider(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _quota_user_id(http_request: Request) -> str | None:
+    """Resolve the caller's user id for quota metering, or None when anonymous."""
+    try:
+        from app.oauth import current_user
+    except Exception:  # pragma: no cover - defensive
+        return None
+    user = current_user(http_request)
+    return user.id if user is not None else None
+
+
+def _enforce_quota(http_request: Request, kind: Literal["scans", "ask_sonar"]) -> None:
+    try:
+        from app.billing.quotas import check_quota
+    except Exception:  # pragma: no cover - defensive
+        return
+    check_quota(_quota_user_id(http_request), kind)
+
+
+def _record_usage(http_request: Request, kind: Literal["scans", "ask_sonar"]) -> None:
+    try:
+        from app.billing.usage import get_usage_store
+    except Exception:  # pragma: no cover - defensive
+        return
+    get_usage_store().increment(_quota_user_id(http_request), kind)
+
+
 @router.post("/ask")
 async def ask_sonar(
     request: AskSonarRequest,
+    http_request: Request,
     x_ai_provider: str | None = Header(default=None),
     x_ai_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -140,7 +167,13 @@ async def ask_sonar(
     headers select a transient bring-your-own-key provider for this request
     only. Ollama needs no API key. Without the headers, the server's
     configured provider answers.
+
+    Every question counts against the caller's monthly Ask Sonar quota
+    (anonymous callers meter against the free tier); the counter increments
+    once the answer is produced, for AI and deterministic answers alike.
     """
+    _enforce_quota(http_request, "ask_sonar")
+
     provider = _resolve_provider(x_ai_provider, x_ai_api_key)
 
     record = _require_scan(request.scan_id)
@@ -165,6 +198,9 @@ async def ask_sonar(
         except Exception:
             result = deterministic_answer(request.question, context)
             answer_source = "deterministic"
+
+    # The question was asked: count it regardless of the answer source.
+    _record_usage(http_request, "ask_sonar")
 
     return {
         "scan_id": request.scan_id,

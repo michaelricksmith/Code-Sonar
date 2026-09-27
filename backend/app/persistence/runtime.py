@@ -9,6 +9,9 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, text, update
 
+from app.billing.tables import (
+    usage_counters as usage_counters_table,  # noqa: F401 - registers table on metadata
+)
 from app.history import ScanRecord
 from app.models.user import users as users_table  # noqa: F401 - registers table on metadata
 from app.persistence.config import (

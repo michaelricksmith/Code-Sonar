@@ -2,6 +2,21 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
+## 2026-09-28 — Email transport hardened (unmerged)
+
+Branch `feature/email-transport`: provider-agnostic `EmailTransport`
+(`log` default, `smtp`, `resend` = Resend SMTP profile at
+`smtp.resend.com:587`, user `resend`, `RESEND_API_KEY` as password);
+new `EMAIL_*` env names (legacy `SONAR_*` aliases kept); `Message-ID` +
+`Date` on every message; one-click unsubscribe headers fixed
+(double-angle-bracket bug); bounded SMTP retries with backoff; send
+logging is routing metadata only. Fixed the `$$7` amount bug —
+receipts render `$7/month`. New `EMAIL-SETUP.md` documents the
+founder's Resend + Render env steps (waiting on `codevitals.tech`).
+17 new tests; full backend suite 719 passed/1 skipped, ruff + strict
+mypy clean. **Still unverified:** real send with a configured provider;
+sandbox end-to-end purchase → webhook → receipt.**
+
 ## 2026-09-28 — Pre-public compliance (merged, deployed)
 
 Branch `feature/prelaunch-compliance` → PR #85 (CI fully green: backend

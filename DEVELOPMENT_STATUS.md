@@ -13,7 +13,11 @@
   (`POST /api/billing/cancel`), resume (`POST /api/billing/resume`),
   subscription state (`GET /api/billing/subscription`); post-purchase
   receipt and cancellation-confirmation emails are transactional
-  (`SONAR_EMAIL_TRANSPORT`: log/smtp/resend). Neutral age gate on
+  (`EMAIL_PROVIDER`: log/smtp/resend via SMTP; `Message-ID` + `Date`
+  headers; bounded retries with backoff; metadata-only send logging;
+  amounts render `$7`, never `$$7`; see `EMAIL-SETUP.md` for the
+  founder's Resend + Render env steps — real provider not yet
+  configured, waiting on `codevitals.tech`). Neutral age gate on
   first sign-in (13+/18+; under-13 accounts deleted, no attempt record);
   marketing opt-in unchecked + one-click unsubscribe (RFC 8058);
   GPC honored; annual reminders via `scripts/annual_reminders.py`.

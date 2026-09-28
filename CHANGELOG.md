@@ -1,3 +1,34 @@
+## Unreleased — Email transport hardening
+
+- **Provider-agnostic email transport.** `backend/app/compliance/email.py`
+  now has an `EmailTransport` abstraction: `LogTransport` (safe default —
+  nothing leaves the machine, everything kept in the outbox),
+  `SmtpTransport` (stdlib `smtplib`, no new deps), and a Resend profile
+  that points the same SMTP path at `smtp.resend.com:587` with username
+  `resend` and `RESEND_API_KEY` as the password. Config via
+  `EMAIL_PROVIDER` (legacy `SONAR_EMAIL_TRANSPORT` alias), `SMTP_HOST` /
+  `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`, `EMAIL_FROM`,
+  `EMAIL_FROM_NAME`, `EMAIL_MARKETING_FROM`. Missing or unknown
+  provider config fails closed to the log transport — the app boots and
+  never crashes unconfigured.
+- **Headers + retries + observability.** Every message gets `Message-ID`
+  and `Date`; marketing mail carries RFC 8058 one-click
+  `List-Unsubscribe` headers from a single `list_unsubscribe_url` field
+  (fixed a double-angle-bracket bug). Bounded retries (3 attempts, 1s/4s
+  backoff) on transient SMTP failures; structured send logs record
+  routing metadata only (to, template, transport, message id, attempt) —
+  never bodies.
+- **Amount formatting fix.** Templates normalize amounts so receipts
+  render `$7/month`, never `$$7/month` (the audit defect).
+- **Tests.** `backend/tests/compliance/test_email_transport.py`: 17
+  tests covering provider resolution (incl. Resend profile and
+  legacy-alias compatibility), mocked-SMTP success, transient retry,
+  permanent-failure no-retry, retry exhaustion, template amounts, and
+  header/unsubscribe behavior. Full suite: 719 passed, 1 skipped.
+- **EMAIL-SETUP.md.** Founder setup guide: Resend account, domain
+  verification (waiting on `codevitals.tech`), Render env vars, test
+  checkout verification. No credentials committed.
+
 ## Unreleased — Pre-public compliance
 
 - **Consumer compliance surface.** New `backend/app/compliance/` package:

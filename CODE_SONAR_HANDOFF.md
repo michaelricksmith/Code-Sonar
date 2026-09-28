@@ -2,7 +2,14 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-## 2026-09-28 — Pre-public compliance (unmerged)
+## 2026-09-28 — Pre-public compliance (merged, deployed)
+
+Branch `feature/prelaunch-compliance` → PR #85 (CI fully green: backend
+tests+lint, frontend build+typecheck, self-scan smoke) → squash-merged
+as `be2ea75`. Render deploy `dep-dastk2jncjis73esvtg0` live;
+production `/health` 200, Alembic `20260927_0005` applied at startup
+(runtime fail-closed pin), new frontend bundle (`index-CEY5vQAB.js`)
+serving with compliance code.
 
 Branch `feature/prelaunch-compliance` implements the launch compliance
 surface on top of #77 billing. Backend: append-only `compliance_records`

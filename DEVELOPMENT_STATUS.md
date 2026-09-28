@@ -3,7 +3,7 @@
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
 > **Authoritative current snapshot — 2026-09-28 PDT**
-- **Pre-public compliance (unmerged, `feature/prelaunch-compliance`).**
+- **Pre-public compliance (merged `be2ea75`, deployed, `/health` 200).**
   Append-only `compliance_records` table (Alembic `20260927_0005`, JSON
   fallback): auto-renewal consents, cancellations, marketing consents,
   age-gate confirmations, GPC opt-outs, annual reminders. Checkout

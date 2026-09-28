@@ -53,7 +53,7 @@ def validate_grounded_answer(
 
 def _finding_label(finding: dict[str, Any]) -> str:
     symbol = finding.get("symbol")
-    file_path = finding.get("file_path", "your code")
+    file_path = str(finding.get("file_path", "your code"))
     if symbol:
         return f"`{symbol}` in {file_path}"
     return file_path

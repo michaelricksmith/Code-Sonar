@@ -137,14 +137,18 @@ def test_context_returns_authoritative_scan_facts_without_ml(client: TestClient)
     assert data["historical_similarity"]["status"] == "unavailable"
 
 
-def test_ask_returns_503_without_approved_provider(client: TestClient) -> None:
+def test_ask_falls_back_to_deterministic_without_approved_provider(client: TestClient) -> None:
+    set_scan_provider(lambda scan_id: _record() if scan_id == "scan-1" else None)
     response = client.post(
         "/api/ask-sonar/ask",
         json={"scan_id": "scan-1", "question": "Why is my score a B?"},
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "ask_sonar_provider_unavailable"
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer_source"] == "deterministic"
+    assert data["answer"]["provider_name"] == "deterministic"
+    assert "720" in data["answer"]["answer"]
 
 
 def test_ask_uses_only_grounded_context_and_preserves_score(client: TestClient) -> None:
@@ -167,7 +171,7 @@ def test_ask_uses_only_grounded_context_and_preserves_score(client: TestClient) 
     assert data["grounding"]["allowed_sources"] == ["deterministic"]
 
 
-def test_ask_rejects_provider_citation_to_unavailable_source(client: TestClient) -> None:
+def test_ask_falls_back_to_deterministic_on_grounding_violation(client: TestClient) -> None:
     record = _record()
     set_scan_provider(lambda scan_id: record if scan_id == "scan-1" else None)
     set_answer_provider(HallucinatedSourceProvider())
@@ -177,7 +181,8 @@ def test_ask_rejects_provider_citation_to_unavailable_source(client: TestClient)
         json={"scan_id": "scan-1", "question": "What does ML say?"},
     )
 
-    assert response.status_code == 502
-    detail = response.json()["detail"]
-    assert detail["code"] == "ask_sonar_grounding_violation"
-    assert "ml_prediction" in detail["message"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer_source"] == "deterministic"
+    assert "ml_prediction" not in data["answer"]["answer"].lower()
+    assert data["answer"]["used_sources"] == ["deterministic"]

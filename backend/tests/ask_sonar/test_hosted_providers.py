@@ -403,15 +403,13 @@ class TestByokHeaders:
         assert data["answer"]["answer"] == "Plain-language answer."
         assert data["answer"]["provider_name"] == "ollama"
 
-    def test_ask_unconfigured_names_what_is_missing(self, client) -> None:
+    def test_ask_unconfigured_falls_back_to_deterministic(self, client) -> None:
         set_scan_provider(lambda scan_id: _record())
         response = client.post(
             "/api/ask-sonar/ask",
             json={"scan_id": "scan-1", "question": "q"},
         )
-        assert response.status_code == 503
-        detail = response.json()["detail"]
-        assert detail["code"] == "ask_sonar_provider_unavailable"
-        assert "OPENAI_API_KEY" in detail["message"]
-        assert "ANTHROPIC_API_KEY" in detail["message"]
-        assert "ollama" in detail["message"]
+        assert response.status_code == 200
+        data = response.json()
+        assert data["answer_source"] == "deterministic"
+        assert data["answer"]["provider_name"] == "deterministic"

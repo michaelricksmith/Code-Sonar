@@ -65,5 +65,7 @@ def test_fallback_empty_scan_is_reassuring():
     ctx["deterministic"]["top_findings"] = []
     ctx["deterministic"]["score"] = 850
     ctx["deterministic"]["grade"] = "A"
-    result = deterministic_answer("what should I do next?", ctx)
-    assert "clean" in result.answer.lower()
+    result = deterministic_answer("any thoughts on my code?", ctx)
+    lowered = result.answer.lower()
+    assert "clean" in lowered
+    assert "nothing urgent" in lowered

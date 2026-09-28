@@ -258,6 +258,15 @@ class UserStore(Protocol):
         """
         ...
 
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block).
+
+        Removes the entire record — name, email, avatar, OAuth identities,
+        tokens, and the signup row itself. No record of the attempt is
+        retained. Returns True when a record was deleted.
+        """
+        ...
+
 
 class OAuthUserStore:
     """Server-side user + OAuth token store (JSON, mode 0600).
@@ -373,6 +382,16 @@ class OAuthUserStore:
                     self._save(records)
                     return updated
         return None
+
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block)."""
+        with self._lock:
+            records = self._load()
+            kept = [u for u in records if u.id != user_id]
+            if len(kept) == len(records):
+                return False
+            self._save(kept)
+            return True
 
 
 _user_store: UserStore = OAuthUserStore()

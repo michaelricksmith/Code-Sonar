@@ -197,6 +197,25 @@ privacy_audit_events = Table(
     ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
 )
 
+# Compliance records: append-only administrative proof (auto-renewal consent,
+# cancellations, marketing consent, age-gate confirmations, GPC opt-outs).
+# No tenant FK: records are keyed by user id and survive tenant erasure.
+compliance_records = Table(
+    "compliance_records",
+    metadata,
+    Column("record_id", String(128), primary_key=True),
+    Column("user_id", String(128), nullable=False),
+    Column("record_type", String(64), nullable=False),
+    Column("payload", JSON, nullable=False),
+    Column("created_at", String(64), nullable=False),
+)
+Index(
+    "ix_compliance_records_user_type_time",
+    compliance_records.c.user_id,
+    compliance_records.c.record_type,
+    compliance_records.c.created_at,
+)
+
 # Receipts deliberately have no tenant FK or tenant identifier: they survive crypto-erasure
 # as non-content proof that an operator completed a request.
 deletion_receipts = Table(

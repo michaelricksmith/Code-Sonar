@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { User } from "../api/auth";
 import { isPaidPlan } from "../api/billing";
 import type { BillingStatus } from "../api/billing";
+import { SiteFooter } from "./SiteFooter";
 
 export type ShellView = "overview" | "issues" | "fixes" | "pricing";
 
@@ -176,10 +177,11 @@ export function Shell({
             <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
           </div>
           <div><span className="dot" />Sonar is watching · {repoLabel ? "repo connected" : "no repo yet"}</div>
+          <SiteFooter variant="compact" />
         </div>
       </aside>
 
-      <section className="main">{children}</section>
+      <main className="main" id="main-content" tabIndex={-1}>{children}</main>
     </div>
   );
 }

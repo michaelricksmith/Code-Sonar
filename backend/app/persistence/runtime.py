@@ -27,6 +27,7 @@ from app.persistence.crypto import (
 )
 from app.persistence.privacy import CryptoErasureHook, SqlPrivacyRepository
 from app.persistence.repositories import (
+    SqlComplianceRecordStore,
     SqlGitHubInstallationStore,
     SqlHistoryStore,
     SqlOutcomeStore,
@@ -35,7 +36,11 @@ from app.persistence.repositories import (
     SqlWebhookAuditStore,
     SqlWebhookScanJobStore,
 )
-from app.persistence.schema import metadata, projects
+from app.persistence.schema import (  # noqa: F401 - registers table on metadata
+    compliance_records,
+    metadata,
+    projects,
+)
 from app.security.runtime import local_dev_enabled
 from app.security.tenant import current_tenant_id
 
@@ -57,6 +62,7 @@ class PersistenceUnitOfWork:
         self.outcomes = SqlOutcomeStore(self.engine)
         self.users = SqlUserStore(self.engine, self.encryption)
         self.privacy = SqlPrivacyRepository(self.engine, self.encryption, self.crypto_erasure)
+        self.compliance = SqlComplianceRecordStore(self.engine)
 
     def record_project_scan(self, project_id: str, record: ScanRecord) -> None:
         """Persist scan/findings and advance project baseline in one transaction."""
@@ -143,10 +149,11 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
             ).scalar_one_or_none()
         # Bump this revision pin every time a new Alembic migration ships:
         # startup fails closed when the database is not exactly here.
-        if revision != "20260926_0004":
+        if revision != "20260927_0005":
             raise RuntimeError("Database schema is not at required Alembic revision")
     persistence = PersistenceUnitOfWork(engine, encryption)
 
+    from app.compliance.records import set_compliance_store
     from app.github_app import (
         set_installation_store,
         set_webhook_audit_store,
@@ -162,6 +169,7 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
     set_history_store(persistence.history)  # type: ignore[arg-type]
     set_project_store(persistence.projects)  # type: ignore[arg-type]
     set_oauth_user_store(persistence.users)
+    set_compliance_store(persistence.compliance)
     set_installation_store(persistence.installations)  # type: ignore[arg-type]
     set_webhook_audit_store(persistence.webhook_audit)  # type: ignore[arg-type]
     set_webhook_job_store(persistence.webhook_jobs)  # type: ignore[arg-type]

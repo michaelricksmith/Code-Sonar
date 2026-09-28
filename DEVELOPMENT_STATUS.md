@@ -2,7 +2,23 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
-> **Authoritative current snapshot — 2026-09-26 PDT**
+> **Authoritative current snapshot — 2026-09-28 PDT**
+- **Pre-public compliance (unmerged, `feature/prelaunch-compliance`).**
+  Append-only `compliance_records` table (Alembic `20260927_0005`, JSON
+  fallback): auto-renewal consents, cancellations, marketing consents,
+  age-gate confirmations, GPC opt-outs, annual reminders. Checkout
+  requires explicit `autorenew_consent: true` (unchecked box + disclosure
+  on the pricing page); consent — tier, amount, terms version —
+  recorded before the Stripe session. In-app cancel at period end
+  (`POST /api/billing/cancel`), resume (`POST /api/billing/resume`),
+  subscription state (`GET /api/billing/subscription`); post-purchase
+  receipt and cancellation-confirmation emails are transactional
+  (`SONAR_EMAIL_TRANSPORT`: log/smtp/resend). Neutral age gate on
+  first sign-in (13+/18+; under-13 accounts deleted, no attempt record);
+  marketing opt-in unchecked + one-click unsubscribe (RFC 8058);
+  GPC honored; annual reminders via `scripts/annual_reminders.py`.
+  Draft Terms/Privacy/Accessibility at `#/legal/*` (pending legal
+  review). 25 new compliance tests pass; ruff + strict mypy clean.
 - **Stripe billing (test-mode ready, unmerged).** Flat-rate tiers with
   monthly quotas — free ($0: 1 repo, 5 scans/mo, 25 Ask Sonar/mo),
   hobby ($7/mo: 5 repos, 50 scans/mo, 500 Ask Sonar/mo), plus ($14/mo:

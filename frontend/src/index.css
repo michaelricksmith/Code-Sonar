@@ -658,3 +658,89 @@ button { font-family: inherit; }
 .modal-card p { font-size: 14.5px; color: var(--muted); line-height: 1.6; margin-bottom: 22px; }
 .modal-actions { display: flex; gap: 10px; justify-content: center; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Pre-launch compliance: a11y + billing + legal ---------- */
+
+/* Skip link: visually hidden until keyboard-focused. */
+.skip-link {
+  position: absolute; left: 16px; top: -60px; z-index: 200;
+  background: var(--ink); color: #fff; font-weight: 700; font-size: 14px;
+  padding: 10px 18px; border-radius: 10px; text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus-visible { top: 12px; }
+
+/* Visible keyboard focus everywhere. */
+:focus-visible {
+  outline: 3px solid rgba(11, 124, 123, 0.65);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* Keep the existing input ring for text inputs; skip the extra outline. */
+.input:focus-visible, .search-input:focus-visible { outline: none; }
+
+/* Auto-renew disclosure on pricing cards — always visible, never a tooltip. */
+.billing-disclosure {
+  font-size: 12.5px; line-height: 1.55; color: var(--muted);
+  margin: 0 0 12px;
+}
+
+/* Explicit consent checkbox (pricing upgrade, age-gate marketing). */
+.consent-check {
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+  margin: 0 0 12px; cursor: pointer; text-align: left;
+}
+.consent-check input[type="checkbox"] {
+  flex: none; width: 18px; height: 18px; margin-top: 1px;
+  accent-color: var(--teal); cursor: pointer;
+}
+
+/* In-app Subscription panel on the pricing page. */
+.sub-panel { padding: 26px 28px; }
+.sub-panel-title { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 8px; }
+.sub-panel-status { font-size: 14.5px; color: var(--muted); margin-bottom: 16px; }
+.sub-panel-status b { color: var(--ink); }
+.sub-cancel-btn { min-width: 220px; }
+.cancel-confirm {
+  border: 1px solid #f0d9d9; background: #fff8f8; border-radius: 12px;
+  padding: 16px 18px; margin-bottom: 14px;
+}
+.cancel-confirm p { font-size: 14px; margin-bottom: 12px; }
+.cancel-confirm-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.sub-portal-link { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.link-btn {
+  background: none; border: none; padding: 0; font: inherit;
+  color: var(--teal); font-weight: 600; cursor: pointer; text-decoration: underline;
+}
+.link-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Age gate. */
+.age-gate { max-width: 560px; }
+.age-gate-card { padding: 34px 32px; margin-top: 48px; }
+.age-gate-label { display: block; font-size: 13px; font-weight: 700; margin: 18px 0 8px; }
+.age-gate-marketing { margin-top: 16px; }
+
+/* Legal pages. */
+.legal-page { max-width: 760px; }
+.legal-draft-banner { margin-top: 26px; }
+.legal-section { margin-top: 26px; }
+.legal-section h2 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 10px; }
+.legal-section p { font-size: 14.5px; color: var(--muted); line-height: 1.65; margin-bottom: 10px; }
+
+/* Site footer. */
+.site-footer { margin-top: 56px; padding: 28px 0 40px; border-top: 1px solid var(--line); }
+.site-footer-in {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 24px; flex-wrap: wrap;
+}
+.site-footer-copy { margin-top: 8px; font-size: 13px; color: var(--muted); max-width: 420px; }
+.site-footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
+.site-footer-links a { font-size: 14px; font-weight: 600; color: var(--teal); text-decoration: none; }
+.site-footer-links a:hover { text-decoration: underline; }
+.site-footer-compact {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.site-footer-compact a { font-size: 11.5px; color: var(--faint); text-decoration: none; }
+.site-footer-compact a:hover { color: var(--teal); text-decoration: underline; }

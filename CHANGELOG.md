@@ -1,3 +1,51 @@
+## Unreleased — Pre-public compliance
+
+- **Consumer compliance surface.** New `backend/app/compliance/` package:
+  append-only compliance records (auto-renewal consents, cancellations,
+  marketing consent, age-gate confirmations, GPC opt-outs, annual
+  reminders) in a `compliance_records` SQL table (Alembic
+  `20260927_0005`, revision pin bumped) with a JSON-file fallback;
+  transactional email (`log`/`smtp`/`resend` via `SONAR_EMAIL_TRANSPORT`)
+  for post-purchase receipts, cancellation confirmations, and annual
+  renewal reminders; RFC 8058 one-click unsubscribe with HMAC-signed
+  tokens; marketing stream separated from transactional and gated on
+  opt-in.
+- **Compliance API.** `GET /api/compliance/status`,
+  `POST /api/compliance/age-gate` (neutral birth-year question; only
+  the 13+/18+ bracket is stored, never the birth year),
+  `POST /api/compliance/age-gate/block` (deletes just-created under-13
+  accounts; no attempt record), `POST /api/compliance/marketing-consent`,
+  `POST /api/compliance/gpc` (honored; no-sale/no-ad-tech posture
+  recorded), `POST /api/compliance/unsubscribe/{token}` (no auth),
+  `GET /api/compliance/reminders/annual` (admin; pairs with
+  `scripts/annual_reminders.py --list/--send`, run monthly).
+- **Billing compliance.** Checkout now requires `autorenew_consent:
+  true` (400 without it); the timestamped consent (tier, amount,
+  monthly frequency, terms version `2026-09-27`) is recorded before the
+  Stripe session is created. New `GET /api/billing/subscription`
+  (plan + live Stripe status), `POST /api/billing/cancel` (schedules at
+  period end; access continues until then; immediate confirmation
+  email), `POST /api/billing/resume`; Stripe portal stays available.
+  Webhooks now send the post-purchase acknowledgment and cancellation
+  confirmation and record subscription links/cancellations.
+- **Frontend.** Pricing page shows the auto-renewal disclosure next to
+  an unchecked consent checkbox gating each paid-tier button; a
+  subscription panel (plan, renewal date, two-step in-app cancel with
+  inline confirm, resume, portal link) sits above the tiers for signed-in
+  paid users. Neutral age gate on first sign-in (birth-year select, no
+  preselection; under-13 → account deleted + signed out). Optional
+  unchecked marketing checkbox. GPC reported when
+  `navigator.globalPrivacyControl` is true. Draft Terms/Privacy/
+  Accessibility pages at `#/legal/terms|privacy|accessibility` (marked
+  DRAFT, pending legal review) and footer links everywhere. A11y: skip
+  link, `<main>` landmarks, global focus-visible ring, labeled controls.
+- **mypy fix (carries PR #84).** `answering.py` `_finding_label` now
+  coerces `finding["file_path"]` to `str` — the same one-line fix PR
+  #84 made on a branch this work's base does not contain.
+- 25 new compliance tests; existing checkout test updated for the
+  consent gate. **Not yet done:** sandbox end-to-end purchase,
+  real email provider, legal review of the draft policies.
+
 ## Unreleased — Prompt-first remediation
 
 - **Pricing nav link fix.** The landing-page "Pricing" nav link pointed at

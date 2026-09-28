@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { GITHUB_LOGIN_URL, GOOGLE_LOGIN_URL } from "../api/auth";
 import { GRADE_TONE, GRADE_WORDS, gradeForScore } from "../copy";
 import { ScoreDial } from "./ScoreDial";
+import { SiteFooter } from "./SiteFooter";
 
 const SAMPLE_SCORE = 612;
 
@@ -51,8 +52,8 @@ export function LandingPage() {
   const grade = gradeForScore(SAMPLE_SCORE);
 
   return (
-    <div>
-      <nav className="landing-nav">
+    <div id="main-content" tabIndex={-1}>
+      <nav className="landing-nav" aria-label="Site">
         <div className="wrap landing-nav-in">
           <a className="brand" href="#/">
             <span className="brand-mark" />
@@ -186,21 +187,8 @@ export function LandingPage() {
       </section>
 
       <footer className="landing-footer">
-        <div className="wrap foot-in">
-          <div>
-            <span className="brand" style={{ fontSize: 15 }}>
-              <span className="brand-mark" style={{ width: 26, height: 26 }} />
-              Code&nbsp;Sonar
-            </span>
-            <div style={{ marginTop: 8 }}>
-              © 2026 Michael Smith. We read your code to score it. We never train on it.
-            </div>
-          </div>
-          <div>
-            <a href="#/">Privacy</a>
-            <a href="#/">Security</a>
-            <a href="#/">Contact</a>
-          </div>
+        <div className="wrap">
+          <SiteFooter />
         </div>
       </footer>
     </div>

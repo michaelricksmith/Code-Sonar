@@ -1,13 +1,19 @@
 """Transactional email for billing lifecycle events.
 
-Pluggable transports selected by ``SONAR_EMAIL_TRANSPORT``:
+Provider-agnostic email transport. Transports are selected by
+``EMAIL_PROVIDER`` (legacy alias ``SONAR_EMAIL_TRANSPORT``):
 
 - ``log`` (default): renders the message and writes it to the application
   log plus an inspectable outbox directory. No email is actually sent.
-  Used in tests and until the operator configures a real provider.
-- ``smtp``: stdlib smtplib against ``SONAR_SMTP_HOST`` (+ PORT, USER,
-  PASSWORD, TLS). No new dependencies.
-- ``resend``: Resend HTTP API via urllib (``RESEND_API_KEY``).
+  Used in tests and until the operator configures a real provider. The
+  app boots and sends "nowhere" safely when unconfigured — nothing is
+  silently dropped, everything is logged and kept in the outbox.
+- ``smtp``: stdlib ``smtplib`` against ``SMTP_HOST`` (+ ``SMTP_PORT``,
+  ``SMTP_USER``, ``SMTP_PASS``, ``SMTP_TLS``). No new dependencies.
+- ``resend``: Resend via its SMTP interface — resolves to
+  ``smtp.resend.com:587`` with username ``resend`` and the
+  ``RESEND_API_KEY`` as the SMTP password. Same stdlib SMTP path as any
+  other provider, so swapping providers later is just env config.
 
 Marketing and transactional streams are separate: transactional mail
 (purchase receipts, cancellation confirmations, renewal reminders) goes to
@@ -28,9 +34,10 @@ import json
 import logging
 import os
 import smtplib
-import urllib.request
+import time
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -38,17 +45,41 @@ logger = logging.getLogger(__name__)
 TRANSACTIONAL = "transactional"
 MARKETING = "marketing"
 
+# Placeholder until the founder verifies a sending domain in Resend and
+# sets EMAIL_FROM / EMAIL_MARKETING_FROM. Never commit a real address here.
 _DEFAULT_FROM = "Code Sonar <noreply@code-sonar.example>"
+
+MAX_ATTEMPTS = 3
+RETRY_DELAYS = (1.0, 4.0)  # seconds of backoff between attempts
+
+_sleep = time.sleep  # module-level so tests can monkeypatch
+
+
+def email_from_name() -> str:
+    return os.environ.get("EMAIL_FROM_NAME", "").strip()
+
+
+def email_from() -> str:
+    """Transactional from-address, honoring EMAIL_FROM / legacy names."""
+    addr = (
+        os.environ.get("EMAIL_FROM", "").strip()
+        or os.environ.get("SONAR_EMAIL_FROM", "").strip()
+        or _DEFAULT_FROM
+    )
+    name = email_from_name()
+    if name and "<" not in addr and "@" in addr:
+        return f"{name} <{addr}>"
+    return addr
 
 
 def from_address(*, kind: str = TRANSACTIONAL) -> str:
     if kind == MARKETING:
-        return os.environ.get("SONAR_EMAIL_MARKETING_FROM", "").strip() or email_from()
+        return (
+            os.environ.get("EMAIL_MARKETING_FROM", "").strip()
+            or os.environ.get("SONAR_EMAIL_MARKETING_FROM", "").strip()
+            or email_from()
+        )
     return email_from()
-
-
-def email_from() -> str:
-    return os.environ.get("SONAR_EMAIL_FROM", "").strip() or _DEFAULT_FROM
 
 
 def _public_url() -> str:
@@ -90,7 +121,11 @@ class OutgoingEmail:
     text_body: str
     html_body: str = ""
     kind: str = TRANSACTIONAL
+    template: str = ""
     headers: dict[str, str] | None = None
+    # Bare (no angle brackets) RFC 8058 one-click unsubscribe URL for
+    # marketing mail. Wired into the message by the transport.
+    list_unsubscribe_url: str = ""
 
 
 def _esc(text: str) -> str:
@@ -100,6 +135,12 @@ def _esc(text: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _amount(value: str) -> str:
+    """Normalize a plan amount so templates always render ``$7``, never
+    ``$$7`` — callers pass either ``"7"`` or ``"$7"``."""
+    return (value or "?").lstrip("$")
 
 
 def _html_wrap(title: str, paragraphs: list[str]) -> str:
@@ -126,15 +167,16 @@ def purchase_receipt_email(
 ) -> OutgoingEmail:
     """Post-purchase acknowledgment: renewal terms, cancellation policy,
     and how to cancel — the CA AB 2863 retainable acknowledgment."""
+    amt = _amount(amount)
     subject = f"Your Code Sonar {plan_name} subscription is active"
     next_renewal = (
         f"Your next renewal is {renews_at}." if renews_at
         else "Your subscription renews each month."
     )
     lines = [
-        f"Thanks — your {plan_name} plan (${amount}/month) is now active.",
+        f"Thanks — your {plan_name} plan (${amt}/month) is now active.",
         "This is a recurring subscription. It renews automatically each month "
-        f"at ${amount}/month until you cancel. {next_renewal}",
+        f"at ${amt}/month until you cancel. {next_renewal}",
         "How to cancel: open the app, go to Pricing → Subscription, and click "
         "\"Cancel subscription\". You can also cancel any time here: " + cancel_url,
         "When you cancel, you keep your plan until the end of the current "
@@ -147,6 +189,7 @@ def purchase_receipt_email(
         text_body="\n\n".join(lines),
         html_body=_html_wrap(subject, lines),
         kind=TRANSACTIONAL,
+        template="purchase_receipt",
     )
 
 
@@ -182,6 +225,7 @@ def cancellation_confirmation_email(
         text_body="\n\n".join(lines),
         html_body=_html_wrap(subject, lines),
         kind=TRANSACTIONAL,
+        template="cancellation_confirmation",
     )
 
 
@@ -193,10 +237,11 @@ def annual_renewal_reminder_email(
     cancel_url: str,
 ) -> OutgoingEmail:
     """CA AB 2863 annual reminder: product, amount/frequency, how to cancel."""
+    amt = _amount(amount)
     subject = f"Reminder: your Code Sonar {plan_name} subscription renews monthly"
     lines = [
         f"This is your yearly reminder that your Code Sonar {plan_name} "
-        f"subscription (${amount}/month) renews automatically each month "
+        f"subscription (${amt}/month) renews automatically each month "
         "until you cancel.",
         "To cancel: open the app, go to Pricing → Subscription, and click "
         "\"Cancel subscription\", or use this link: " + cancel_url,
@@ -207,6 +252,7 @@ def annual_renewal_reminder_email(
         text_body="\n\n".join(lines),
         html_body=_html_wrap(subject, lines),
         kind=TRANSACTIONAL,
+        template="annual_renewal_reminder",
     )
 
 
@@ -223,7 +269,8 @@ def fee_change_notice_email(
     subject = f"Upcoming change to your Code Sonar {plan_name} price"
     lines = [
         f"Heads up: the price of your Code Sonar {plan_name} plan is changing "
-        f"from ${old_amount}/month to ${new_amount}/month, effective {effective_at}.",
+        f"from ${_amount(old_amount)}/month to ${_amount(new_amount)}/month, "
+        f"effective {effective_at}.",
         "If you do nothing, your subscription continues at the new price. "
         "To cancel before the change takes effect: " + cancel_url,
     ]
@@ -233,10 +280,41 @@ def fee_change_notice_email(
         text_body="\n\n".join(lines),
         html_body=_html_wrap(subject, lines),
         kind=TRANSACTIONAL,
+        template="fee_change_notice",
+    )
+
+
+def marketing_announcement_email(
+    *,
+    to: str,
+    user_id: str,
+    subject: str,
+    paragraphs: list[str],
+) -> OutgoingEmail:
+    """Marketing mail. Always carries RFC 8058 one-click unsubscribe and is
+    only sent when a marketing-consent opt-in record exists for the
+    recipient — the consent gate lives in the caller (see compliance.api)."""
+    return OutgoingEmail(
+        to=to,
+        subject=subject,
+        text_body="\n\n".join(paragraphs),
+        html_body=_html_wrap(subject, paragraphs),
+        kind=MARKETING,
+        template="marketing_announcement",
+        list_unsubscribe_url=unsubscribe_url(user_id),
     )
 
 
 # -- transport --------------------------------------------------------------
+
+
+class EmailTransport:
+    """Provider-agnostic send interface."""
+
+    name = "base"
+
+    def send(self, email: OutgoingEmail, message: EmailMessage) -> dict[str, str]:
+        raise NotImplementedError
 
 
 def _outbox_dir() -> Path:
@@ -246,28 +324,123 @@ def _outbox_dir() -> Path:
     return Path.home() / ".code-sonar" / "email-outbox"
 
 
-def _send_via_log(email: OutgoingEmail) -> dict[str, str]:
-    _outbox_dir().mkdir(parents=True, exist_ok=True)
-    entry = {
-        "to": email.to,
-        "from": from_address(kind=email.kind),
-        "subject": email.subject,
-        "kind": email.kind,
-        "headers": email.headers or {},
-        "text_body": email.text_body,
-    }
-    path = _outbox_dir() / (
-        f"{hashlib.sha256(email.subject.encode()).hexdigest()[:8]}"
-        f"-{len(email.text_body)}.json"
-    )
-    path.write_text(json.dumps(entry, indent=2), encoding="utf-8")
-    logger.info(
-        "email[%s] to=%s subject=%s (log transport; no email sent)",
-        email.kind,
-        email.to,
-        email.subject,
-    )
-    return {"transport": "log", "outbox_file": str(path)}
+class LogTransport(EmailTransport):
+    """Safe default: no email leaves the machine. Rendered messages are
+    logged and kept in the outbox so nothing is silently dropped."""
+
+    name = "log"
+
+    def send(self, email: OutgoingEmail, message: EmailMessage) -> dict[str, str]:
+        _outbox_dir().mkdir(parents=True, exist_ok=True)
+        entry = {
+            "to": email.to,
+            "from": message["From"],
+            "subject": email.subject,
+            "kind": email.kind,
+            "template": email.template,
+            "message_id": message["Message-ID"],
+            "headers": email.headers or {},
+            "text_body": email.text_body,
+        }
+        path = _outbox_dir() / (
+            f"{hashlib.sha256(email.subject.encode()).hexdigest()[:8]}"
+            f"-{len(email.text_body)}.json"
+        )
+        path.write_text(json.dumps(entry, indent=2), encoding="utf-8")
+        return {"transport": "log", "outbox_file": str(path)}
+
+
+class SmtpTransport(EmailTransport):
+    """Stdlib SMTP. The Resend profile is this same class pointed at
+    smtp.resend.com:587 with username ``resend`` — provider-agnostic."""
+
+    name = "smtp"
+
+    def __init__(
+        self,
+        *,
+        host: str,
+        port: int = 587,
+        username: str = "",
+        password: str = "",
+        use_tls: bool = True,
+        name: str = "smtp",
+        timeout: int = 20,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.use_tls = use_tls
+        self.timeout = timeout
+        self.name = name
+
+    def send(self, email: OutgoingEmail, message: EmailMessage) -> dict[str, str]:
+        with smtplib.SMTP(self.host, self.port, timeout=self.timeout) as client:
+            if self.use_tls:
+                client.starttls()
+            if self.username:
+                client.login(self.username, self.password)
+            client.send_message(message)
+        return {"transport": self.name}
+
+
+def _env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return default
+
+
+def build_transport() -> EmailTransport:
+    """Resolve the configured transport from the environment.
+
+    ``EMAIL_PROVIDER`` (legacy ``SONAR_EMAIL_TRANSPORT``), one of
+    ``log`` | ``smtp`` | ``resend``. ``resend`` is the SMTP profile:
+    smtp.resend.com:587, user ``resend``, password from ``RESEND_API_KEY``
+    (or an explicit ``SMTP_PASS`` override). Anything unknown — including
+    a ``smtp``/``resend`` provider missing its credentials — fails closed
+    to the ``log`` transport rather than raising at import or startup.
+    """
+    provider = _env("EMAIL_PROVIDER", "SONAR_EMAIL_TRANSPORT", default="log").lower()
+    if provider == "smtp":
+        host = _env("SMTP_HOST", "SONAR_SMTP_HOST")
+        if not host:
+            logger.warning("EMAIL_PROVIDER=smtp but no SMTP_HOST; using log transport")
+            return LogTransport()
+        port = int(_env("SMTP_PORT", "SONAR_SMTP_PORT", default="587") or "587")
+        use_tls = _env("SMTP_TLS", "SONAR_SMTP_TLS", default="true").lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        return SmtpTransport(
+            host=host,
+            port=port,
+            username=_env("SMTP_USER", "SONAR_SMTP_USER"),
+            password=os.environ.get("SMTP_PASS", "")
+            or os.environ.get("SONAR_SMTP_PASSWORD", ""),
+            use_tls=use_tls,
+        )
+    if provider == "resend":
+        api_key = _env("RESEND_API_KEY") or _env("SMTP_PASS")
+        if not api_key:
+            logger.warning(
+                "EMAIL_PROVIDER=resend but no RESEND_API_KEY; using log transport"
+            )
+            return LogTransport()
+        return SmtpTransport(
+            host="smtp.resend.com",
+            port=587,
+            username="resend",
+            password=api_key,
+            use_tls=True,
+            name="resend",
+        )
+    if provider != "log":
+        logger.warning("Unknown EMAIL_PROVIDER=%r; falling back to log", provider)
+    return LogTransport()
 
 
 def _as_message(email: OutgoingEmail) -> EmailMessage:
@@ -275,10 +448,12 @@ def _as_message(email: OutgoingEmail) -> EmailMessage:
     msg["From"] = from_address(kind=email.kind)
     msg["To"] = email.to
     msg["Subject"] = email.subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="code-sonar")
     if email.kind == MARKETING:
-        list_unsub = email.headers.get("List-Unsubscribe", "") if email.headers else ""
-        msg["List-Unsubscribe"] = f"<{list_unsub}>"
-        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        if email.list_unsubscribe_url:
+            msg["List-Unsubscribe"] = f"<{email.list_unsubscribe_url}>"
+            msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
     for key, value in (email.headers or {}).items():
         if key not in msg:
             msg[key] = value
@@ -288,69 +463,67 @@ def _as_message(email: OutgoingEmail) -> EmailMessage:
     return msg
 
 
-def _send_via_smtp(email: OutgoingEmail) -> dict[str, str]:
-    host = os.environ.get("SONAR_SMTP_HOST", "").strip()
-    if not host:
-        raise RuntimeError("SONAR_SMTP_HOST is not configured")
-    port = int(os.environ.get("SONAR_SMTP_PORT", "587").strip() or "587")
-    username = os.environ.get("SONAR_SMTP_USER", "").strip()
-    password = os.environ.get("SONAR_SMTP_PASSWORD", "")
-    use_tls = os.environ.get("SONAR_SMTP_TLS", "true").strip().lower() not in ("0", "false", "no")
-    msg = _as_message(email)
-    with smtplib.SMTP(host, port, timeout=20) as client:
-        if use_tls:
-            client.starttls()
-        if username:
-            client.login(username, password)
-        client.send_message(msg)
-    logger.info("email[%s] to=%s subject=%s via smtp", email.kind, email.to, email.subject)
-    return {"transport": "smtp"}
-
-
-def _send_via_resend(email: OutgoingEmail) -> dict[str, str]:
-    api_key = os.environ.get("RESEND_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("RESEND_API_KEY is not configured")
-    payload: dict[str, object] = {
-        "from": from_address(kind=email.kind),
-        "to": [email.to],
-        "subject": email.subject,
-        "text": email.text_body,
-    }
-    if email.html_body:
-        payload["html"] = email.html_body
-    if email.headers:
-        payload["headers"] = email.headers
-    request = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "code-sonar/1.0",
-        },
-        method="POST",
+def _transient(error: Exception) -> bool:
+    """True for SMTP failures worth retrying (4xx, connection drops)."""
+    if isinstance(error, smtplib.SMTPResponseException):
+        return 400 <= error.smtp_code < 500
+    return isinstance(
+        error,
+        (
+            smtplib.SMTPConnectError,
+            smtplib.SMTPServerDisconnected,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+        ),
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        body = response.read().decode("utf-8")
-    logger.info("email[%s] to=%s subject=%s via resend", email.kind, email.to, email.subject)
-    return {"transport": "resend", "response": body[:200]}
 
 
 def send_email(email: OutgoingEmail) -> dict[str, str]:
-    """Send an email through the configured transport.
+    """Render and send an email through the configured transport.
 
     Defaults to the ``log`` transport (no email leaves the machine) until
-    the operator sets SONAR_EMAIL_TRANSPORT=smtp|resend with credentials.
+    the operator sets EMAIL_PROVIDER=smtp|resend with credentials.
+
+    Bounded retries with backoff on transient SMTP failures; permanent
+    failures raise. Structured logging records only routing metadata
+    (to, template, transport, message id, attempt) — never bodies.
     """
-    transport = os.environ.get("SONAR_EMAIL_TRANSPORT", "log").strip().lower()
-    if transport == "smtp":
-        return _send_via_smtp(email)
-    if transport == "resend":
-        return _send_via_resend(email)
-    if transport != "log":
-        logger.warning("Unknown SONAR_EMAIL_TRANSPORT=%r; falling back to log", transport)
-    return _send_via_log(email)
+    transport = build_transport()
+    message = _as_message(email)
+    message_id = str(message["Message-ID"])
+    receipt: dict[str, str] = {"transport": transport.name}
+    attempts = MAX_ATTEMPTS if transport.name != "log" else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            result = transport.send(email, message)
+            receipt.update(result)
+            receipt["message_id"] = message_id
+            receipt["attempt"] = str(attempt)
+            logger.info(
+                "email.send kind=%s to=%s template=%s transport=%s message_id=%s attempt=%d",
+                email.kind,
+                email.to,
+                email.template or email.subject,
+                receipt.get("transport"),
+                message_id,
+                attempt,
+            )
+            return receipt
+        except Exception as exc:  # noqa: BLE001 - retry policy decides
+            logger.warning(
+                "email.send kind=%s to=%s template=%s transport=%s attempt=%d failed: %s",
+                email.kind,
+                email.to,
+                email.template or email.subject,
+                transport.name,
+                attempt,
+                type(exc).__name__,
+            )
+            if attempt >= attempts or not _transient(exc):
+                raise
+            _sleep(RETRY_DELAYS[min(attempt - 1, len(RETRY_DELAYS) - 1)])
+    raise RuntimeError("unreachable: retry loop exhausted")  # pragma: no cover
 
 
 def marketing_headers(user_id: str) -> dict[str, str]:

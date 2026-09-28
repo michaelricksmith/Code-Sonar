@@ -559,6 +559,10 @@ variables — no secrets are ever committed to the repo:
 | `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe API key + webhook signing secret (absent = billing disabled, free limits) |
 | `STRIPE_PRICE_HOBBY` / `STRIPE_PRICE_PLUS` | Stripe Price IDs for the $7/mo hobby and $14/mo plus tiers |
+| `SONAR_EMAIL_TRANSPORT` | `log` (default: renders to outbox, sends nothing), `smtp`, or `resend` |
+| `SONAR_SMTP_HOST` / `PORT` / `USER` / `PASSWORD` | SMTP provider for transactional email |
+| `RESEND_API_KEY` | Resend API key (when `SONAR_EMAIL_TRANSPORT=resend`) |
+| `SONAR_EMAIL_FROM` | Transactional from-address (default `Code Sonar <noreply@code-sonar.example>`) |
 
 ### Billing (Stripe, test mode)
 
@@ -577,6 +581,26 @@ products in the Stripe Dashboard (test mode first), set the four
 `STRIPE_*` vars, and point a webhook at
 `<SONAR_PUBLIC_URL>/api/billing/webhook` for `checkout.session.completed`,
 `customer.subscription.updated`, and `customer.subscription.deleted`.
+
+Checkout requires explicit auto-renewal consent (`autorenew_consent: true`;
+the pricing page shows the recurring-price disclosure next to an
+unchecked checkbox, and the consent — tier, amount, terms version
+`2026-09-27` — is recorded before the Stripe session is created).
+Paid users can cancel in-app (`POST /api/billing/cancel`, scheduled at
+the end of the current billing period, access continues until then)
+and resume (`POST /api/billing/resume`); `GET /api/billing/subscription`
+reports plan + Stripe status. Checkout completion sends a post-purchase
+receipt and cancellation triggers a confirmation email
+(`SONAR_EMAIL_TRANSPORT`: `log` default, `smtp`, or `resend`).
+Auto-renewal consents, cancellations, marketing consents, age-gate
+confirmations, and GPC opt-outs are stored in the append-only
+`compliance_records` table (Alembic `20260927_0005`) with a JSON-file
+fallback; see `/api/compliance/*` (`status`, `age-gate`,
+`marketing-consent`, `gpc`, one-click `unsubscribe/{token}`).
+Annual renewal reminders go out via `scripts/annual_reminders.py`
+(`--list` / `--send`; run monthly). Draft Terms, Privacy Policy, and
+Accessibility Statement ship at `#/legal/terms`, `#/legal/privacy`,
+`#/legal/accessibility` — marked **DRAFT, pending legal review**.
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth
 client**, then set each provider's authorized redirect URI to

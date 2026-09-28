@@ -2,8 +2,17 @@
  * Code Sonar — Stripe billing API client (test-mode ready).
  *
  * Backend contract:
- *   POST /api/billing/checkout {"tier": "hobby"|"plus"} → {"checkout_url"}
+ *   POST /api/billing/checkout {"tier": "hobby"|"plus", "autorenew_consent": true}
+ *     → {"checkout_url"} (400 when autorenew_consent is not true)
  *   POST /api/billing/portal                    → {"portal_url"}
+ *   POST /api/billing/cancel                    → {"cancelled": true, "effective_at", "plan"}
+ *   POST /api/billing/resume                    → {"resumed": true}
+ *   GET  /api/billing/subscription               →
+ *     {"active": bool, "plan": "free"|"hobby"|"plus",
+ *      "status": "active"|"canceled"|"none",
+ *      "cancel_at_period_end": bool,
+ *      "current_period_end": string|null (ISO),
+ *      "stripe_subscription_id": string|null}
  *   GET  /api/billing/status                    →
  *     {"plan": "free"|"hobby"|"plus",
  *      "limits": {"repos","scans_per_month","ask_sonar_per_month","history_days","priority"},
@@ -127,15 +136,18 @@ export async function fetchBillingStatus(): Promise<BillingStatus> {
 
 /**
  * Starts a Stripe Checkout session for the tier and returns the URL to
- * redirect the browser to. Throws ApiError with status 503 when billing
- * isn't enabled yet, 400 for an unknown tier, 401 when signed out.
+ * redirect the browser to. The caller must pass the user's explicit
+ * auto-renew consent (the unchecked-by-default checkbox on the pricing
+ * page); the backend answers 400 when autorenew_consent is not true.
+ * Throws ApiError with status 503 when billing isn't enabled yet, 400
+ * for an unknown tier, 401 when signed out.
  */
-export async function createCheckout(tier: CheckoutTier): Promise<string> {
+export async function createCheckout(tier: CheckoutTier, autorenewConsent: boolean): Promise<string> {
   const res = await fetch("/api/billing/checkout", {
     method: "POST",
     headers: jsonHeaders,
     credentials: "same-origin",
-    body: JSON.stringify({ tier }),
+    body: JSON.stringify({ tier, autorenew_consent: autorenewConsent }),
   });
   const data = await decodeOrThrow(res, "Could not start checkout");
   if (typeof data?.checkout_url !== "string" || !data.checkout_url) {
@@ -159,4 +171,51 @@ export async function openPortal(): Promise<string> {
     throw new Error("Billing portal returned no redirect URL.");
   }
   return data.portal_url as string;
+}
+
+/** The user's current subscription state (always 200, even with no subscription). */
+export interface SubscriptionState {
+  active: boolean;
+  plan: BillingPlan;
+  status: "active" | "canceled" | "none";
+  cancel_at_period_end: boolean;
+  /** ISO timestamp of the current period end, or null when unknown. */
+  current_period_end: string | null;
+  stripe_subscription_id: string | null;
+}
+
+export async function fetchSubscriptionState(): Promise<SubscriptionState> {
+  const res = await fetch("/api/billing/subscription", { credentials: "same-origin" });
+  return (await decodeOrThrow(res, "Could not load subscription details")) as SubscriptionState;
+}
+
+export interface CancelSubscriptionResult {
+  cancelled: boolean;
+  /** ISO timestamp when the cancellation takes effect (end of period). */
+  effective_at: string;
+  plan: string;
+}
+
+/**
+ * Cancels the active subscription at the end of the current billing
+ * period. Throws ApiError 400 {"detail": "no active subscription"} when
+ * there is nothing to cancel.
+ */
+export async function cancelSubscription(): Promise<CancelSubscriptionResult> {
+  const res = await fetch("/api/billing/cancel", {
+    method: "POST",
+    headers: jsonHeaders,
+    credentials: "same-origin",
+  });
+  return (await decodeOrThrow(res, "Could not cancel the subscription")) as CancelSubscriptionResult;
+}
+
+/** Reverses a scheduled cancellation ("Keep my plan"). */
+export async function resumeSubscription(): Promise<{ resumed: boolean }> {
+  const res = await fetch("/api/billing/resume", {
+    method: "POST",
+    headers: jsonHeaders,
+    credentials: "same-origin",
+  });
+  return (await decodeOrThrow(res, "Could not resume the subscription")) as { resumed: boolean };
 }

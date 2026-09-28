@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.ask_sonar.api import router as ask_sonar_router
 from app.billing.api import router as billing_router
+from app.compliance.api import router as compliance_router
 from app.drift import compute_drift
 from app.github_app import router as github_app_router
 from app.github_app import set_webhook_scan_handler
@@ -64,6 +65,7 @@ async def validate_security_configuration() -> None:
 app.include_router(ml_router)
 app.include_router(ask_sonar_router)
 app.include_router(billing_router)
+app.include_router(compliance_router)
 app.include_router(oauth_router)
 app.include_router(scan_job_router)
 app.include_router(remediation_router)

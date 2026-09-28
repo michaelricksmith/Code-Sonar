@@ -13,6 +13,7 @@ from sqlalchemy import Engine, and_, delete, func, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from app.compliance.records import ComplianceRecord
 from app.github_app import (
     GitHubInstallation,
     WebhookAuditRecord,
@@ -823,6 +824,21 @@ class SqlUserStore:
             connection.execute(update(users).where(users.c.id == user_id).values(**values))
             return self._get_or_raise(connection, user_id)
 
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block).
+
+        Removes the entire row — PII, OAuth identities, and tokens. No
+        record of the signup attempt is retained.
+        """
+        with self.engine.begin() as connection:
+            exists = connection.execute(
+                select(users.c.id).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+            if exists is None:
+                return False
+            connection.execute(delete(users).where(users.c.id == user_id))
+            return True
+
     # -- legacy import ------------------------------------------------
 
     def import_legacy_json(self, path: Path) -> int:
@@ -884,3 +900,90 @@ class SqlUserStore:
                     )
                 )
         return len(order)
+
+
+class SqlComplianceRecordStore:
+    """SQL implementation of the append-only compliance record store."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(
+        self, *, user_id: str, record_type: str, payload: dict[str, Any] | None = None
+    ) -> ComplianceRecord:
+        from app.persistence.schema import compliance_records
+
+        record = ComplianceRecord(
+            record_id=uuid.uuid4().hex,
+            user_id=user_id,
+            record_type=record_type,
+            payload=dict(payload or {}),
+            created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(compliance_records).values(
+                    record_id=record.record_id,
+                    user_id=record.user_id,
+                    record_type=record.record_type,
+                    payload=record.payload,
+                    created_at=record.created_at,
+                )
+            )
+        return record
+
+    def latest(self, user_id: str, record_type: str) -> ComplianceRecord | None:
+        from app.persistence.schema import compliance_records
+
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(compliance_records)
+                    .where(
+                        compliance_records.c.user_id == user_id,
+                        compliance_records.c.record_type == record_type,
+                    )
+                    .order_by(compliance_records.c.created_at.desc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return ComplianceRecord(
+            record_id=row["record_id"],
+            user_id=row["user_id"],
+            record_type=row["record_type"],
+            payload=dict(row["payload"] or {}),
+            created_at=row["created_at"],
+        )
+
+    def history(
+        self, user_id: str, record_type: str | None = None
+    ) -> list[ComplianceRecord]:
+        from app.persistence.schema import compliance_records
+
+        conditions = [compliance_records.c.user_id == user_id]
+        if record_type is not None:
+            conditions.append(compliance_records.c.record_type == record_type)
+        with self.engine.begin() as connection:
+            rows = (
+                connection.execute(
+                    select(compliance_records)
+                    .where(and_(*conditions))
+                    .order_by(compliance_records.c.created_at.asc())
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            ComplianceRecord(
+                record_id=row["record_id"],
+                user_id=row["user_id"],
+                record_type=row["record_type"],
+                payload=dict(row["payload"] or {}),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]

@@ -24,17 +24,22 @@ import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
 import { PENDING_CHECKOUT_TIER_KEY, fetchBillingStatus, isCheckoutTier, openPortal } from "./api/billing";
 import type { BillingStatus } from "./api/billing";
+import { fetchComplianceStatus, reportGpc } from "./api/compliance";
+import type { ComplianceStatus } from "./api/compliance";
 import { isQuotaError } from "./api/errors";
 import type { ApiError, QuotaErrorBody } from "./api/errors";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
 import { fetchFixLog } from "./api/outcomes";
 import { fetchPromptStatus } from "./api/prompts";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
+import { AgeGate } from "./components/AgeGate";
 import { Dashboard } from "./components/Dashboard";
 import { FixesView } from "./components/FixesView";
 import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
 import { LandingPage } from "./components/LandingPage";
+import { LegalPage } from "./components/LegalPage";
+import type { LegalPageId } from "./components/LegalPage";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PricingView } from "./components/PricingView";
 import { UpgradeNudge } from "./components/UpgradeNudge";
@@ -48,7 +53,8 @@ type Route =
   | { name: "issues" }
   | { name: "issue"; id: string }
   | { name: "fixes" }
-  | { name: "pricing" };
+  | { name: "pricing" }
+  | { name: "legal"; page: LegalPageId };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -59,6 +65,9 @@ function parseRoute(): Route {
   }
   if (hash === "" || hash === "/") return { name: "landing" };
   if (hash === "/pricing") return { name: "pricing" };
+  if (hash === "/legal/terms") return { name: "legal", page: "terms" };
+  if (hash === "/legal/privacy") return { name: "legal", page: "privacy" };
+  if (hash === "/legal/accessibility") return { name: "legal", page: "accessibility" };
   if (hash === "/app") return { name: "app" };
   if (hash === "/app/issues") return { name: "issues" };
   if (hash === "/app/fixes") return { name: "fixes" };
@@ -131,6 +140,9 @@ export default function App() {
     used: number;
   } | null>(null);
   const [portalError, setPortalError] = useState<string | null>(null);
+  /** Pre-launch compliance: age gate, marketing opt-in, GPC. */
+  const [compliance, setCompliance] = useState<ComplianceStatus | null>(null);
+  const [complianceChecked, setComplianceChecked] = useState(false);
 
   // Auth check on boot.
   useEffect(() => {
@@ -255,11 +267,47 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Global Privacy Control: honor it once on mount, signed in or not.
+  // Fire-and-forget — a failed report must never break the page.
+  useEffect(() => {
+    if ((navigator as unknown as { globalPrivacyControl?: boolean }).globalPrivacyControl === true) {
+      void reportGpc().catch(() => {
+        // best-effort
+      });
+    }
+  }, []);
+
+  // Compliance status for signed-in users: drives the age gate.
+  useEffect(() => {
+    if (!user) {
+      setCompliance(null);
+      setComplianceChecked(false);
+      return;
+    }
+    let cancelled = false;
+    fetchComplianceStatus()
+      .then((status) => {
+        if (!cancelled) setCompliance(status);
+      })
+      .catch(() => {
+        // Compliance is informational; without it we don't block the app —
+        // but we also must not skip the gate, so leave compliance null and
+        // mark the check done: the gate only shows on a known incomplete state.
+        if (!cancelled) setCompliance(null);
+      })
+      .finally(() => {
+        if (!cancelled) setComplianceChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   // Route guards.
   useEffect(() => {
     if (!authChecked) return;
-    // Pricing is public: signed-out visitors can read the tiers.
-    if (!user && route.name !== "landing" && route.name !== "pricing") navigate("/");
+    // Pricing and the legal pages are public: signed-out visitors can read them.
+    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal") navigate("/");
     if (user && route.name === "landing") navigate("/app");
   }, [authChecked, user, route.name]);
 
@@ -442,16 +490,82 @@ export default function App() {
   }
 
   if (!user) {
-    // Pricing is public: signed-out visitors can read the tiers and are
-    // pointed at sign-in when they try to upgrade.
-    if (route.name === "pricing") {
+    // Pricing and the legal pages are public: signed-out visitors can read
+    // the tiers and the draft legal documents.
+    if (route.name === "legal") {
       return (
-        <div className="main">
-          <PricingView user={null} billing={null} billingLoading={false} />
-        </div>
+        <>
+          <a className="skip-link" href="#main-content">Skip to content</a>
+          <main className="main" id="main-content" tabIndex={-1}>
+            <LegalPage page={route.page} />
+          </main>
+        </>
       );
     }
-    return <LandingPage />;
+    if (route.name === "pricing") {
+      return (
+        <>
+          <a className="skip-link" href="#main-content">Skip to content</a>
+          <div className="main" id="main-content" tabIndex={-1}>
+            <PricingView user={null} billing={null} billingLoading={false} />
+          </div>
+        </>
+      );
+    }
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <LandingPage />
+      </>
+    );
+  }
+
+  // The legal pages stay public for signed-in users too — reading them
+  // never requires (or interrupts) a session.
+  if (route.name === "legal") {
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <main className="main" id="main-content" tabIndex={-1}>
+          <LegalPage page={route.page} />
+        </main>
+      </>
+    );
+  }
+
+  // Wait for the compliance check before rendering the app, so the age
+  // gate never flashes the dashboard underneath it.
+  if (!complianceChecked) {
+    return (
+      <div className="loading-screen">
+        <div className="loading-inner">
+          <div className="spinner" />
+          Waking up Sonar…
+        </div>
+      </div>
+    );
+  }
+
+  if (compliance && !compliance.age_gate_completed) {
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <main className="main" id="main-content" tabIndex={-1}>
+          <AgeGate
+            onComplete={() => {
+              // Re-read compliance status so the gate clears on its own.
+              void fetchComplianceStatus()
+                .then(setCompliance)
+                .catch(() => {
+                  // The gate itself succeeded; don't trap the user if the
+                  // status read hiccups — fail open to the app.
+                  setCompliance({ age_gate_completed: true, marketing_opt_in: false, gpc_honored: false });
+                });
+            }}
+          />
+        </main>
+      </>
+    );
   }
 
   const shellView: ShellView =
@@ -467,6 +581,7 @@ export default function App() {
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <Shell
         user={user}
         repoLabel={repoLabel}

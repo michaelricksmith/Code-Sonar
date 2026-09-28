@@ -172,7 +172,11 @@ class TestCheckout:
         headers, user = auth_headers
         fake_session = MagicMock(url="https://checkout.stripe.test/s/abc")
         with patch("stripe.checkout.Session.create", return_value=fake_session) as mock_create:
-            response = client.post("/api/billing/checkout", json={"tier": "hobby"}, headers=headers)
+            response = client.post(
+                "/api/billing/checkout",
+                json={"tier": "hobby", "autorenew_consent": True},
+                headers=headers,
+            )
         assert response.status_code == 200
         assert response.json() == {"checkout_url": "https://checkout.stripe.test/s/abc"}
         _, kwargs = mock_create.call_args

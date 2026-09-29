@@ -268,6 +268,72 @@ class UserStore(Protocol):
         ...
 
 
+def _merge_existing_oauth_user(
+    existing: OAuthUser,
+    *,
+    provider: str,
+    provider_user_id: str,
+    name: str,
+    email: str,
+    avatar_url: str,
+    github_access_token: str,
+    github_username: str,
+    now: str,
+) -> OAuthUser:
+    """Refresh an existing OAuth record with a fresh sign-in.
+
+    Non-empty incoming values win; empty ones keep the stored values.
+    """
+    return OAuthUser(
+        id=existing.id,
+        provider=provider,
+        provider_user_id=provider_user_id,
+        name=name or existing.name,
+        email=email or existing.email,
+        avatar_url=avatar_url or existing.avatar_url,
+        github_access_token=github_access_token or existing.github_access_token,
+        created_at=existing.created_at,
+        updated_at=now,
+        github_id=provider_user_id if provider == "github" else existing.github_id,
+        github_username=github_username or existing.github_username,
+        google_sub=provider_user_id if provider == "google" else existing.google_sub,
+        plan=existing.plan,
+        stripe_customer_id=existing.stripe_customer_id,
+        status=existing.status,
+        is_admin=existing.is_admin,
+        last_login_at=now,
+    )
+
+
+def _new_oauth_user(
+    *,
+    provider: str,
+    provider_user_id: str,
+    name: str,
+    email: str,
+    avatar_url: str,
+    github_access_token: str,
+    github_username: str,
+    now: str,
+) -> OAuthUser:
+    """Build a first-time OAuth record."""
+    return OAuthUser(
+        id=uuid.uuid4().hex,
+        provider=provider,
+        provider_user_id=provider_user_id,
+        name=name,
+        email=email,
+        avatar_url=avatar_url,
+        github_access_token=github_access_token,
+        created_at=now,
+        updated_at=now,
+        github_id=provider_user_id if provider == "github" else "",
+        github_username=github_username,
+        google_sub=provider_user_id if provider == "google" else "",
+        last_login_at=now,
+    )
+
+
 class OAuthUserStore:
     """Server-side user + OAuth token store (JSON, mode 0600).
 
@@ -323,44 +389,29 @@ class OAuthUserStore:
             records = self._load()
             for index, existing in enumerate(records):
                 if existing.provider == provider and existing.provider_user_id == provider_user_id:
-                    updated = OAuthUser(
-                        id=existing.id,
+                    updated = _merge_existing_oauth_user(
+                        existing,
                         provider=provider,
                         provider_user_id=provider_user_id,
-                        name=name or existing.name,
-                        email=email or existing.email,
-                        avatar_url=avatar_url or existing.avatar_url,
-                        github_access_token=github_access_token or existing.github_access_token,
-                        created_at=existing.created_at,
-                        updated_at=now,
-                        github_id=provider_user_id if provider == "github" else existing.github_id,
-                        github_username=github_username or existing.github_username,
-                        google_sub=provider_user_id
-                        if provider == "google"
-                        else existing.google_sub,
-                        plan=existing.plan,
-                        stripe_customer_id=existing.stripe_customer_id,
-                        status=existing.status,
-                        is_admin=existing.is_admin,
-                        last_login_at=now,
+                        name=name,
+                        email=email,
+                        avatar_url=avatar_url,
+                        github_access_token=github_access_token,
+                        github_username=github_username,
+                        now=now,
                     )
                     records[index] = updated
                     self._save(records)
                     return updated
-            user = OAuthUser(
-                id=uuid.uuid4().hex,
+            user = _new_oauth_user(
                 provider=provider,
                 provider_user_id=provider_user_id,
                 name=name,
                 email=email,
                 avatar_url=avatar_url,
                 github_access_token=github_access_token,
-                created_at=now,
-                updated_at=now,
-                github_id=provider_user_id if provider == "github" else "",
                 github_username=github_username,
-                google_sub=provider_user_id if provider == "google" else "",
-                last_login_at=now,
+                now=now,
             )
             records.append(user)
             self._save(records)
@@ -561,6 +612,19 @@ def _set_session_cookie(response: RedirectResponse, user_id: str, secret: str) -
     )
 
 
+def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]:
+    """Map a GitHub profile payload to ``OAuthUserStore.upsert()`` kwargs."""
+    return {
+        "provider": "github",
+        "provider_user_id": str(profile["id"]),
+        "name": str(profile.get("name") or profile.get("login") or ""),
+        "email": str(profile.get("email") or ""),
+        "avatar_url": str(profile.get("avatar_url") or ""),
+        "github_access_token": token,
+        "github_username": str(profile.get("login") or ""),
+    }
+
+
 @router.get("/github/callback")
 async def github_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
     config = oauth_config()
@@ -573,15 +637,7 @@ async def github_callback(code: str | None = None, state: str | None = None) -> 
 
     token = _exchange_github_code(config, code)
     profile = _github_profile(token)
-    user = get_oauth_user_store().upsert(
-        provider="github",
-        provider_user_id=str(profile["id"]),
-        name=str(profile.get("name") or profile.get("login") or ""),
-        email=str(profile.get("email") or ""),
-        avatar_url=str(profile.get("avatar_url") or ""),
-        github_access_token=token,
-        github_username=str(profile.get("login") or ""),
-    )
+    user = get_oauth_user_store().upsert(**_github_upsert_fields(profile, token))
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)

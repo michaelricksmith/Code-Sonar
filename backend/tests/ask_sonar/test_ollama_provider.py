@@ -36,7 +36,7 @@ def _context() -> dict[str, object]:
     }
 
 
-def test_ollama_provider_sends_grounded_json_prompt() -> None:
+def _provider_with_capturing_transport() -> tuple[OllamaAnswerProvider, dict[str, object]]:
     captured: dict[str, object] = {}
 
     def transport(url: str, payload: bytes, timeout: float) -> bytes:
@@ -63,8 +63,13 @@ def test_ollama_provider_sends_grounded_json_prompt() -> None:
         timeout_seconds=12.0,
         transport=transport,
     )
+    return provider, captured
 
-    result = provider.answer("Why is my score a B?", _context())
+
+def test_ollama_provider_sends_grounded_json_prompt() -> None:
+    provider, captured = _provider_with_capturing_transport()
+
+    provider.answer("Why is my score a B?", _context())
 
     assert captured["url"] == "http://127.0.0.1:11434/api/chat"
     assert captured["timeout"] == 12.0
@@ -76,6 +81,13 @@ def test_ollama_provider_sends_grounded_json_prompt() -> None:
     prompt = request_body["messages"][0]["content"]
     assert "Allowed sources: [\"deterministic\"]" in prompt
     assert "Never invent repository facts" in prompt
+
+
+def test_ollama_provider_returns_grounded_answer() -> None:
+    provider, _ = _provider_with_capturing_transport()
+
+    result = provider.answer("Why is my score a B?", _context())
+
     assert result.answer == "The deterministic score is 720, grade B."
     assert result.used_sources == ("deterministic",)
     assert result.provider_name == "ollama"

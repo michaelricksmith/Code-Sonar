@@ -126,6 +126,31 @@ def _count_lines(path: Path) -> int:
         return 0
 
 
+def _add_test_stems(stem: str, test_stems: Set[str]) -> None:
+    """Add a test file stem plus the source-module stem it implies."""
+    if stem == "__init__":
+        return
+    test_stems.add(stem)
+    # If the test file is named after a source module, capture that.
+    if stem.startswith("test_"):
+        test_stems.add(stem[len("test_"):])
+    elif stem.endswith("_test"):
+        test_stems.add(stem[: -len("_test")])
+
+
+def _collect_test_stems(
+    python_files: list[Path], rel_paths: list[tuple[str, ...]]
+) -> tuple[Set[str], bool]:
+    """Collect stems of all test files under tests/ directories."""
+    test_stems: Set[str] = set()
+    has_tests_dir = False
+    for fp, parts in zip(python_files, rel_paths):
+        if _is_test_file(parts):
+            has_tests_dir = True
+            _add_test_stems(fp.stem, test_stems)
+    return test_stems, has_tests_dir
+
+
 class TestingDebtAnalyzer(Analyzer):
     """Heuristic detector for missing Python test coverage."""
 
@@ -153,21 +178,7 @@ class TestingDebtAnalyzer(Analyzer):
             p.resolve().relative_to(repo_path).parts for p in all_python
         ]
 
-        # Collect stems of all test files under tests/ directories.
-        test_stems: Set[str] = set()
-        has_tests_dir = False
-        for fp, parts in zip(all_python, rel_paths):
-            if _is_test_file(parts):
-                has_tests_dir = True
-                stem = fp.stem
-                if stem == "__init__":
-                    continue
-                test_stems.add(stem)
-                # If the test file is named after a source module, capture that.
-                if stem.startswith("test_"):
-                    test_stems.add(stem[len("test_"):])
-                elif stem.endswith("_test"):
-                    test_stems.add(stem[: -len("_test")])
+        test_stems, has_tests_dir = _collect_test_stems(all_python, rel_paths)
 
         findings: list[Finding] = []
 
@@ -175,25 +186,38 @@ class TestingDebtAnalyzer(Analyzer):
             findings.append(self._build_missing_tests_dir_finding(repo_path))
 
         for fp, parts in zip(all_python, rel_paths):
-            if _is_test_file(parts):
-                continue  # skip test files themselves
-            stem = fp.stem
-            if stem == "__init__":
-                continue
-            rel = "/".join(parts)
-            if stem in test_stems:
-                continue
-            # Untested module.
-            line_count = _count_lines(fp)
-            if line_count == 0:
-                continue
-            findings.append(self._build_untested_module_finding(
-                fp=fp,
-                repo_root=repo_path,
-                rel=rel,
-                line_count=line_count,
-            ))
+            finding = self._untested_module_finding(
+                fp, parts, test_stems, repo_path
+            )
+            if finding is not None:
+                findings.append(finding)
         return findings
+
+    def _untested_module_finding(
+        self,
+        fp: Path,
+        parts: tuple[str, ...],
+        test_stems: Set[str],
+        repo_root: Path,
+    ) -> Finding | None:
+        if _is_test_file(parts):
+            return None  # skip test files themselves
+        stem = fp.stem
+        if stem == "__init__":
+            return None
+        if stem in test_stems:
+            return None
+        # Untested module.
+        line_count = _count_lines(fp)
+        if line_count == 0:
+            return None
+        rel = "/".join(parts)
+        return self._build_untested_module_finding(
+            fp=fp,
+            repo_root=repo_root,
+            rel=rel,
+            line_count=line_count,
+        )
 
     def _build_untested_module_finding(
         self,

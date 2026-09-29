@@ -72,6 +72,27 @@ def make_repo(tmp_path):
     return _make
 
 
+def _assert_finding_identity(
+    finding, filename: str, severity: FindingSeverity
+) -> None:
+    """Core identity assertions every named-kind finding must satisfy."""
+    assert finding.severity == severity
+    assert finding.category == FindingCategory.SECURITY
+    assert finding.analyzer == "secrets"
+    assert finding.confidence >= 0.70
+    assert finding.debt_points > 0
+    assert finding.file_path == filename
+    assert finding.line_start == 1
+
+
+def _assert_evidence_redacted(finding, body: str) -> None:
+    """Evidence must NOT echo the live secret. Only the redacted form."""
+    assert body.strip().split('"')[1] not in finding.evidence
+    # Redaction marker must be present.
+    assert "match=" in finding.evidence
+    assert "kind=" in finding.evidence
+
+
 class TestNamedKindDetection:
     def test_gh_token_line_triggers_both_gh_token_and_generic_heuristic(
         self, analyzer, make_repo
@@ -110,18 +131,8 @@ class TestNamedKindDetection:
         rule_findings = [f for f in findings if f.rule_id == rule_prefix]
         assert len(rule_findings) >= 1
         f = rule_findings[0]
-        assert f.severity == severity
-        assert f.category == FindingCategory.SECURITY
-        assert f.analyzer == "secrets"
-        assert f.confidence >= 0.70
-        assert f.debt_points > 0
-        assert f.file_path == filename
-        assert f.line_start == 1
-        # Evidence must NOT echo the live secret. Only the redacted form.
-        assert body.strip().split('"')[1] not in f.evidence
-        # Redaction marker must be present.
-        assert "match=" in f.evidence
-        assert "kind=" in f.evidence
+        _assert_finding_identity(f, filename, severity)
+        _assert_evidence_redacted(f, body)
 
 
 class TestNegativeCases:

@@ -23,6 +23,17 @@ from app.models.finding import FindingCategory, FindingSeverity
 
 
 class TestOversizedFilesAnalyzer:
+    @staticmethod
+    def _analyze_repo(repo_path, threshold):
+        analyzer = OversizedFilesAnalyzer(threshold=threshold)
+        return analyzer.analyze(repo_path)
+
+    @staticmethod
+    def _finding_by_name(findings, name):
+        return next(
+            (f for f in findings if Path(f.file_path).name == name), None
+        )
+
     def test_file_below_threshold_no_finding(self, mixed_repo, threshold):
         analyzer = OversizedFilesAnalyzer(threshold=threshold)
         findings = analyzer.analyze(mixed_repo)
@@ -37,14 +48,18 @@ class TestOversizedFilesAnalyzer:
         assert exact == [], "File at threshold must not produce a finding"
 
     def test_file_above_threshold_emits_warning(self, mixed_repo, threshold):
-        analyzer = OversizedFilesAnalyzer(threshold=threshold)
-        findings = analyzer.analyze(mixed_repo)
-        big = next(
-            (f for f in findings if Path(f.file_path).name == "big.py"), None
-        )
+        findings = self._analyze_repo(mixed_repo, threshold)
+        big = self._finding_by_name(findings, "big.py")
         assert big is not None, "big.py (501 lines) must produce a finding"
         assert big.severity == FindingSeverity.WARNING
         assert big.category == FindingCategory.MAINTAINABILITY
+
+    def test_file_above_threshold_finding_metadata(
+        self, mixed_repo, threshold
+    ):
+        findings = self._analyze_repo(mixed_repo, threshold)
+        big = self._finding_by_name(findings, "big.py")
+        assert big is not None, "big.py (501 lines) must produce a finding"
         assert big.analyzer == "oversized_files"
         assert big.rule_id == "oversized_files:over-threshold"
         assert big.metadata["line_count"] == 501

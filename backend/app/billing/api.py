@@ -182,16 +182,66 @@ def _first_price_id(container: Any) -> str | None:
     return str(price.get("id") or "") or None
 
 
+def _resolve_checkout_plan(session: Any, metadata: dict[str, Any]) -> str | None:
+    """Plan for a completed checkout: price id first, then metadata tier."""
+    plan = _plan_for_price_id(_first_price_id(session))
+    if plan is None:
+        tier = str(metadata.get("tier") or "")
+        plan = tier if tier in _PAID_TIERS else None
+    return plan
+
+
+def _lookup_receipt_period_end(subscription_id: str) -> dt.datetime | None:
+    """Current period end of the subscription for the receipt email.
+
+    Best-effort: returns None when the subscription cannot be looked up.
+    """
+    if not subscription_id or not stripe_configured():
+        return None
+    try:
+        import stripe
+
+        stripe.api_key = _stripe_api_key()
+        sub = stripe.Subscription.retrieve(subscription_id)
+        current_period_end = getattr(sub, "current_period_end", None)
+        if current_period_end:
+            return dt.datetime.fromtimestamp(
+                int(current_period_end), tz=dt.timezone.utc
+            )
+    except Exception as exc:  # noqa: BLE001 - receipt is best-effort
+        logger.warning("subscription lookup for receipt failed: %s", exc)
+    return None
+
+
+def _send_purchase_receipt(
+    user_id: str, plan: str, period_end: dt.datetime | None
+) -> None:
+    """Post-purchase acknowledgment (CA AB 2863): recurring-price /
+    cancel-instructions receipt. Never fails the webhook."""
+    user = get_oauth_user_store().get(user_id)
+    if user is None or not user.email:
+        return
+    try:
+        email_module.send_email(
+            email_module.purchase_receipt_email(
+                to=user.email,
+                plan_name=plan_display_name(plan),
+                amount=_PLAN_AMOUNTS.get(plan, "?"),
+                renews_at=period_end.isoformat() if period_end else None,
+                cancel_url=_cancel_page_url(),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the webhook on email
+        logger.warning("purchase receipt email failed: %s", exc)
+
+
 def _handle_checkout_completed(session: Any) -> None:
     metadata = session.get("metadata") or {}
     user_id = str(session.get("client_reference_id") or metadata.get("user_id") or "")
     if not user_id:
         logger.warning("checkout.session.completed without a user reference; skipping")
         return
-    plan = _plan_for_price_id(_first_price_id(session))
-    if plan is None:
-        tier = str(metadata.get("tier") or "")
-        plan = tier if tier in _PAID_TIERS else None
+    plan = _resolve_checkout_plan(session, metadata)
     if plan is None:
         logger.warning("checkout.session.completed with unrecognized tier; skipping")
         return
@@ -199,20 +249,7 @@ def _handle_checkout_completed(session: Any) -> None:
     # Post-purchase acknowledgment (CA AB 2863): record the subscription
     # link and send the recurring-price / cancel-instructions receipt.
     subscription_id = str(session.get("subscription") or "")
-    period_end: dt.datetime | None = None
-    if subscription_id and stripe_configured():
-        try:
-            import stripe
-
-            stripe.api_key = _stripe_api_key()
-            sub = stripe.Subscription.retrieve(subscription_id)
-            current_period_end = getattr(sub, "current_period_end", None)
-            if current_period_end:
-                period_end = dt.datetime.fromtimestamp(
-                    int(current_period_end), tz=dt.timezone.utc
-                )
-        except Exception as exc:  # noqa: BLE001 - receipt is best-effort
-            logger.warning("subscription lookup for receipt failed: %s", exc)
+    period_end = _lookup_receipt_period_end(subscription_id)
     get_compliance_store().append(
         user_id=user_id,
         record_type=AUTORENEW_CONSENT,
@@ -225,46 +262,29 @@ def _handle_checkout_completed(session: Any) -> None:
             "stripe_subscription_id": subscription_id,
         },
     )
-    user = get_oauth_user_store().get(user_id)
-    if user is not None and user.email:
-        try:
-            email_module.send_email(
-                email_module.purchase_receipt_email(
-                    to=user.email,
-                    plan_name=plan_display_name(plan),
-                    amount=_PLAN_AMOUNTS.get(plan, "?"),
-                    renews_at=period_end.isoformat() if period_end else None,
-                    cancel_url=_cancel_page_url(),
-                )
-            )
-        except Exception as exc:  # noqa: BLE001 - never fail the webhook on email
-            logger.warning("purchase receipt email failed: %s", exc)
+    _send_purchase_receipt(user_id, plan, period_end)
 
 
-def _handle_subscription_updated(subscription: Any) -> None:
-    metadata = subscription.get("metadata") or {}
-    user_id = str(metadata.get("user_id") or "")
+def _first_item_price_id(subscription: Any) -> str | None:
+    """Price id of the subscription's first item, or None when absent."""
     items = (subscription.get("items") or {}).get("data") or []
-    price_id: str | None = None
-    if items:
-        price = items[0].get("price") or {}
-        price_id = str(price.get("id") or "") or None
-    plan = _plan_for_price_id(price_id)
-    if not user_id or plan is None:
-        logger.info(
-            "customer.subscription.updated skipped (user known: %s, price recognized: %s)",
-            bool(user_id),
-            plan is not None,
-        )
-        return
-    _apply_billing(user_id, plan=plan, stripe_customer_id="")
-    # Track scheduled cancellations made through the Stripe portal so the
-    # in-app billing state stays accurate.
-    cancel_at_period_end = bool(subscription.get("cancel_at_period_end"))
-    store = get_compliance_store()
-    latest = store.latest(user_id, CANCELLATION)
-    previously_scheduled = bool(latest and latest.payload.get("scheduled"))
-    subscription_id = str(subscription.get("id") or "")
+    if not items:
+        return None
+    price = items[0].get("price") or {}
+    return str(price.get("id") or "") or None
+
+
+def _record_cancellation_change(
+    store: Any,
+    *,
+    user_id: str,
+    plan: str,
+    subscription_id: str,
+    cancel_at_period_end: bool,
+    previously_scheduled: bool,
+) -> None:
+    """Track scheduled cancellations made through the Stripe portal so the
+    in-app billing state stays accurate."""
     if cancel_at_period_end and not previously_scheduled:
         store.append(
             user_id=user_id,
@@ -287,6 +307,31 @@ def _handle_subscription_updated(subscription: Any) -> None:
                 "stripe_subscription_id": subscription_id,
             },
         )
+
+
+def _handle_subscription_updated(subscription: Any) -> None:
+    metadata = subscription.get("metadata") or {}
+    user_id = str(metadata.get("user_id") or "")
+    plan = _plan_for_price_id(_first_item_price_id(subscription))
+    if not user_id or plan is None:
+        logger.info(
+            "customer.subscription.updated skipped (user known: %s, price recognized: %s)",
+            bool(user_id),
+            plan is not None,
+        )
+        return
+    _apply_billing(user_id, plan=plan, stripe_customer_id="")
+    store = get_compliance_store()
+    latest = store.latest(user_id, CANCELLATION)
+    previously_scheduled = bool(latest and latest.payload.get("scheduled"))
+    _record_cancellation_change(
+        store,
+        user_id=user_id,
+        plan=plan,
+        subscription_id=str(subscription.get("id") or ""),
+        cancel_at_period_end=bool(subscription.get("cancel_at_period_end")),
+        previously_scheduled=previously_scheduled,
+    )
 
 
 def _handle_subscription_deleted(subscription: Any) -> None:

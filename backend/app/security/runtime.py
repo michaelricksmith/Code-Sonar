@@ -75,6 +75,26 @@ def validate_runtime_security_config() -> None:
     configured_origins()
 
 
+def _parse_tenant_token_bindings(raw: str) -> dict[str, str]:
+    """Parse the JSON ``CODESONAR_API_TENANT_TOKENS`` value (already stripped)."""
+    bindings: dict[str, str] = {}
+    if not raw:
+        return bindings
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be a JSON object")
+    for tenant_id, credential in parsed.items():
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            raise RuntimeError("Tenant identifiers must be non-empty strings")
+        if not isinstance(credential, str) or not credential.strip():
+            raise RuntimeError("Tenant API tokens must be non-empty strings")
+        bindings[tenant_id.strip()] = credential.strip()
+    return bindings
+
+
 def configured_tenant_credentials() -> dict[str, str]:
     """Load server-owned tenant-to-token bindings.
 
@@ -82,21 +102,8 @@ def configured_tenant_credentials() -> dict[str, str]:
     remains supported and is bound to ``CODESONAR_TENANT_ID`` (``local`` by
     default). Caller-supplied tenant headers are intentionally ignored.
     """
-    bindings: dict[str, str] = {}
     raw = os.environ.get("CODESONAR_API_TENANT_TOKENS", "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be valid JSON") from exc
-        if not isinstance(parsed, dict):
-            raise RuntimeError("CODESONAR_API_TENANT_TOKENS must be a JSON object")
-        for tenant_id, credential in parsed.items():
-            if not isinstance(tenant_id, str) or not tenant_id.strip():
-                raise RuntimeError("Tenant identifiers must be non-empty strings")
-            if not isinstance(credential, str) or not credential.strip():
-                raise RuntimeError("Tenant API tokens must be non-empty strings")
-            bindings[tenant_id.strip()] = credential.strip()
+    bindings = _parse_tenant_token_bindings(raw)
     legacy = os.environ.get("CODESONAR_API_TOKEN", "").strip()
     if legacy:
         tenant_id = os.environ.get("CODESONAR_TENANT_ID", LOCAL_TENANT_ID).strip()
@@ -121,6 +128,59 @@ def _authenticate_tenant(authorization: str) -> str | None:
     return None
 
 
+def _reject_disallowed_origin(origin: str | None) -> Response | None:
+    """403 response when a request carries a non-allowlisted Origin header."""
+    allowed_origins = configured_origins()
+    if origin and origin.rstrip("/") not in allowed_origins:
+        return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
+    return None
+
+
+def _request_requires_auth(request: Request) -> bool:
+    return (
+        request.method != "OPTIONS"
+        and request.url.path.startswith("/api/")
+        and request.url.path not in WEBHOOK_PATHS
+        and request.url.path not in PUBLIC_AUTH_PATHS
+    )
+
+
+def _authenticate_request(request: Request) -> tuple[str | None, Response | None]:
+    """Authenticate a gated /api/ request.
+
+    Returns ``(tenant_id, None)`` when a valid Bearer token identifies the
+    tenant, ``(None, None)`` for a valid session cookie (session users share
+    the local tenant), ``(None, None)`` when unauthenticated access is still
+    allowed (local dev without configured credentials), and
+    ``(None, rejection)`` when the request must fail closed with a 401.
+    """
+    credentials = configured_tenant_credentials()
+    tenant_id = _authenticate_tenant(request.headers.get("authorization", ""))
+    if tenant_id is not None:
+        return tenant_id, None
+    if current_user(request) is not None:
+        return None, None
+    # Local dev without any configured credential keeps its
+    # unauthenticated ergonomics; every other deployment fails closed.
+    if credentials or not local_dev_enabled():
+        return None, JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return None, None
+
+
+def _apply_cors_headers(response: Response, origin: str | None) -> None:
+    if not origin:
+        return
+    response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = (
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    )
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Authorization, Content-Type, X-GitHub-Event, "
+        "X-GitHub-Delivery, X-Hub-Signature-256"
+    )
+
+
 class ApiBoundaryMiddleware(BaseHTTPMiddleware):
     """Enforce authentication and an exact CORS origin allowlist.
 
@@ -132,25 +192,14 @@ class ApiBoundaryMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         origin = request.headers.get("origin")
-        allowed_origins = configured_origins()
-        if origin and origin.rstrip("/") not in allowed_origins:
-            return JSONResponse({"detail": "Origin is not allowed"}, status_code=403)
+        rejection = _reject_disallowed_origin(origin)
+        if rejection is not None:
+            return rejection
 
-        if (
-            request.method != "OPTIONS"
-            and request.url.path.startswith("/api/")
-            and request.url.path not in WEBHOOK_PATHS
-            and request.url.path not in PUBLIC_AUTH_PATHS
-        ):
-            credentials = configured_tenant_credentials()
-            tenant_id = _authenticate_tenant(request.headers.get("authorization", ""))
-            session_user = current_user(request) if tenant_id is None else None
-            if tenant_id is None and session_user is None:
-                # Local dev without any configured credential keeps its
-                # unauthenticated ergonomics; every other deployment fails closed.
-                if credentials or not local_dev_enabled():
-                    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-
+        if _request_requires_auth(request):
+            tenant_id, rejection = _authenticate_request(request)
+            if rejection is not None:
+                return rejection
             # Session-cookie users share the local tenant, matching the
             # single-tenant dashboard posture.
             tenant_token = bind_tenant(tenant_id or LOCAL_TENANT_ID)
@@ -164,14 +213,5 @@ class ApiBoundaryMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
         finally:
             reset_tenant(tenant_token)
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Methods"] = (
-                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            )
-            response.headers["Access-Control-Allow-Headers"] = (
-                "Authorization, Content-Type, X-GitHub-Event, "
-                "X-GitHub-Delivery, X-Hub-Signature-256"
-            )
+        _apply_cors_headers(response, origin)
         return response

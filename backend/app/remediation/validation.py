@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
-from app.history import HistoryStore, JsonlHistoryStore, build_scan_record
+from app.history import HistoryStore, JsonlHistoryStore, ScanRecord, build_scan_record
 from app.ml.outcomes import JsonlOutcomeStore, RemediationOutcome
 from app.ml.outcomes.labels import remediation_success_label
 from app.models.finding import Finding
@@ -174,28 +174,17 @@ class RemediationValidationService:
         ).hexdigest()[:20]
         return f"remediation-{digest}"
 
-    def validate(
-        self,
-        *,
-        request_id: str,
-        workspace_path: str,
-        before_scan_id: str,
-        finding_id: str,
-        executor: str,
-        remediation_kind: str,
-        attempted_at: str | None = None,
-    ) -> RemediationValidationResult:
-        workspace = self._verify_workspace(workspace_path)
+    def _load_before_scan(self, before_scan_id: str, finding_id: str) -> ScanRecord:
         before = self.history_store.get(before_scan_id)
         if before is None:
             raise LookupError("Original persisted scan was not found")
         if not any(finding.id == finding_id for finding in before.findings):
             raise LookupError("Target finding was not present in the original scan")
+        return before
 
-        outcome_id = self._outcome_id(request_id, before.scan_id, finding_id)
-        if self.outcome_store.get(outcome_id) is not None:
-            raise FileExistsError("Remediation outcome already exists")
-
+    def _run_validation_commands(
+        self, workspace: Path
+    ) -> tuple[ValidationCommandResult, ...]:
         command_results: list[ValidationCommandResult] = []
         for command in self.commands:
             if not command.argv:
@@ -213,11 +202,9 @@ class RemediationValidationService:
                     returncode=returncode,
                 )
             )
+        return tuple(command_results)
 
-        command_tuple = tuple(command_results)
-        build_passed = self._aggregate_kind(command_tuple, "build")
-        tests_passed = self._aggregate_kind(command_tuple, "tests")
-
+    def _rescan_findings(self, workspace: Path) -> list[Finding]:
         scan_output = self.scanner(workspace)
         if isinstance(scan_output, ScanExecutionResult):
             if not scan_output.complete:
@@ -229,9 +216,12 @@ class RemediationValidationService:
                 raise RuntimeError(
                     f"Remediation rescan incomplete; failed analyzers: {failed}"
                 )
-            findings = list(scan_output.findings)
-        else:
-            findings = scan_output
+            return list(scan_output.findings)
+        return scan_output
+
+    def _persist_after_scan(
+        self, before: ScanRecord, findings: list[Finding]
+    ) -> ScanRecord:
         scoring = calculate_score(findings)
         after = build_scan_record(
             repository_id=before.repository_id,
@@ -240,7 +230,23 @@ class RemediationValidationService:
             scoring=scoring,
         )
         self.history_store.append(after)
+        return after
 
+    def _record_outcome(
+        self,
+        *,
+        request_id: str,
+        outcome_id: str,
+        before: ScanRecord,
+        after: ScanRecord,
+        finding_id: str,
+        executor: str,
+        remediation_kind: str,
+        build_passed: bool | None,
+        tests_passed: bool | None,
+        command_results: tuple[ValidationCommandResult, ...],
+        attempted_at: str | None,
+    ) -> RemediationValidationResult:
         finding_resolved = not any(finding.id == finding_id for finding in after.findings)
         score_delta = after.score - before.score
         debt_points_delta = after.total_debt_points - before.total_debt_points
@@ -277,7 +283,45 @@ class RemediationValidationService:
             debt_points_delta=debt_points_delta,
             build_passed=build_passed,
             tests_passed=tests_passed,
-            command_results=command_tuple,
+            command_results=command_results,
             training_label_value=label.value,
             training_label_trust_tier=label.trust_tier.value,
+        )
+
+    def validate(
+        self,
+        *,
+        request_id: str,
+        workspace_path: str,
+        before_scan_id: str,
+        finding_id: str,
+        executor: str,
+        remediation_kind: str,
+        attempted_at: str | None = None,
+    ) -> RemediationValidationResult:
+        workspace = self._verify_workspace(workspace_path)
+        before = self._load_before_scan(before_scan_id, finding_id)
+        outcome_id = self._outcome_id(request_id, before.scan_id, finding_id)
+        if self.outcome_store.get(outcome_id) is not None:
+            raise FileExistsError("Remediation outcome already exists")
+
+        command_results = self._run_validation_commands(workspace)
+        build_passed = self._aggregate_kind(command_results, "build")
+        tests_passed = self._aggregate_kind(command_results, "tests")
+
+        findings = self._rescan_findings(workspace)
+        after = self._persist_after_scan(before, findings)
+
+        return self._record_outcome(
+            request_id=request_id,
+            outcome_id=outcome_id,
+            before=before,
+            after=after,
+            finding_id=finding_id,
+            executor=executor,
+            remediation_kind=remediation_kind,
+            build_passed=build_passed,
+            tests_passed=tests_passed,
+            command_results=command_results,
+            attempted_at=attempted_at,
         )

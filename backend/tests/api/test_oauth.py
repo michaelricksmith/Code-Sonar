@@ -130,25 +130,32 @@ class TestGitHubLogin:
 
 
 class TestGitHubCallback:
-    def test_callback_creates_user_sets_cookie_and_redirects(
-        self, client, oauth_http, oauth_store
-    ):
+    def _perform_github_callback(self, client, oauth_http, oauth_store):
+        """Run the GitHub callback once and return (response, stored user)."""
         state = new_state(_TEST_SECRET)
         response = client.get(
             "/api/auth/github/callback",
             params={"code": "auth-code", "state": state},
             follow_redirects=False,
         )
+        stored = oauth_store.get(oauth_store._load()[0].id)
+        return response, stored
+
+    def test_callback_redirects_to_app(self, client, oauth_http, oauth_store):
+        response, _ = self._perform_github_callback(client, oauth_http, oauth_store)
         assert response.status_code == 302
         assert response.headers["location"] == "/app"
 
+    def test_callback_sets_session_cookie(self, client, oauth_http, oauth_store):
+        response, _ = self._perform_github_callback(client, oauth_http, oauth_store)
         set_cookie = response.headers["set-cookie"]
         assert "sonar_session=" in set_cookie
         assert "HttpOnly" in set_cookie
         assert "Secure" in set_cookie
         assert "SameSite=Lax" in set_cookie or "samesite=lax" in set_cookie.lower()
 
-        stored = oauth_store.get(oauth_store._load()[0].id)
+    def test_callback_creates_github_user(self, client, oauth_http, oauth_store):
+        _, stored = self._perform_github_callback(client, oauth_http, oauth_store)
         assert stored is not None
         assert stored.provider == "github"
         assert stored.name == "Mike S"

@@ -119,20 +119,35 @@ def test_context_returns_404_for_unknown_scan(client: TestClient) -> None:
     assert detail["scan_id"] == "missing"
 
 
-def test_context_returns_authoritative_scan_facts_without_ml(client: TestClient) -> None:
+def _context_payload(client: TestClient) -> dict[str, Any]:
     record = _record()
     set_scan_provider(lambda scan_id: record if scan_id == "scan-1" else None)
 
     response = client.get("/api/ask-sonar/context/scan-1")
 
     assert response.status_code == 200
-    data = response.json()
+    return response.json()
+
+
+def test_context_returns_authoritative_scan_facts_without_ml(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["context_schema_version"] == "1.0"
+    assert data["deterministic"]["score"] == 720
+    assert data["deterministic"]["grade"] == "B"
+
+
+def test_context_marks_deterministic_source_as_authoritative(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["deterministic_score_unchanged"] is True
     assert data["source_policy"]["deterministic_is_authoritative"] is True
     assert data["allowed_sources"] == ["deterministic"]
-    assert data["deterministic"]["score"] == 720
-    assert data["deterministic"]["grade"] == "B"
+
+
+def test_context_reports_ml_and_similarity_as_unavailable(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["ml_prediction"]["status"] == "unavailable"
     assert data["historical_similarity"]["status"] == "unavailable"
 

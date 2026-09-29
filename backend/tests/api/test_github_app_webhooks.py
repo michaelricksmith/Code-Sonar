@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 
 from app.github_app import (
+    GitHubAppAuth,
     GitHubInstallation,
     GitHubInstallationStore,
     WebhookAuditStore,
@@ -71,28 +72,59 @@ def test_webhook_rejects_invalid_signature(monkeypatch: object) -> None:
     assert response.status_code == 401
 
 
-def test_install_url_uses_signed_state_and_callback_persists_identity_only(
-    tmp_path: Path,
-    monkeypatch: object,
-) -> None:
+def _setup_install_flow(
+    tmp_path: Path, monkeypatch: object
+) -> tuple[TestClient, FakeGitHubAppAuth, tuple[GitHubAppAuth, GitHubInstallationStore, int | None]]:
+    """Prepare the GitHub App install/callback environment.
+
+    Returns the test client, the fake auth backend, and the previously active
+    globals so a test can restore them in a ``finally`` block.
+    """
     monkeypatch.setenv("CODE_SONAR_GITHUB_APP_SLUG", "code-sonar-test")  # type: ignore[attr-defined]
     monkeypatch.setenv("CODE_SONAR_GITHUB_APP_STATE_SECRET", "state-secret")  # type: ignore[attr-defined]
-    previous_auth = get_github_app_auth()
-    previous_store = get_installation_store()
-    previous_active = get_active_installation_id()
+    previous = (get_github_app_auth(), get_installation_store(), get_active_installation_id())
     fake_auth = FakeGitHubAppAuth()
-    store = GitHubInstallationStore(tmp_path / "installations.json")
     set_github_app_auth(fake_auth)  # type: ignore[arg-type]
-    set_installation_store(store)
+    set_installation_store(GitHubInstallationStore(tmp_path / "installations.json"))
     set_active_installation_id(None)
-    client = TestClient(app)
+    return TestClient(app), fake_auth, previous
+
+
+def _restore_install_flow(
+    previous: tuple[GitHubAppAuth, GitHubInstallationStore, int | None],
+) -> None:
+    """Restore the globals replaced by :func:`_setup_install_flow`."""
+    previous_auth, previous_store, previous_active = previous
+    set_github_app_auth(previous_auth)
+    set_installation_store(previous_store)
+    set_active_installation_id(previous_active)
+
+
+def _install_state(client: TestClient) -> str:
+    """Fetch a fresh signed install state from the install-url endpoint."""
+    install = client.get("/api/github-app/install-url")
+    assert install.status_code == 200
+    return parse_qs(urlparse(install.json()["install_url"]).query)["state"][0]
+
+
+def test_install_url_uses_signed_state(tmp_path: Path, monkeypatch: object) -> None:
+    client, _, previous = _setup_install_flow(tmp_path, monkeypatch)
     try:
         install = client.get("/api/github-app/install-url")
         assert install.status_code == 200
         install_payload = install.json()
         assert install_payload["state_signed"] is True
-        state = parse_qs(urlparse(install_payload["install_url"]).query)["state"][0]
+    finally:
+        _restore_install_flow(previous)
 
+
+def test_callback_persists_installation_identity_only(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, _, previous = _setup_install_flow(tmp_path, monkeypatch)
+    try:
+        state = _install_state(client)
         callback = client.get(
             "/api/github-app/callback",
             params={"installation_id": 42, "setup_action": "install", "state": state},
@@ -103,14 +135,52 @@ def test_install_url_uses_signed_state_and_callback_persists_identity_only(
         assert payload["installation"]["installation_id"] == 42
         assert payload["token_persisted"] is False
         assert payload["token_exposed"] is False
+    finally:
+        _restore_install_flow(previous)
+
+
+def test_callback_records_installation_side_effects(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, fake_auth, previous = _setup_install_flow(tmp_path, monkeypatch)
+    try:
+        state = _install_state(client)
+        callback = client.get(
+            "/api/github-app/callback",
+            params={"installation_id": 42, "setup_action": "install", "state": state},
+        )
+        assert callback.status_code == 200
         assert fake_auth.detail_requests == [42]
         assert fake_auth.token_requests == []
         assert get_active_installation_id() == 42
+    finally:
+        _restore_install_flow(previous)
 
+
+def test_callback_persisted_installation_contains_no_secrets(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, _, previous = _setup_install_flow(tmp_path, monkeypatch)
+    try:
+        state = _install_state(client)
+        callback = client.get(
+            "/api/github-app/callback",
+            params={"installation_id": 42, "setup_action": "install", "state": state},
+        )
+        assert callback.status_code == 200
         persisted = (tmp_path / "installations.json").read_text(encoding="utf-8")
         assert "ephemeral-installation-token" not in persisted
         assert "state-secret" not in persisted
+    finally:
+        _restore_install_flow(previous)
 
+
+def test_callback_rejects_tampered_state(tmp_path: Path, monkeypatch: object) -> None:
+    client, _, previous = _setup_install_flow(tmp_path, monkeypatch)
+    try:
+        state = _install_state(client)
         tampered = client.get(
             "/api/github-app/callback",
             params={
@@ -121,9 +191,7 @@ def test_install_url_uses_signed_state_and_callback_persists_identity_only(
         )
         assert tampered.status_code == 400
     finally:
-        set_github_app_auth(previous_auth)
-        set_installation_store(previous_store)
-        set_active_installation_id(previous_active)
+        _restore_install_flow(previous)
 
 
 def test_activation_verifies_ephemeral_token_without_mutating_global_integration(
@@ -202,16 +270,29 @@ def test_unknown_installation_event_does_not_claim_a_tenant(
         set_webhook_audit_store(previous_audit)
 
 
-def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
-    tmp_path: Path,
-    monkeypatch: object,
-) -> None:
+def _setup_default_branch_push(
+    tmp_path: Path, monkeypatch: object
+) -> tuple[
+    TestClient,
+    bytes,
+    dict[str, str],
+    list[str],
+    tuple[ProjectStore, GitHubInstallationStore, WebhookAuditStore, WebhookScanJobStore],
+]:
+    """Prepare stores and a fake scan handler for a default-branch push webhook.
+
+    Returns the test client, the signed request body and headers, the recorded
+    scan calls, and the previously active globals so a test can restore them in
+    a ``finally`` block.
+    """
     secret = "webhook-secret"
     monkeypatch.setenv("CODE_SONAR_GITHUB_WEBHOOK_SECRET", secret)  # type: ignore[attr-defined]
-    previous_projects = get_project_store()
-    previous_installations = get_installation_store()
-    previous_audit = get_webhook_audit_store()
-    previous_jobs = get_webhook_job_store()
+    previous = (
+        get_project_store(),
+        get_installation_store(),
+        get_webhook_audit_store(),
+        get_webhook_job_store(),
+    )
     project_store = ProjectStore(tmp_path / "projects.json")
     project = ProjectRecord(
         project_id="proj_test",
@@ -252,20 +333,71 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
         "X-GitHub-Delivery": "delivery-push",
         "X-Hub-Signature-256": _signature(secret, body),
     }
+    return TestClient(app), body, headers, calls, previous
+
+
+def _restore_default_branch_push(
+    previous: tuple[
+        ProjectStore, GitHubInstallationStore, WebhookAuditStore, WebhookScanJobStore
+    ],
+) -> None:
+    """Restore the globals replaced by :func:`_setup_default_branch_push`."""
+    previous_projects, previous_installations, previous_audit, previous_jobs = previous
+    set_webhook_scan_handler(scan_project)
+    set_webhook_audit_store(previous_audit)
+    set_webhook_job_store(previous_jobs)
+    set_project_store(previous_projects)
+    set_installation_store(previous_installations)
+
+
+def test_default_branch_push_triggers_one_project_scan(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, body, headers, _calls, previous = _setup_default_branch_push(
+        tmp_path, monkeypatch
+    )
     try:
-        client = TestClient(app)
+        first = client.post("/api/github-app/webhook", content=body, headers=headers)
+        assert first.status_code == 200
+        assert first.json()["scan_triggered"] is True
+        assert first.json()["project_id"] == "proj_test"
+        assert isinstance(first.json()["job_id"], str)
+    finally:
+        _restore_default_branch_push(previous)
+
+
+def test_default_branch_push_deduplicates_repeated_delivery(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, body, headers, calls, previous = _setup_default_branch_push(
+        tmp_path, monkeypatch
+    )
+    try:
         first = client.post("/api/github-app/webhook", content=body, headers=headers)
         second = client.post("/api/github-app/webhook", content=body, headers=headers)
 
         assert first.status_code == 200
-        assert first.json()["scan_triggered"] is True
-        assert first.json()["project_id"] == "proj_test"
-        job_id = first.json()["job_id"]
-        assert isinstance(job_id, str)
         assert second.status_code == 200
         assert second.json()["duplicate"] is True
         assert second.json()["scan_triggered"] is False
         assert calls == ["proj_test"]
+    finally:
+        _restore_default_branch_push(previous)
+
+
+def test_default_branch_push_records_job_and_audit(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    client, body, headers, _calls, previous = _setup_default_branch_push(
+        tmp_path, monkeypatch
+    )
+    try:
+        first = client.post("/api/github-app/webhook", content=body, headers=headers)
+        assert first.status_code == 200
+        job_id = first.json()["job_id"]
 
         job = get_webhook_job_store().get(job_id)
         assert job is not None
@@ -276,11 +408,7 @@ def test_default_branch_push_triggers_one_project_scan_and_deduplicates(
         assert delivery.outcome == "scan_queued"
         assert delivery.job_id == job_id
     finally:
-        set_webhook_scan_handler(scan_project)
-        set_webhook_audit_store(previous_audit)
-        set_webhook_job_store(previous_jobs)
-        set_project_store(previous_projects)
-        set_installation_store(previous_installations)
+        _restore_default_branch_push(previous)
 
 
 def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypatch: object) -> None:

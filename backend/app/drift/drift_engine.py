@@ -239,20 +239,12 @@ def _empty_buckets() -> tuple[
     return {}, {}, {}
 
 
-def compute_drift(
+def _fill_summary_header(
+    summary: DriftSummary,
     baseline: ScanRecord | None,
     current: ScanRecord | None,
-) -> DriftResult:
-    """Compare ``current`` to ``baseline`` and return a DriftResult.
-
-    Either side may be None to represent "no prior scan" / "no
-    findings now". The result is deterministic for fixed inputs.
-    """
-    summary = DriftSummary()
-    findings: list[DriftFinding] = []
-    by_category, by_analyzer, by_severity = _empty_buckets()
-
-    # Header copy.
+) -> None:
+    """Copy scan headers into the summary. Either side may be None."""
     if baseline is not None:
         summary.baseline_scan_id = baseline.scan_id
         summary.baseline_scanned_at = baseline.scanned_at
@@ -268,6 +260,179 @@ def compute_drift(
         summary.current_total_debt_points = current.total_debt_points
         summary.current_finding_count = current.finding_count
 
+
+def _collect_bucket_keys(
+    baseline: ScanRecord | None,
+    current: ScanRecord | None,
+) -> tuple[set[str], set[str], set[str]]:
+    """Union of categories / analyzers / severities across both sides."""
+    categories: set[str] = set()
+    analyzers: set[str] = set()
+    severities: set[str] = set()
+    if baseline is not None:
+        for f in baseline.findings:
+            categories.add(f.category)
+            analyzers.add(f.analyzer)
+            severities.add(f.severity)
+    if current is not None:
+        for f in current.findings:
+            categories.add(f.category)
+            analyzers.add(f.analyzer)
+            severities.add(f.severity)
+    return categories, analyzers, severities
+
+
+def _seed_buckets(
+    by_category: DriftCategoryBreakdown,
+    by_analyzer: AnalyzerBreakdown,
+    by_severity: DriftSeverityBreakdown,
+    categories: set[str],
+    analyzers: set[str],
+    severities: set[str],
+) -> None:
+    """Ensure every observed key has a bucket, even with no findings."""
+    for cat in categories:
+        by_category.setdefault(cat, _BucketCounts())
+    for az in analyzers:
+        by_analyzer.setdefault(az, _BucketCounts())
+    for sev in severities:
+        by_severity.setdefault(sev, _BucketCounts())
+
+
+def _classify_risk_pair(baseline_risk: float, current_risk: float) -> str:
+    """Classify a paired finding from its baseline/current risk."""
+    if current_risk > baseline_risk:
+        return WORSENED
+    if current_risk < baseline_risk:
+        return IMPROVED
+    return PERSISTENT
+
+
+def _process_new_finding(
+    by_category: DriftCategoryBreakdown,
+    by_analyzer: AnalyzerBreakdown,
+    by_severity: DriftSeverityBreakdown,
+    summary: DriftSummary,
+    fid: str,
+    snap: FindingSnapshot,
+) -> DriftFinding:
+    summary.new_count += 1
+    risk = _risk(snap)
+    _bump_bucket(by_category[snap.category], NEW, snap, risk)
+    _bump_bucket(by_analyzer[snap.analyzer], NEW, snap, risk)
+    _bump_bucket(by_severity[snap.severity], NEW, snap, risk)
+    return _df_for_current(fid, snap, risk)
+
+
+def _process_resolved_finding(
+    by_category: DriftCategoryBreakdown,
+    by_analyzer: AnalyzerBreakdown,
+    by_severity: DriftSeverityBreakdown,
+    summary: DriftSummary,
+    fid: str,
+    snap: FindingSnapshot,
+) -> DriftFinding:
+    summary.resolved_count += 1
+    risk = _risk(snap)
+    _bump_bucket(by_category[snap.category], RESOLVED, snap, risk)
+    _bump_bucket(by_analyzer[snap.analyzer], RESOLVED, snap, risk)
+    _bump_bucket(by_severity[snap.severity], RESOLVED, snap, risk)
+    return _df_for_baseline(fid, snap, risk)
+
+
+def _process_paired_finding(
+    by_category: DriftCategoryBreakdown,
+    by_analyzer: AnalyzerBreakdown,
+    by_severity: DriftSeverityBreakdown,
+    summary: DriftSummary,
+    fid: str,
+    baseline: FindingSnapshot,
+    current: FindingSnapshot,
+) -> DriftFinding:
+    baseline_risk = _risk(baseline)
+    current_risk = _risk(current)
+    classification = _classify_risk_pair(baseline_risk, current_risk)
+    if classification == WORSENED:
+        summary.worsened_count += 1
+    elif classification == IMPROVED:
+        summary.improved_count += 1
+    else:
+        summary.persistent_count += 1
+    _bump_bucket_pair(
+        by_category[current.category],
+        classification,
+        baseline,
+        current,
+        baseline_risk,
+        current_risk,
+    )
+    _bump_bucket_pair(
+        by_analyzer[current.analyzer],
+        classification,
+        baseline,
+        current,
+        baseline_risk,
+        current_risk,
+    )
+    _bump_bucket_pair(
+        by_severity[current.severity],
+        classification,
+        baseline,
+        current,
+        baseline_risk,
+        current_risk,
+    )
+    return _df_for_pair(
+        fid, baseline, current, baseline_risk, current_risk, classification
+    )
+
+
+def _process_finding(
+    by_category: DriftCategoryBreakdown,
+    by_analyzer: AnalyzerBreakdown,
+    by_severity: DriftSeverityBreakdown,
+    summary: DriftSummary,
+    fid: str,
+    baseline: FindingSnapshot | None,
+    current: FindingSnapshot | None,
+) -> DriftFinding | None:
+    """Dispatch one finding id to its drift branch. None if unmatched."""
+    if baseline is None and current is not None:
+        return _process_new_finding(
+            by_category, by_analyzer, by_severity, summary, fid, current
+        )
+    if current is None and baseline is not None:
+        return _process_resolved_finding(
+            by_category, by_analyzer, by_severity, summary, fid, baseline
+        )
+    if baseline is not None and current is not None:
+        return _process_paired_finding(
+            by_category, by_analyzer, by_severity, summary, fid, baseline, current
+        )
+    return None
+
+
+def _finding_sort_key(d: DriftFinding) -> tuple[int, str]:
+    # Classification priority: NEW first, RESOLVED, WORSENED,
+    # IMPROVED, PERSISTENT. Tie-break on finding_id.
+    return (_CLASSIFICATION_ORDER[d.classification], d.finding_id)
+
+
+def compute_drift(
+    baseline: ScanRecord | None,
+    current: ScanRecord | None,
+) -> DriftResult:
+    """Compare ``current`` to ``baseline`` and return a DriftResult.
+
+    Either side may be None to represent "no prior scan" / "no
+    findings now". The result is deterministic for fixed inputs.
+    """
+    summary = DriftSummary()
+    findings: list[DriftFinding] = []
+    by_category, by_analyzer, by_severity = _empty_buckets()
+
+    _fill_summary_header(summary, baseline, current)
+
     summary.score_delta = summary.current_score - summary.baseline_score
     summary.debt_delta = (
         summary.current_total_debt_points - summary.baseline_total_debt_points
@@ -282,98 +447,31 @@ def compute_drift(
     current_by_id = _by_id(current.findings) if current else {}
 
     # Union of categories / analyzers / severities for stable keys.
-    all_categories: set[str] = set()
-    all_analyzers: set[str] = set()
-    all_severities: set[str] = set()
-    if baseline is not None:
-        for f in baseline.findings:
-            all_categories.add(f.category)
-            all_analyzers.add(f.analyzer)
-            all_severities.add(f.severity)
-    if current is not None:
-        for f in current.findings:
-            all_categories.add(f.category)
-            all_analyzers.add(f.analyzer)
-            all_severities.add(f.severity)
-
-    for cat in all_categories:
-        by_category.setdefault(cat, _BucketCounts())
-    for az in all_analyzers:
-        by_analyzer.setdefault(az, _BucketCounts())
-    for sev in all_severities:
-        by_severity.setdefault(sev, _BucketCounts())
+    categories, analyzers, severities = _collect_bucket_keys(baseline, current)
+    _seed_buckets(
+        by_category, by_analyzer, by_severity, categories, analyzers, severities
+    )
 
     # Process findings. Iteration order is the union of ids, sorted
     # lexicographically, so the result is deterministic.
     all_ids = sorted(set(baseline_by_id.keys()) | set(current_by_id.keys()))
 
     for fid in all_ids:
-        b = baseline_by_id.get(fid)
-        c = current_by_id.get(fid)
-        if b is None and c is not None:
-            classification = NEW
-            summary.new_count += 1
-            finding_risk = _risk(c)
-            _bump_bucket(by_category[c.category], classification, c, finding_risk)
-            _bump_bucket(by_analyzer[c.analyzer], classification, c, finding_risk)
-            _bump_bucket(by_severity[c.severity], classification, c, finding_risk)
-            findings.append(_df_for_current(fid, c, finding_risk))
-        elif c is None and b is not None:
-            classification = RESOLVED
-            summary.resolved_count += 1
-            baseline_risk = _risk(b)
-            _bump_bucket(by_category[b.category], classification, b, baseline_risk)
-            _bump_bucket(by_analyzer[b.analyzer], classification, b, baseline_risk)
-            _bump_bucket(by_severity[b.severity], classification, b, baseline_risk)
-            findings.append(_df_for_baseline(fid, b, baseline_risk))
-        elif b is not None and c is not None:
-            b_risk = _risk(b)
-            c_risk = _risk(c)
-            if c_risk > b_risk:
-                classification = WORSENED
-                summary.worsened_count += 1
-            elif c_risk < b_risk:
-                classification = IMPROVED
-                summary.improved_count += 1
-            else:
-                classification = PERSISTENT
-                summary.persistent_count += 1
-            _bump_bucket_pair(
-                by_category[c.category],
-                classification,
-                b,
-                c,
-                b_risk,
-                c_risk,
-            )
-            _bump_bucket_pair(
-                by_analyzer[c.analyzer],
-                classification,
-                b,
-                c,
-                b_risk,
-                c_risk,
-            )
-            _bump_bucket_pair(
-                by_severity[c.severity],
-                classification,
-                b,
-                c,
-                b_risk,
-                c_risk,
-            )
-            findings.append(_df_for_pair(fid, b, c, b_risk, c_risk, classification))
+        drift_finding = _process_finding(
+            by_category,
+            by_analyzer,
+            by_severity,
+            summary,
+            fid,
+            baseline_by_id.get(fid),
+            current_by_id.get(fid),
+        )
+        if drift_finding is not None:
+            findings.append(drift_finding)
 
     # Final findings list is sorted by (classification, finding_id)
     # for deterministic output ordering across re-runs.
-    findings.sort(
-        key=lambda d: (
-            # Classification priority: NEW first, RESOLVED, WORSENED,
-            # IMPROVED, PERSISTENT. Tie-break on finding_id.
-            _CLASSIFICATION_ORDER[d.classification],
-            d.finding_id,
-        )
-    )
+    findings.sort(key=_finding_sort_key)
 
     return DriftResult(
         summary=summary,

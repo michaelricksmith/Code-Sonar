@@ -69,6 +69,81 @@ def _parse_instruction(instruction: str) -> tuple[str, str] | None:
     return m.group(1), m.group(2)
 
 
+@dataclass
+class _SplitState:
+    """Mutable accumulator for the TypeScript block-splitting loop."""
+
+    blocks: list[_Block]
+    current: list[str]
+    current_name: str
+    current_kind: str
+    in_block: bool
+    depth: int
+    header_lines: list[str]
+
+
+def _is_header_line(stripped: str) -> bool:
+    """Check if a line belongs to the leading import/comment header."""
+    return (
+        stripped.startswith("import ")
+        or stripped.startswith("//")
+        or stripped.startswith("/*")
+        or stripped.startswith("*")
+        or stripped == ""
+        or stripped.startswith("#")
+    )
+
+
+def _export_block_name(line: str, index: int) -> str:
+    """Extract a file-safe base name from a top-level export line."""
+    nm = re.search(
+        r"export\s+(?:default\s+)?(?:async\s+)?"
+        r"(?:function|const|let|var|class|interface|type|enum)\s+(\w+)",
+        line,
+    )
+    return nm.group(1) if nm else f"export_{index}"
+
+
+def _flush_block(state: _SplitState) -> None:
+    """Append the in-progress block to the result, if any."""
+    if state.current:
+        state.blocks.append(_Block(
+            name=state.current_name or f"block_{len(state.blocks)}",
+            kind=state.current_kind,
+            text="\n".join(state.current).strip() + "\n",
+        ))
+
+
+def _start_export_block(state: _SplitState, line: str) -> None:
+    """Begin a new export block at a top-level `export` line."""
+    if state.in_block:
+        _flush_block(state)
+    state.current = [line]
+    state.current_kind = "export"
+    state.current_name = _export_block_name(line, len(state.blocks))
+    state.in_block = True
+
+
+def _append_internal_line(state: _SplitState, stripped: str, line: str) -> None:
+    """Append a non-exported top-level line to the internal block."""
+    if not stripped:
+        return
+    if not state.current or state.current_kind != "internal":
+        _flush_block(state)
+        state.current = []
+        state.current_kind = "internal"
+        state.current_name = f"internal_{len(state.blocks)}"
+        state.in_block = True
+    state.current.append(line)
+
+
+def _next_depth(depth: int, line: str) -> int:
+    """Update naive brace/paren depth for one line, clamped at 0."""
+    depth += line.count("{") - line.count("}")
+    depth += line.count("(") - line.count(")")
+    return depth if depth >= 0 else 0
+
+
 def _split_typescript(text: str) -> list[_Block]:
     """Split TypeScript/JavaScript source into top-level blocks.
 
@@ -77,84 +152,43 @@ def _split_typescript(text: str) -> list[_Block]:
     into internal blocks.
     """
     lines = text.split("\n")
-    blocks: list[_Block] = []
-    current: list[str] = []
-    current_name = ""
-    current_kind = "internal"
-    depth = 0
-    in_block = False
+    state = _SplitState(
+        blocks=[],
+        current=[],
+        current_name="",
+        current_kind="internal",
+        in_block=False,
+        depth=0,
+        header_lines=[],
+    )
 
     # Track leading import statements separately — they stay in each
     # split file as needed (we do a simple per-file import pass later).
-    header_lines: list[str] = []
     body_start = 0
     for i, line in enumerate(lines):
         stripped = line.strip()
         # Collect leading imports and comments as header.
-        if not in_block and (
-            stripped.startswith("import ")
-            or stripped.startswith("//")
-            or stripped.startswith("/*")
-            or stripped.startswith("*")
-            or stripped == ""
-            or stripped.startswith("#")
-        ):
-            header_lines.append(line)
+        if not state.in_block and _is_header_line(stripped):
+            state.header_lines.append(line)
             body_start = i + 1
             continue
         # A top-level export at depth 0 starts a new block.
-        if depth == 0 and line.startswith("export "):
-            if in_block and current:
-                blocks.append(_Block(
-                    name=current_name or f"block_{len(blocks)}",
-                    kind=current_kind,
-                    text="\n".join(current).strip() + "\n",
-                ))
-            current = [line]
-            current_kind = "export"
-            # Extract a name for the file.
-            nm = re.search(
-                r"export\s+(?:default\s+)?(?:async\s+)?"
-                r"(?:function|const|let|var|class|interface|type|enum)\s+(\w+)",
-                line,
-            )
-            current_name = nm.group(1) if nm else f"export_{len(blocks)}"
-            in_block = True
-        elif in_block:
-            current.append(line)
+        if state.depth == 0 and line.startswith("export "):
+            _start_export_block(state, line)
+        elif state.in_block:
+            state.current.append(line)
         else:
-            # Non-exported top-level code → internal block.
-            if stripped:
-                if not current or current_kind != "internal":
-                    if current:
-                        blocks.append(_Block(
-                            name=current_name or f"block_{len(blocks)}",
-                            kind=current_kind,
-                            text="\n".join(current).strip() + "\n",
-                        ))
-                    current = []
-                    current_kind = "internal"
-                    current_name = f"internal_{len(blocks)}"
-                    in_block = True
-                current.append(line)
+            _append_internal_line(state, stripped, line)
         # Track brace depth (naive: counts all braces, strings may throw
         # it off, but good enough for block-boundary detection).
-        depth += line.count("{") - line.count("}")
-        depth += line.count("(") - line.count(")")
-        if depth < 0:
-            depth = 0
+        state.depth = _next_depth(state.depth, line)
 
-    if current:
-        blocks.append(_Block(
-            name=current_name or f"block_{len(blocks)}",
-            kind=current_kind,
-            text="\n".join(current).strip() + "\n",
-        ))
+    _flush_block(state)
 
     # Attach header to the result for the caller.
-    _split_typescript.header = "\n".join(header_lines).strip()  # type: ignore[attr-defined]
+    _split_typescript.header = "\n".join(state.header_lines).strip()  # type: ignore[attr-defined]
     _split_typescript.body_start = body_start  # type: ignore[attr-defined]
-    return blocks
+    return state.blocks
 
 
 def _sanitize_filename(name: str) -> str:
@@ -162,6 +196,104 @@ def _sanitize_filename(name: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_-]", "-", name)
     safe = re.sub(r"-+", "-", safe).strip("-")
     return safe or "block"
+
+
+def _write_internal_module(
+    repo_root: Path,
+    split_dir: Path,
+    suffix: str,
+    internals: list[_Block],
+) -> str | None:
+    """Write shared internal helpers to `_internal<suffix>`; None if empty."""
+    if not internals:
+        return None
+    internal_file = split_dir / f"_internal{suffix}"
+    internal_file.write_text(
+        "\n\n".join(b.text for b in internals),
+        encoding="utf-8",
+    )
+    return str(internal_file.relative_to(repo_root))
+
+
+def _write_export_file(split_dir: Path, suffix: str, block: _Block) -> Path:
+    """Write one export block to its own module, avoiding name collisions."""
+    fname = _sanitize_filename(block.name)
+    # Avoid collisions.
+    target = split_dir / f"{fname}{suffix}"
+    counter = 1
+    while target.exists():
+        counter += 1
+        target = split_dir / f"{fname}-{counter}{suffix}"
+    # If this block references internal helpers, add an import.
+    # (Simple heuristic: check for names defined in internals.)
+    content = block.text
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def _write_export_modules(
+    repo_root: Path,
+    split_dir: Path,
+    suffix: str,
+    exports: list[_Block],
+) -> list[str]:
+    """Write one file per export; returns repo-relative paths."""
+    changed: list[str] = []
+    for block in exports:
+        target = _write_export_file(split_dir, suffix, block)
+        changed.append(str(target.relative_to(repo_root)))
+    return changed
+
+
+def _written_export_targets(
+    split_dir: Path,
+    suffix: str,
+    exports: list[_Block],
+) -> dict[str, Path]:
+    """Map each export block name to the module file it was written to."""
+    written_files: dict[str, Path] = {}
+    for block in exports:
+        fname = _sanitize_filename(block.name)
+        candidates = sorted(split_dir.glob(f"{fname}*{suffix}"))
+        if not candidates:
+            continue
+        written_files[block.name] = candidates[0]
+    return written_files
+
+
+def _build_barrel_text(
+    written_files: dict[str, Path],
+    split_dir: Path,
+    exports: list[_Block],
+) -> str:
+    """Build the barrel re-export text for the original file.
+
+    Blocks we couldn't name (default exports, etc.) stay inline
+    so behavior is preserved.
+    """
+    barrel_lines: list[str] = []
+    inline_blocks: list[str] = []
+    for block in exports:
+        split_target = written_files.get(block.name)
+        if split_target is None:
+            continue
+        rel = f"./{split_dir.name}/{split_target.stem}"
+        if block.name.startswith("export_"):
+            # Unnamed/default export — keep inline to preserve behavior.
+            inline_blocks.append(block.text)
+        else:
+            barrel_lines.append(f"export {{ {block.name} }} from '{rel}';")
+
+    parts: list[str] = []
+    if barrel_lines:
+        parts.append("\n".join(barrel_lines))
+    if inline_blocks:
+        parts.append(
+            "// The following exports were kept inline because they "
+            "could not be safely re-exported by name.\n"
+            + "\n\n".join(inline_blocks)
+        )
+    return "\n\n".join(parts) + "\n"
 
 
 def _split_oversized_file(
@@ -203,68 +335,21 @@ def _split_oversized_file(
     split_dir.mkdir(parents=True, exist_ok=True)
 
     # Shared internal helpers.
-    internal_name = "_internal"
-    internal_file = None
-    if internals:
-        internal_file = split_dir / f"{internal_name}{suffix}"
-        internal_file.write_text(
-            "\n\n".join(b.text for b in internals),
-            encoding="utf-8",
-        )
-
-    # Write one file per export.
     changed: list[str] = []
-    for block in exports:
-        fname = _sanitize_filename(block.name)
-        # Avoid collisions.
-        target = split_dir / f"{fname}{suffix}"
-        counter = 1
-        while target.exists():
-            counter += 1
-            target = split_dir / f"{fname}-{counter}{suffix}"
-        # If this block references internal helpers, add an import.
-        # (Simple heuristic: check for names defined in internals.)
-        content = block.text
-        target.write_text(content, encoding="utf-8")
-        changed.append(str(target.relative_to(repo_root)))
+    internal_rel = _write_internal_module(
+        repo_root, split_dir, suffix, internals
+    )
+    # Write one file per export.
+    changed.extend(
+        _write_export_modules(repo_root, split_dir, suffix, exports)
+    )
 
-    if internal_file is not None:
-        changed.append(str(internal_file.relative_to(repo_root)))
+    if internal_rel is not None:
+        changed.append(internal_rel)
 
     # Rewrite the original as a barrel re-export.
-    # Blocks we couldn't name (default exports, etc.) stay inline
-    # so behavior is preserved.
-    barrel_lines: list[str] = []
-    inline_blocks: list[str] = []
-    written_files: dict[str, Path] = {}
-    for block in exports:
-        fname = _sanitize_filename(block.name)
-        candidates = sorted(split_dir.glob(f"{fname}*{suffix}"))
-        if not candidates:
-            continue
-        written_files[block.name] = candidates[0]
-
-    for block in exports:
-        split_target = written_files.get(block.name)
-        if split_target is None:
-            continue
-        rel = f"./{split_dir.name}/{split_target.stem}"
-        if block.name.startswith("export_"):
-            # Unnamed/default export — keep inline to preserve behavior.
-            inline_blocks.append(block.text)
-        else:
-            barrel_lines.append(f"export {{ {block.name} }} from '{rel}';")
-
-    parts: list[str] = []
-    if barrel_lines:
-        parts.append("\n".join(barrel_lines))
-    if inline_blocks:
-        parts.append(
-            "// The following exports were kept inline because they "
-            "could not be safely re-exported by name.\n"
-            + "\n\n".join(inline_blocks)
-        )
-    barrel_text = "\n\n".join(parts) + "\n"
+    written_files = _written_export_targets(split_dir, suffix, exports)
+    barrel_text = _build_barrel_text(written_files, split_dir, exports)
     full.write_text(barrel_text, encoding="utf-8")
     changed.append(file_path)
 

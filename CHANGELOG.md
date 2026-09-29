@@ -1,3 +1,22 @@
+## Unreleased — Cyclomatic complexity reduction (priority #2)
+
+- **Zero `cyclomatic_complexity:over-threshold` findings.** Refactored all
+  66 flagged functions across 46 files to radon complexity ≤ 10 via
+  extract-helper splits along branch boundaries: 23 source files
+  (including `DeadCodeAnalyzer.analyze` 27 → A, `calculate_score`
+  24 → A, `_split_typescript` 24 → B, `prompt_status` 23 → A,
+  `validate_pilot_manifest` 22 → A, `compute_drift` 21 → A,
+  `assess_readiness` 21 → A), 22 test files (assert-heavy tests split,
+  every assertion preserved), and the `demo/sample_repo/state-B`
+  fixture. No behavior changes; no public signature changes.
+- **Scan-verified.** Clean before/after scans: score 529 → 699,
+  findings 310 → 222, technical-debt points 1378 → 977. Zero new
+  complexity findings; the analyzer was sanity-checked against a
+  deliberately complex probe file first.
+- Full suite: **1184 passed, 1 skipped, zero exclusions** — the local
+  venv now has the declared `stripe>=10.0.0`, so the previously
+  excluded billing/compliance modules run too.
+
 ## Unreleased — Test coverage for previously untested modules
 
 - **Zero critical `testing_debt:untested-module` findings.** Added 422

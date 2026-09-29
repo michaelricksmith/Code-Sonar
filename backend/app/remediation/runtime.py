@@ -109,6 +109,37 @@ def configure_remediation_executor_from_env() -> None:
     _executor = DeterministicRemediationExecutor()
 
 
+def _rescan_only_validation_service() -> RemediationValidationService:
+    """Build the failsafe validation service: rescan only, no explicit commands."""
+    return RemediationValidationService(workspace_root=_workspace_manager.root)
+
+
+def _parse_validation_command(item: object) -> ValidationCommand:
+    """Validate one entry of the validators JSON array.
+
+    Raises ``ValueError``, ``KeyError``, or ``TypeError`` on invalid input so the
+    caller can fail closed to a rescan-only validation service.
+    """
+    if not isinstance(item, dict):
+        raise ValueError("Validation command entries must be objects")
+    name = str(item["name"]).strip()
+    kind = str(item["kind"]).strip().lower()
+    argv_raw = item["argv"]
+    timeout_seconds = float(item.get("timeout_seconds", 300.0))
+    if not name or kind not in {"build", "tests", "other"}:
+        raise ValueError("Invalid validation command name or kind")
+    if not isinstance(argv_raw, list) or not argv_raw:
+        raise ValueError("Validation argv must be a non-empty JSON array")
+    if timeout_seconds <= 0:
+        raise ValueError("Validation timeout must be positive")
+    return ValidationCommand(
+        name=name,
+        kind=kind,  # type: ignore[arg-type]
+        argv=tuple(str(token) for token in argv_raw),
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def configure_validation_service_from_env() -> None:
     """Configure explicit build/test validation commands from a JSON array.
 
@@ -120,45 +151,20 @@ def configure_validation_service_from_env() -> None:
     global _validation_service
     raw = os.getenv("CODE_SONAR_REMEDIATION_VALIDATORS_JSON", "").strip()
     if not raw:
-        _validation_service = RemediationValidationService(
-            workspace_root=_workspace_manager.root
-        )
+        _validation_service = _rescan_only_validation_service()
         return
 
     try:
         payload = json.loads(raw)
         if not isinstance(payload, list):
             raise ValueError("Validation configuration must be a JSON array")
-        commands: list[ValidationCommand] = []
-        for item in payload:
-            if not isinstance(item, dict):
-                raise ValueError("Validation command entries must be objects")
-            name = str(item["name"]).strip()
-            kind = str(item["kind"]).strip().lower()
-            argv_raw = item["argv"]
-            timeout_seconds = float(item.get("timeout_seconds", 300.0))
-            if not name or kind not in {"build", "tests", "other"}:
-                raise ValueError("Invalid validation command name or kind")
-            if not isinstance(argv_raw, list) or not argv_raw:
-                raise ValueError("Validation argv must be a non-empty JSON array")
-            if timeout_seconds <= 0:
-                raise ValueError("Validation timeout must be positive")
-            commands.append(
-                ValidationCommand(
-                    name=name,
-                    kind=kind,  # type: ignore[arg-type]
-                    argv=tuple(str(token) for token in argv_raw),
-                    timeout_seconds=timeout_seconds,
-                )
-            )
+        commands = [_parse_validation_command(item) for item in payload]
         _validation_service = RemediationValidationService(
             commands=tuple(commands),
             workspace_root=_workspace_manager.root,
         )
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        _validation_service = RemediationValidationService(
-            workspace_root=_workspace_manager.root
-        )
+        _validation_service = _rescan_only_validation_service()
 
 
 configure_remediation_executor_from_env()

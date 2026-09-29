@@ -452,60 +452,76 @@ async def history_get(scan_id: str) -> dict[str, Any]:
     return _record_public_dict(record)
 
 
+def _resolve_drift_repository_id(repo_path: str) -> str:
+    """Map the drift query's repo_path to its history-store repository id."""
+    try:
+        repo_path_obj = validate_repo_path(repo_path)
+    except RepositoryValidationError:
+        # The hosted UI passes the "owner/name" repo slug rather than a
+        # local path; resolve it to the same slug-based identity that
+        # hosted scan jobs persist under.
+        return compute_repository_id_for_slug(repo_path)
+    return compute_repository_id(repo_path_obj)
+
+
+def _find_drift_record(records: list[ScanRecord], scan_id: str) -> ScanRecord:
+    """Return the first record with scan_id, 404 when no record matches."""
+    record = next((r for r in records if r.scan_id == scan_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No scan with scan_id={scan_id!r}")
+    return record
+
+
+def _default_drift_pair(records: list[ScanRecord]) -> tuple[ScanRecord, ScanRecord]:
+    """Baseline/current pair when no explicit scan ids are given."""
+    if len(records) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least two scans to compute drift; found only one",
+        )
+    return records[-2], records[-1]
+
+
+def _resolve_drift_baseline(
+    records: list[ScanRecord],
+    current: ScanRecord,
+    from_scan_id: str | None,
+) -> ScanRecord:
+    """Pick the baseline scan: explicit id, else the latest scan before current."""
+    if from_scan_id is not None:
+        return _find_drift_record(records, from_scan_id)
+    earlier = [r for r in records if r.scan_id != current.scan_id]
+    if not earlier:
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least two scans to compute drift",
+        )
+    return earlier[-1]
+
+
+def _select_drift_pair(
+    records: list[ScanRecord],
+    from_scan_id: str | None,
+    to_scan_id: str | None,
+) -> tuple[ScanRecord, ScanRecord]:
+    """Resolve the (baseline, current) scan pair for a drift comparison."""
+    if to_scan_id is None:
+        return _default_drift_pair(records)
+    current = _find_drift_record(records, to_scan_id)
+    return _resolve_drift_baseline(records, current, from_scan_id), current
+
+
 @app.get("/api/drift")
 async def drift(
     repo_path: str = Query(description="Repository path whose history to compare"),
     from_scan_id: str | None = Query(default=None),
     to_scan_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    try:
-        repo_path_obj = validate_repo_path(repo_path)
-    except RepositoryValidationError:
-        repo_path_obj = None
-
-    store = get_history_store()
-    if repo_path_obj is not None:
-        repository_id = compute_repository_id(repo_path_obj)
-    else:
-        # The hosted UI passes the "owner/name" repo slug rather than a
-        # local path; resolve it to the same slug-based identity that
-        # hosted scan jobs persist under.
-        repository_id = compute_repository_id_for_slug(repo_path)
-    records = store.load_all(repository_id)
+    repository_id = _resolve_drift_repository_id(repo_path)
+    records = get_history_store().load_all(repository_id)
     if not records:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
-
-    if to_scan_id is None:
-        if len(records) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Need at least two scans to compute drift; found only one",
-            )
-        current = records[-1]
-        baseline = records[-2]
-    else:
-        current = cast(ScanRecord, next((r for r in records if r.scan_id == to_scan_id), None))
-        if current is None:
-            raise HTTPException(status_code=404, detail=f"No scan with scan_id={to_scan_id!r}")
-        if from_scan_id is None:
-            earlier = [r for r in records if r.scan_id != current.scan_id]
-            if not earlier:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Need at least two scans to compute drift",
-                )
-            baseline = earlier[-1]
-        else:
-            baseline = cast(
-                ScanRecord,
-                next((r for r in records if r.scan_id == from_scan_id), None),
-            )
-            if baseline is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No scan with scan_id={from_scan_id!r}",
-                )
-
+    baseline, current = _select_drift_pair(records, from_scan_id, to_scan_id)
     return compute_drift(baseline, current).to_dict()
 
 

@@ -56,30 +56,41 @@ class TestOversizedFunctionsAnalyzer:
         analyzer = OversizedFunctionsAnalyzer(threshold=51)
         assert analyzer.analyze(tmp_path) == []
 
-    def test_above_threshold_emits_warning(self, tmp_path):
+    def _analyze_above_threshold(self, tmp_path):
         body_lines = ["def over():", "    # filler"]
         for i in range(60):
             body_lines.append(f"    x_{i} = {i}")
         body_lines.append("    return x_0")
         _write(tmp_path / "m.py", "\n".join(body_lines) + "\n")
 
-        analyzer = OversizedFunctionsAnalyzer(threshold=50)
-        findings = analyzer.analyze(tmp_path)
+        findings = OversizedFunctionsAnalyzer(threshold=50).analyze(tmp_path)
         assert len(findings) == 1
-        f = findings[0]
+        return findings[0]
+
+    def test_above_threshold_emits_warning(self, tmp_path):
+        f = self._analyze_above_threshold(tmp_path)
         assert f.severity in (
             FindingSeverity.WARNING,
             FindingSeverity.ERROR,
             FindingSeverity.CRITICAL,
         )
+
+    def test_above_threshold_finding_identity(self, tmp_path):
+        f = self._analyze_above_threshold(tmp_path)
         assert f.category == FindingCategory.MAINTAINABILITY
         assert f.analyzer == "oversized_functions"
         assert f.rule_id == "oversized_functions:over-threshold"
         assert f.symbol == "over"
+
+    def test_above_threshold_metadata(self, tmp_path):
+        f = self._analyze_above_threshold(tmp_path)
         assert f.metadata["function_length"] > 50
         assert f.metadata["threshold"] == 50
         assert f.metadata["is_async"] is False
         assert f.metadata["is_method"] is False
+
+    def test_above_threshold_evidence_suggestion_debt(self, tmp_path):
+        f = self._analyze_above_threshold(tmp_path)
         assert "over" in f.evidence
         assert "threshold=50" in f.evidence
         assert f.suggestion

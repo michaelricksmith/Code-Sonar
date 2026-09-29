@@ -97,94 +97,141 @@ NON_SOURCE_CATEGORY_CAP = MAX_PENALTY * SOURCE_CONTEXT_MODIFIER[TEST]
 
 def calculate_score(findings: list[Finding]) -> ScoringResult:
     """Calculate the deterministic Code Sonar score for normalized findings."""
-    finding_ids = [finding.id for finding in findings]
-    duplicate_ids = sorted(item for item, count in Counter(finding_ids).items() if count > 1)
-    if duplicate_ids:
-        raise ValueError(f"Duplicate finding IDs are not scoreable: {', '.join(duplicate_ids)}")
+    _raise_for_duplicate_ids(findings)
 
     if not findings:
-        return ScoringResult(
-            score=PERFECT_SCORE,
-            grade="A",
-            total_debt_points=0,
-            finding_count=0,
-            category_scores={cat.value: PERFECT_SCORE for cat in FindingCategory},
-            severity_distribution={sev.value: 0 for sev in FindingSeverity},
-            findings_by_category={cat.value: 0 for cat in FindingCategory},
-            findings_source_breakdown={k: 0 for k in SOURCE_CONTEXT_MODIFIER},
-            penalty_explanation={
-                "total_penalty": 0.0,
-                "categories": {},
-                "findings": [],
-            },
-        )
+        return _empty_scoring_result()
 
     canonical_findings = sorted(findings, key=lambda finding: finding.id)
-    findings_by_category_map: dict[FindingCategory, list[Finding]] = defaultdict(list)
-    for finding in canonical_findings:
-        findings_by_category_map[finding.category].append(finding)
+    findings_by_category_map = _group_by_category(canonical_findings)
 
     total_debt_points = sum(f.debt_points for f in canonical_findings)
 
-    severity_counts: dict[str, int] = {sev.value: 0 for sev in FindingSeverity}
-    for finding in canonical_findings:
-        severity_counts[finding.severity.value] += 1
+    category_details = _category_details(findings_by_category_map)
+    category_penalties = _category_penalties(category_details)
 
-    source_counts: dict[str, int] = {k: 0 for k in SOURCE_CONTEXT_MODIFIER}
-    for finding in canonical_findings:
-        cls = classify_path(finding.file_path)
-        source_counts[cls if cls in source_counts else SOURCE] += 1
-
-    category_details = {
-        category: _calculate_category_penalty(findings_by_category_map.get(category, []))
-        for category in FindingCategory
-    }
-    category_penalties = {
-        category: float(details["capped_penalty"]) for category, details in category_details.items()
-    }
-
-    total_penalty = fsum(
-        category_penalties.get(cat, 0.0) * CATEGORY_WEIGHTS.get(cat, 0.0) for cat in FindingCategory
-    )
-
-    raw_score = PERFECT_SCORE - total_penalty
-    final_score = max(MINIMUM_SCORE, min(PERFECT_SCORE, int(raw_score)))
-
-    category_scores = {
-        cat.value: max(
-            MINIMUM_SCORE,
-            min(PERFECT_SCORE, int(PERFECT_SCORE - category_penalties.get(cat, 0.0))),
-        )
-        for cat in FindingCategory
-    }
-
-    findings_count_by_category = {
-        cat.value: len(findings_by_category_map.get(cat, [])) for cat in FindingCategory
-    }
+    total_penalty = _weighted_total_penalty(category_penalties)
+    final_score = _clamp_score(PERFECT_SCORE - total_penalty)
 
     return ScoringResult(
         score=final_score,
         grade=_score_to_grade(final_score),
         total_debt_points=total_debt_points,
         finding_count=len(canonical_findings),
-        category_scores=category_scores,
-        severity_distribution=severity_counts,
-        findings_by_category=findings_count_by_category,
-        findings_source_breakdown=source_counts,
+        category_scores=_category_scores(category_penalties),
+        severity_distribution=_severity_distribution(canonical_findings),
+        findings_by_category={
+            cat.value: len(findings_by_category_map.get(cat, [])) for cat in FindingCategory
+        },
+        findings_source_breakdown=_source_breakdown(canonical_findings),
+        penalty_explanation=_penalty_explanation(
+            category_details, category_penalties, total_penalty, canonical_findings
+        ),
+    )
+
+
+def _raise_for_duplicate_ids(findings: list[Finding]) -> None:
+    finding_ids = [finding.id for finding in findings]
+    duplicate_ids = sorted(item for item, count in Counter(finding_ids).items() if count > 1)
+    if duplicate_ids:
+        raise ValueError(f"Duplicate finding IDs are not scoreable: {', '.join(duplicate_ids)}")
+
+
+def _empty_scoring_result() -> ScoringResult:
+    return ScoringResult(
+        score=PERFECT_SCORE,
+        grade="A",
+        total_debt_points=0,
+        finding_count=0,
+        category_scores={cat.value: PERFECT_SCORE for cat in FindingCategory},
+        severity_distribution={sev.value: 0 for sev in FindingSeverity},
+        findings_by_category={cat.value: 0 for cat in FindingCategory},
+        findings_source_breakdown={k: 0 for k in SOURCE_CONTEXT_MODIFIER},
         penalty_explanation={
-            "total_penalty": total_penalty,
-            "categories": {
-                category.value: {
-                    **details,
-                    "weight": CATEGORY_WEIGHTS.get(category, 0.0),
-                    "weighted_penalty": category_penalties[category]
-                    * CATEGORY_WEIGHTS.get(category, 0.0),
-                }
-                for category, details in category_details.items()
-            },
-            "findings": [_finding_explanation(finding) for finding in canonical_findings],
+            "total_penalty": 0.0,
+            "categories": {},
+            "findings": [],
         },
     )
+
+
+def _group_by_category(
+    findings: list[Finding],
+) -> dict[FindingCategory, list[Finding]]:
+    grouped: dict[FindingCategory, list[Finding]] = defaultdict(list)
+    for finding in findings:
+        grouped[finding.category].append(finding)
+    return grouped
+
+
+def _category_details(
+    findings_by_category_map: dict[FindingCategory, list[Finding]],
+) -> dict[FindingCategory, dict[str, float | bool]]:
+    return {
+        category: _calculate_category_penalty(findings_by_category_map.get(category, []))
+        for category in FindingCategory
+    }
+
+
+def _category_penalties(
+    category_details: dict[FindingCategory, dict[str, float | bool]],
+) -> dict[FindingCategory, float]:
+    return {
+        category: float(details["capped_penalty"]) for category, details in category_details.items()
+    }
+
+
+def _weighted_total_penalty(category_penalties: dict[FindingCategory, float]) -> float:
+    return fsum(
+        category_penalties.get(cat, 0.0) * CATEGORY_WEIGHTS.get(cat, 0.0) for cat in FindingCategory
+    )
+
+
+def _clamp_score(raw_score: float) -> int:
+    return max(MINIMUM_SCORE, min(PERFECT_SCORE, int(raw_score)))
+
+
+def _category_scores(category_penalties: dict[FindingCategory, float]) -> dict[str, int]:
+    return {
+        cat.value: _clamp_score(PERFECT_SCORE - category_penalties.get(cat, 0.0))
+        for cat in FindingCategory
+    }
+
+
+def _severity_distribution(findings: list[Finding]) -> dict[str, int]:
+    severity_counts: dict[str, int] = {sev.value: 0 for sev in FindingSeverity}
+    for finding in findings:
+        severity_counts[finding.severity.value] += 1
+    return severity_counts
+
+
+def _source_breakdown(findings: list[Finding]) -> dict[str, int]:
+    source_counts: dict[str, int] = {k: 0 for k in SOURCE_CONTEXT_MODIFIER}
+    for finding in findings:
+        cls = classify_path(finding.file_path)
+        source_counts[cls if cls in source_counts else SOURCE] += 1
+    return source_counts
+
+
+def _penalty_explanation(
+    category_details: dict[FindingCategory, dict[str, float | bool]],
+    category_penalties: dict[FindingCategory, float],
+    total_penalty: float,
+    findings: list[Finding],
+) -> dict[str, Any]:
+    return {
+        "total_penalty": total_penalty,
+        "categories": {
+            category.value: {
+                **details,
+                "weight": CATEGORY_WEIGHTS.get(category, 0.0),
+                "weighted_penalty": category_penalties[category]
+                * CATEGORY_WEIGHTS.get(category, 0.0),
+            }
+            for category, details in category_details.items()
+        },
+        "findings": [_finding_explanation(finding) for finding in findings],
+    }
 
 
 def _confidence_modifier(finding: Finding) -> float:

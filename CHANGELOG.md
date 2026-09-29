@@ -1,3 +1,22 @@
+## Unreleased — Test coverage for previously untested modules
+
+- **Zero critical `testing_debt:untested-module` findings.** Added 422
+  tests across 16 new test modules covering the 10 modules Code Sonar
+  flagged as untested: `analyzers/dead_code`,
+  `history/scan_record`, `persistence/privacy`,
+  `persistence/repositories`, `projects`,
+  `remediation/deterministic`, `remediation/groq`, `api/github_app`,
+  `compliance/email`, and `app.main`. No source files changed.
+- **Scan-verified.** Clean before/after scans: score 526 → 529,
+  findings 319 → 310, technical-debt points 1496 → 1378. The only new
+  finding is one info-level `dead_code:stale-fixture` on the shared
+  `clean_email_env` pytest fixture (same pattern as the pre-existing
+  `outbox_env` fixture) — the analyzer cannot see fixture injection
+  through test parameters.
+- Full suite: 1088 passed, 1 skipped (two billing/compliance modules
+  excluded locally pending `stripe` dependency sync; `stripe>=10.0.0`
+  is already declared in `backend/pyproject.toml`).
+
 ## Unreleased — Email transport hardening
 
 - **Provider-agnostic email transport.** `backend/app/compliance/email.py`

@@ -817,3 +817,61 @@ class TestSharedRateLimitConcurrency:
         finally:
             reset_rate_limits()
             engine.dispose()
+
+
+class TestAlembicRevisionCheck:
+    """Startup must accept the DB when it is at the shipped Alembic head.
+
+    Regression: shipping migrations 0006/0007 without updating the startup
+    revision check crashed production startup with "Database schema is not at
+    required Alembic revision". The expected revision is now derived from the
+    migration scripts instead of a hardcoded pin.
+    """
+
+    def _fake_engine(self, version_num: str | None):
+        from sqlalchemy import create_engine
+
+        engine = create_engine("sqlite:///:memory:")
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, statement):
+                class Result:
+                    def scalar_one_or_none(self):
+                        return version_num
+
+                return Result()
+
+        engine.connect = lambda: FakeConnection()  # type: ignore[method-assign]
+        return engine
+
+    def _pg_config(self):
+        from pathlib import Path
+
+        from app.persistence.config import PersistenceConfig
+
+        return PersistenceConfig(
+            database_url="postgresql://user:pass@localhost:5432/db",
+            data_root=Path("/tmp"),
+        )
+
+    def test_accepts_database_at_shipped_head(self) -> None:
+        from app.persistence.runtime import _initialize_schema, _required_alembic_revision
+
+        head = _required_alembic_revision()
+        assert head == "20260930_0007"
+        # Must not raise: the DB was migrated to the shipped head.
+        _initialize_schema(self._fake_engine(head), self._pg_config())
+
+    def test_rejects_stale_database(self) -> None:
+        import pytest
+
+        from app.persistence.runtime import _initialize_schema
+
+        with pytest.raises(RuntimeError, match="Alembic revision"):
+            _initialize_schema(self._fake_engine("20260927_0005"), self._pg_config())

@@ -192,6 +192,19 @@ class TestVerifyUnsubscribeTokenEdges:
         monkeypatch.setenv("SONAR_SESSION_SECRET", "second-secret")
         assert email_module.verify_unsubscribe_token(token) is None
 
+    def test_missing_secret_fails_closed(self, monkeypatch) -> None:
+        # No hardcoded fallback: without SONAR_SESSION_SECRET the token
+        # machinery must refuse rather than mint forgeable tokens.
+        monkeypatch.setenv("SONAR_SESSION_SECRET", "test-unsubscribe-secret")
+        token = email_module.unsubscribe_token("user-123")
+        monkeypatch.delenv("SONAR_SESSION_SECRET", raising=False)
+        with pytest.raises(RuntimeError, match="SONAR_SESSION_SECRET"):
+            email_module.unsubscribe_token("user-123")
+        with pytest.raises(RuntimeError, match="SONAR_SESSION_SECRET"):
+            email_module.verify_unsubscribe_token(token)
+        # Malformed tokens still return None without touching the secret.
+        assert email_module.verify_unsubscribe_token("bogus") is None
+
 
 class TestUnsubscribeUrl:
     def test_default_public_url(self, clean_email_env: None) -> None:

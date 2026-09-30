@@ -17,6 +17,21 @@ from app.scoring.engine import calculate_score
 from app.security import REMEDIATION_WORKTREES_DIR
 from app.services.repository import ScanExecutionResult, scan_repository
 
+
+def resolve_within(root: Path, file_path: str) -> Path:
+    """Resolve ``file_path`` under ``root``, rejecting path escape.
+
+    The instruction parser's regex currently rejects ``..`` stems, but that
+    is incidental: enforce containment explicitly so a future parser change
+    can't turn this join into a write outside the repository.
+    """
+    full = (root / file_path).resolve()
+    try:
+        full.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"File path escapes the repository: {file_path}") from exc
+    return full
+
 ValidationKind = Literal["build", "tests", "other"]
 
 

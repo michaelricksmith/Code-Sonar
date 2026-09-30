@@ -30,6 +30,11 @@ def fake_clone(monkeypatch: pytest.MonkeyPatch):
     def _clone(clone_url: str, branch: str | None, dest: Path) -> None:
         seen["clone_url"] = clone_url
         seen["branch"] = branch
+        # The real clone layer reads the OAuth token out-of-band through
+        # git_auth.clone_token(), never from the URL.
+        from app.security.git_auth import get_clone_token
+
+        seen["clone_token"] = get_clone_token()
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "main.py").write_text(
             '"""Fixture repo."""\n\n\n# TODO: clean this up\n'
@@ -127,8 +132,10 @@ class TestScanJobLifecycle:
         self, client, fake_clone, signed_in_github_user
     ):
         job_id, data = _run_completed_scan(client, signed_in_github_user["cookie"])
-        # The OAuth token was used server-side for the clone but never leaks.
-        assert "secret-token-xyz" in fake_clone["clone_url"]
+        # The OAuth token must never appear in the clone URL (it would be
+        # visible in process listings); it reaches the clone layer out-of-band.
+        assert "secret-token-xyz" not in fake_clone["clone_url"]
+        assert fake_clone["clone_token"] == "secret-token-xyz"
         assert "secret-token-xyz" not in str(data)
         status_now = client.get(f"/api/scan-job/{job_id}").json()
         assert "secret-token-xyz" not in str(status_now)

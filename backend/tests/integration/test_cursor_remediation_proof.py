@@ -109,7 +109,10 @@ def _cursor_runner_for(target):
         assert timeout > 0
         if args[0] == "cursor-proof-agent":
             assert args[1] == str(cwd)
-            assert target.id in args[2]
+            # A "--" separator is inserted before the free-text instruction so
+            # a leading "-" can't be parsed as a CLI flag.
+            assert args[2] == "--"
+            assert target.id in args[3]
             candidate = cwd / "src" / "app.py"
             candidate.write_text(
                 candidate.read_text(encoding="utf-8").replace(

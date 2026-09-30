@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { DriftResult, Finding, ScanResponse } from "./api/analyzers";
 import { fetchDrift, fetchHistoryCount } from "./api/analyzers";
+import { assertBillingUrl, stripSensitiveKeys } from "./utils/security";
 import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
@@ -331,7 +332,17 @@ export default function App() {
     setResult(next);
     setRepoLabel(label);
     try {
-      window.localStorage.setItem(LAST_SCAN_KEY, JSON.stringify({ result: next, repoLabel: label }));
+      // Sanitize before persisting: localStorage is readable by any script
+      // on the origin, so finding metadata goes through the sensitive-key
+      // blocklist (the backend already redacts secret evidence server-side).
+      const sanitized: ScanResponse = {
+        ...next,
+        findings: (next.findings ?? []).map((f) => ({
+          ...f,
+          metadata: stripSensitiveKeys(f.metadata),
+        })),
+      };
+      window.localStorage.setItem(LAST_SCAN_KEY, JSON.stringify({ result: sanitized, repoLabel: label }));
     } catch {
       // Storage is best-effort; the in-memory state is authoritative.
     }
@@ -378,7 +389,7 @@ export default function App() {
   const handleManageBilling = useCallback(async () => {
     setPortalError(null);
     try {
-      window.location.href = await openPortal();
+      window.location.href = assertBillingUrl(await openPortal());
     } catch (e) {
       setPortalError(e instanceof Error ? e.message : String(e));
     }

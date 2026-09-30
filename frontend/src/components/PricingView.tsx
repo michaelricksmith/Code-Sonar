@@ -24,6 +24,7 @@ import {
   openPortal,
   resumeSubscription,
 } from "../api/billing";
+import { assertBillingUrl } from "../utils/security";
 import type { BillingPlan, BillingStatus, CheckoutTier, SubscriptionState } from "../api/billing";
 import { SiteFooter } from "./SiteFooter";
 
@@ -143,7 +144,7 @@ export function PricingView({ user, billing, billingLoading }: PricingViewProps)
       // best-effort
     }
     try {
-      window.location.href = await createCheckout(tier, autorenewConsent);
+      window.location.href = assertBillingUrl(await createCheckout(tier, autorenewConsent));
     } catch (e) {
       if (isBillingDisabledError(e)) {
         setBillingDisabled(true);
@@ -159,7 +160,7 @@ export function PricingView({ user, billing, billingLoading }: PricingViewProps)
     setNotice(null);
     setPortalLoading(true);
     try {
-      window.location.href = await openPortal();
+      window.location.href = assertBillingUrl(await openPortal());
     } catch (e) {
       if (isBillingDisabledError(e)) {
         setBillingDisabled(true);

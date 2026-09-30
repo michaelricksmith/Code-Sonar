@@ -13,19 +13,19 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.security import SCAN_ROOT_DIR
+from app.security.rate_limit import rate_limit
 
 router = APIRouter(prefix="/api/scan-job", tags=["scan-job"])
 
@@ -43,22 +43,11 @@ CloneRepo = Callable[[str, str | None, Path], None]
 
 
 def _default_clone_repo(clone_url: str, branch: str | None, dest: Path) -> None:
-    cmd = ["git", "clone", "--depth", "1"]
-    if branch:
-        cmd += ["--branch", branch]
-    cmd += [clone_url, str(dest)]
-    completed = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            "Repository clone failed: "
-            + (completed.stderr.strip() or completed.stdout.strip() or "unknown error")
-        )
+    # The OAuth token (if any) travels via the clone_token context, never in
+    # argv, so it stays out of the process table. See app/security/git_auth.py.
+    from app.security.git_auth import run_git_clone
+
+    run_git_clone(clone_url, branch, dest)
 
 
 _clone_repo: CloneRepo = _default_clone_repo
@@ -113,28 +102,33 @@ def _record_usage(request: Request, kind: Literal["scans", "ask_sonar"]) -> None
     get_usage_store().increment(_quota_user_id(request), kind)
 
 
+# Only GitHub clone URLs are accepted. Pinning the host closes the SSRF hole
+# where an arbitrary https:// URL (cloud metadata IPs, internal hosts, or an
+# attacker server issuing redirects to them) could be passed to `git clone`.
+_GITHUB_CLONE_HOSTS = {"github.com", "www.github.com"}
+_SLUG_PART_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
 def _parse_repo_input(repo: str) -> str:
-    """Normalize 'owner/name' or a repo URL to an https clone URL. Fail closed."""
+    """Normalize 'owner/name' or a github.com repo URL to an https clone URL.
+
+    Fail closed: only github.com hosts are accepted, and userinfo/ports are
+    rejected so credentials or non-standard endpoints can't smuggle in.
+    """
     text = (repo or "").strip()
     if _OWNER_NAME_RE.match(text):
         return f"https://github.com/{text}.git"
     if text.startswith("https://"):
         parsed = urlparse(text)
-        if not parsed.hostname:
-            raise ValueError("Repository URL has no host")
-        return text
-    raise ValueError("Repository must be 'owner/name' or an https:// repository URL")
-
-
-def _with_token(clone_url: str, token: str) -> str:
-    """Embed the OAuth token in the clone URL for private repos (never logged)."""
-    if not token:
-        return clone_url
-    parsed = urlparse(clone_url)
-    netloc = f"x-access-token:{token}@{parsed.hostname}"
-    if parsed.port:
-        netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=netloc))
+        host = (parsed.hostname or "").lower()
+        if host not in _GITHUB_CLONE_HOSTS:
+            raise ValueError("Only github.com repository URLs are supported")
+        if parsed.username or parsed.password:
+            raise ValueError("Repository URL must not contain credentials")
+        if parsed.port:
+            raise ValueError("Repository URL must not specify a port")
+        return f"https://github.com{parsed.path or '/'}"
+    raise ValueError("Repository must be 'owner/name' or an https://github.com URL")
 
 
 def _repository_slug(clone_url: str) -> str | None:
@@ -147,7 +141,10 @@ def _repository_slug(clone_url: str) -> str | None:
     if (parsed.hostname or "").lower() != "github.com":
         return None
     parts = parsed.path.strip("/").removesuffix(".git").split("/")
-    if len(parts) == 2 and all(part.strip() for part in parts):
+    if (
+        len(parts) == 2
+        and all(part and part not in (".", "..") and _SLUG_PART_RE.match(part) for part in parts)
+    ):
         return f"{parts[0]}/{parts[1]}"
     return None
 
@@ -206,6 +203,8 @@ def _run_job(
     branch: str | None,
     repo_label: str,
     repository_slug: str | None,
+    github_token: str,
+    owner_user_id: str | None,
 ) -> None:
     """Worker thread: clone, then run the unchanged existing scan pipeline."""
     # Deferred imports avoid a circular import with app.main at module load.
@@ -220,13 +219,16 @@ def _run_job(
     from app.main import _build_scan_response, get_history_store
     from app.scoring.engine import calculate_score
     from app.security import RepositoryValidationError, validate_repo_path
+    from app.security.git_auth import clone_token
     from app.services.repository import scan_repository
 
     dest = WORKSPACES_ROOT / job_id
     try:
         _update_job(job_id, status="running", step="Cloning your repository…", progress=0.1)
         WORKSPACES_ROOT.mkdir(parents=True, exist_ok=True)
-        _clone_repo(clone_url, branch, dest)
+        # The OAuth token is supplied out-of-band (GIT_ASKPASS), never in argv.
+        with clone_token(github_token):
+            _clone_repo(clone_url, branch, dest)
 
         _update_job(job_id, step="Reading your files…", progress=0.3)
         try:
@@ -264,6 +266,7 @@ def _run_job(
                 scanned_at=scanned_at,
                 repository_slug=repository_slug,
                 branch=branch,
+                owner_user_id=owner_user_id,
             )
             get_history_store().append(record)
             persisted_scan_id = record.scan_id
@@ -303,6 +306,7 @@ class ScanJobRequest(BaseModel):
 
 
 @router.post("", response_model=dict)
+@rate_limit(limit=10, window_seconds=600)
 async def create_scan_job(request: Request, body: ScanJobRequest) -> dict[str, str]:
     try:
         clone_url = _parse_repo_input(body.repo)
@@ -317,15 +321,20 @@ async def create_scan_job(request: Request, body: ScanJobRequest) -> dict[str, s
         _jobs[job_id] = job
     _record_usage(request, "scans")
 
+    # Attribute the scan to the signed-in user so later reads/remediation can
+    # enforce ownership. Anonymous scans keep owner_user_id=None.
+    owner_user_id = _quota_user_id(request)
     repo_label = body.repo.strip().removesuffix(".git").split("github.com/")[-1]
     thread = threading.Thread(
         target=_run_job,
         args=(
             job_id,
-            _with_token(clone_url, token),
+            clone_url,
             body.branch,
             repo_label,
             _repository_slug(clone_url),
+            token,
+            owner_user_id,
         ),
         name=f"scan-job-{job_id}",
         daemon=True,

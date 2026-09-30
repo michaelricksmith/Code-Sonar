@@ -49,8 +49,10 @@ def local_dev_enabled() -> bool:
 
 def configured_origins() -> tuple[str, ...]:
     raw = os.environ.get("CODESONAR_CORS_ORIGINS")
-    origins = DEFAULT_CORS_ORIGINS if raw is None else tuple(
-        item.strip().rstrip("/") for item in raw.split(",") if item.strip()
+    origins = (
+        DEFAULT_CORS_ORIGINS
+        if raw is None
+        else tuple(item.strip().rstrip("/") for item in raw.split(",") if item.strip())
     )
     for origin in origins:
         parsed = urlsplit(origin)
@@ -172,12 +174,9 @@ def _apply_cors_headers(response: Response, origin: str | None) -> None:
         return
     response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
     response.headers["Vary"] = "Origin"
-    response.headers["Access-Control-Allow-Methods"] = (
-        "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    )
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = (
-        "Authorization, Content-Type, X-GitHub-Event, "
-        "X-GitHub-Delivery, X-Hub-Signature-256"
+        "Authorization, Content-Type, X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256"
     )
 
 

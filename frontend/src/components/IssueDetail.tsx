@@ -35,6 +35,7 @@ import {
 } from "../copy";
 import { issueCardTitle } from "../copy/issues";
 import { NerdsDetails } from "./NerdsDetails";
+import { stripSensitiveKeys } from "../utils/security";
 
 interface IssueDetailProps {
   finding: Finding;
@@ -418,7 +419,7 @@ export function IssueDetail({
             <div className="kv"><span>Symbol</span><span className="mono">{finding.symbol ?? "—"}</span></div>
             {Object.keys(finding.metadata ?? {}).length > 0 && (
               <div style={{ marginTop: 12 }}>
-                <pre>{rawJson(finding.metadata)}</pre>
+                <pre>{rawJson(stripSensitiveKeys(finding.metadata))}</pre>
               </div>
             )}
           </NerdsDetails>

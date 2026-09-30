@@ -3,9 +3,9 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -37,6 +37,7 @@ from app.remediation.prompts import router as remediation_prompts_router
 from app.scan_jobs import router as scan_job_router
 from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
+from app.security.ownership import assert_scan_access
 from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
 from app.services.repository import (
     get_analyzer_metadata,
@@ -48,6 +49,17 @@ app = FastAPI(
     title="Code Sonar API",
     description="Credit report for your codebase",
     version="0.1.0-beta.1",
+    # The interactive docs expose the full API schema map. Keep them for local
+    # dev, disable on production (SONAR_ENV=production on Render).
+    docs_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/docs",
+    redoc_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/redoc",
+    openapi_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/openapi.json",
 )
 
 app.add_middleware(ApiBoundaryMiddleware)
@@ -181,6 +193,7 @@ def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
 def _record_public_dict(record: ScanRecord) -> dict[str, Any]:
     data = _record_to_dict(record)
     data.pop("repository_path", None)
+    data.pop("owner_user_id", None)
     return data
 
 
@@ -445,10 +458,12 @@ async def history_latest(
 
 
 @app.get("/api/history/{scan_id}")
-async def history_get(scan_id: str) -> dict[str, Any]:
+async def history_get(request: Request, scan_id: str) -> dict[str, Any]:
     record = get_history_store().get(scan_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"No scan with scan_id={scan_id!r}")
+    # Same cross-user protection as Ask Sonar: owned scans are owner-visible.
+    assert_scan_access(record, request)
     return _record_public_dict(record)
 
 

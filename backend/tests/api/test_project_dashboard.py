@@ -5,11 +5,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Tuple
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.history import InMemoryHistoryStore
 from app.main import app, get_history_store, set_history_store
 from app.projects import ProjectRecord, ProjectStore, get_project_store, set_project_store
+
+
+@pytest.fixture(autouse=True)
+def _signed_in_user(monkeypatch: pytest.MonkeyPatch):
+    """Project dashboards enumerate owned scans, so sign in an owner."""
+    from types import SimpleNamespace
+
+    import app.oauth as oauth_module
+
+    monkeypatch.setattr(oauth_module, "current_user", lambda r: SimpleNamespace(id="test-user"))
 
 
 @contextmanager

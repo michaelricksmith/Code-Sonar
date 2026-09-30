@@ -80,6 +80,7 @@ class SqlHistoryStore:
                 grade=record.grade,
                 total_debt_points=record.total_debt_points,
                 finding_count=record.finding_count,
+                commit_sha=record.commit_sha,
                 aggregates=aggregate,
             )
         )
@@ -141,6 +142,26 @@ class SqlHistoryStore:
 
     def get(self, scan_id: str) -> ScanRecord | None:
         return next((item for item in self._records() if item.scan_id == scan_id), None)
+
+    def update_owner(self, scan_id: str, owner_user_id: str) -> bool:
+        """Attribute an ownerless scan; owner lives inside the aggregates JSON."""
+        tenant_id = current_tenant_id()
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                select(scans.c.aggregates).where(
+                    and_(scans.c.tenant_id == tenant_id, scans.c.scan_id == scan_id)
+                )
+            ).first()
+            if row is None:
+                return False
+            aggregates = dict(row[0] or {})
+            aggregates["owner_user_id"] = owner_user_id
+            connection.execute(
+                update(scans)
+                .where(and_(scans.c.tenant_id == tenant_id, scans.c.scan_id == scan_id))
+                .values(aggregates=aggregates)
+            )
+            return True
 
 
 class SqlProjectStore:
@@ -900,9 +921,7 @@ class SqlUserStore:
             "stripe_customer_id": record.stripe_customer_id or None,
             "status": record.status or STATUS_ACTIVE,
             "is_admin": bool(record.is_admin),
-            "github_token_ciphertext": self._encrypt_token(
-                record.id, record.github_access_token
-            ),
+            "github_token_ciphertext": self._encrypt_token(record.id, record.github_access_token),
             "created_at": record.created_at,
             "updated_at": record.updated_at,
             "last_login_at": record.last_login_at or None,
@@ -928,9 +947,7 @@ class SqlUserStore:
                 return 0
             for key in order:
                 record = merged[key]
-                connection.execute(
-                    insert(users).values(**self._legacy_insert_values(record))
-                )
+                connection.execute(insert(users).values(**self._legacy_insert_values(record)))
         return len(order)
 
 
@@ -991,9 +1008,7 @@ class SqlComplianceRecordStore:
             created_at=row["created_at"],
         )
 
-    def history(
-        self, user_id: str, record_type: str | None = None
-    ) -> list[ComplianceRecord]:
+    def history(self, user_id: str, record_type: str | None = None) -> list[ComplianceRecord]:
         from app.persistence.schema import compliance_records
 
         conditions = [compliance_records.c.user_id == user_id]

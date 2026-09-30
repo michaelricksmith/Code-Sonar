@@ -30,7 +30,7 @@ from app.github_app import (
     set_webhook_scan_handler,
 )
 from app.github_integration import GitHubIntegration, get_github_integration, set_github_integration
-from app.main import app, scan_project
+from app.main import app, scan_project_webhook
 from app.projects import ProjectRecord, ProjectStore, get_project_store, set_project_store
 
 
@@ -74,7 +74,9 @@ def test_webhook_rejects_invalid_signature(monkeypatch: object) -> None:
 
 def _setup_install_flow(
     tmp_path: Path, monkeypatch: object
-) -> tuple[TestClient, FakeGitHubAppAuth, tuple[GitHubAppAuth, GitHubInstallationStore, int | None]]:
+) -> tuple[
+    TestClient, FakeGitHubAppAuth, tuple[GitHubAppAuth, GitHubInstallationStore, int | None]
+]:
     """Prepare the GitHub App install/callback environment.
 
     Returns the test client, the fake auth backend, and the previously active
@@ -308,9 +310,7 @@ def _setup_default_branch_push(
     project_store.upsert(project)
     set_project_store(project_store)
     installation_store = GitHubInstallationStore(tmp_path / "installations.json")
-    installation_store.upsert(
-        GitHubInstallation(900, "octo", "Organization", "now", "now")
-    )
+    installation_store.upsert(GitHubInstallation(900, "octo", "Organization", "now", "now"))
     set_installation_store(installation_store)
     set_webhook_audit_store(WebhookAuditStore(tmp_path / "audit.jsonl"))
     set_webhook_job_store(WebhookScanJobStore(tmp_path / "jobs.json"))
@@ -337,13 +337,11 @@ def _setup_default_branch_push(
 
 
 def _restore_default_branch_push(
-    previous: tuple[
-        ProjectStore, GitHubInstallationStore, WebhookAuditStore, WebhookScanJobStore
-    ],
+    previous: tuple[ProjectStore, GitHubInstallationStore, WebhookAuditStore, WebhookScanJobStore],
 ) -> None:
     """Restore the globals replaced by :func:`_setup_default_branch_push`."""
     previous_projects, previous_installations, previous_audit, previous_jobs = previous
-    set_webhook_scan_handler(scan_project)
+    set_webhook_scan_handler(scan_project_webhook)
     set_webhook_audit_store(previous_audit)
     set_webhook_job_store(previous_jobs)
     set_project_store(previous_projects)
@@ -354,9 +352,7 @@ def test_default_branch_push_triggers_one_project_scan(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
-    client, body, headers, _calls, previous = _setup_default_branch_push(
-        tmp_path, monkeypatch
-    )
+    client, body, headers, _calls, previous = _setup_default_branch_push(tmp_path, monkeypatch)
     try:
         first = client.post("/api/github-app/webhook", content=body, headers=headers)
         assert first.status_code == 200
@@ -371,9 +367,7 @@ def test_default_branch_push_deduplicates_repeated_delivery(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
-    client, body, headers, calls, previous = _setup_default_branch_push(
-        tmp_path, monkeypatch
-    )
+    client, body, headers, calls, previous = _setup_default_branch_push(tmp_path, monkeypatch)
     try:
         first = client.post("/api/github-app/webhook", content=body, headers=headers)
         second = client.post("/api/github-app/webhook", content=body, headers=headers)
@@ -391,9 +385,7 @@ def test_default_branch_push_records_job_and_audit(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
-    client, body, headers, _calls, previous = _setup_default_branch_push(
-        tmp_path, monkeypatch
-    )
+    client, body, headers, _calls, previous = _setup_default_branch_push(tmp_path, monkeypatch)
     try:
         first = client.post("/api/github-app/webhook", content=body, headers=headers)
         assert first.status_code == 200
@@ -432,9 +424,7 @@ def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypat
     )
     set_project_store(project_store)
     installation_store = GitHubInstallationStore(tmp_path / "installations.json")
-    installation_store.upsert(
-        GitHubInstallation(901, "octo", "Organization", "now", "now")
-    )
+    installation_store.upsert(GitHubInstallation(901, "octo", "Organization", "now", "now"))
     set_installation_store(installation_store)
     set_webhook_audit_store(WebhookAuditStore(tmp_path / "audit.jsonl"))
     calls: list[str] = []
@@ -466,7 +456,7 @@ def test_non_default_branch_push_does_not_trigger_scan(tmp_path: Path, monkeypat
         assert response.json()["job_id"] is None
         assert calls == []
     finally:
-        set_webhook_scan_handler(scan_project)
+        set_webhook_scan_handler(scan_project_webhook)
         set_webhook_audit_store(previous_audit)
         set_project_store(previous_projects)
         set_installation_store(previous_installations)

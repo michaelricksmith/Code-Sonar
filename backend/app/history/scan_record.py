@@ -139,9 +139,7 @@ class FindingSnapshot:
         Higher debt points and higher severity weigh more. Severity
         ordering: info=1, warning=2, error=3, critical=4.
         """
-        sev_w = {"info": 1, "warning": 2, "error": 3, "critical": 4}.get(
-            self.severity, 1
-        )
+        sev_w = {"info": 1, "warning": 2, "error": 3, "critical": 4}.get(self.severity, 1)
         return float(self.debt_points) * sev_w
 
 
@@ -160,6 +158,7 @@ class ScanRecord:
         "repository_path",
         "repository_slug",
         "branch",
+        "commit_sha",
         "scanned_at",
         "schema_version",
         "scoring_version",
@@ -192,6 +191,7 @@ class ScanRecord:
         findings: list[FindingSnapshot],
         repository_slug: str | None = None,
         branch: str | None = None,
+        commit_sha: str | None = None,
         scoring_version: str = "legacy-unversioned",
         tenant_id: str = LOCAL_TENANT_ID,
         owner_user_id: str | None = None,
@@ -203,6 +203,7 @@ class ScanRecord:
         self.repository_path = repository_path
         self.repository_slug = repository_slug
         self.branch = branch
+        self.commit_sha = commit_sha
         self.scanned_at = scanned_at
         self.schema_version = schema_version
         self.scoring_version = scoring_version
@@ -225,6 +226,7 @@ class ScanRecord:
             "repository_path": self.repository_path,
             "repository_slug": self.repository_slug,
             "branch": self.branch,
+            "commit_sha": self.commit_sha,
             "scanned_at": self.scanned_at,
             "schema_version": self.schema_version,
             "scoring_version": self.scoring_version,
@@ -251,6 +253,8 @@ class ScanRecord:
         # Records persisted before slug/branch tracking remain readable.
         record.repository_slug = data.get("repository_slug")
         record.branch = data.get("branch")
+        # Records persisted before commit-SHA tracking remain readable.
+        record.commit_sha = data.get("commit_sha")
         record.scanned_at = data["scanned_at"]
         record.schema_version = data["schema_version"]
         # Records written before scoring-version tracking remain readable.
@@ -262,12 +266,8 @@ class ScanRecord:
         record.category_scores = dict(data.get("category_scores") or {})
         record.severity_distribution = dict(data.get("severity_distribution") or {})
         record.findings_by_category = dict(data.get("findings_by_category") or {})
-        record.findings_source_breakdown = dict(
-            data.get("findings_source_breakdown") or {}
-        )
-        record.findings = [
-            FindingSnapshot.from_dict(f) for f in data.get("findings") or []
-        ]
+        record.findings_source_breakdown = dict(data.get("findings_source_breakdown") or {})
+        record.findings = [FindingSnapshot.from_dict(f) for f in data.get("findings") or []]
         return record
 
 
@@ -281,6 +281,7 @@ def build_scan_record(
     scanned_at: str | None = None,
     repository_slug: str | None = None,
     branch: str | None = None,
+    commit_sha: str | None = None,
     owner_user_id: str | None = None,
 ) -> ScanRecord:
     """Build a ``ScanRecord`` from a finished scan.
@@ -301,6 +302,7 @@ def build_scan_record(
         repository_path=repository_path,
         repository_slug=repository_slug,
         branch=branch,
+        commit_sha=commit_sha,
         scanned_at=scanned_at or _utcnow_iso(),
         schema_version=SCHEMA_VERSION,
         scoring_version=SCORING_VERSION,

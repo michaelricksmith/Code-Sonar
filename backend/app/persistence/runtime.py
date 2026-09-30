@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,8 @@ from app.persistence.schema import (  # noqa: F401 - registers table on metadata
 )
 from app.security.runtime import local_dev_enabled
 from app.security.tenant import current_tenant_id
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -211,6 +214,15 @@ def configure_persistence_from_env() -> PersistenceUnitOfWork | None:
     config = persistence_config_from_env()
     validate_persistence_config(config)
     if config.database_url is None:
+        if os.environ.get("RENDER"):
+            # Render's filesystem is ephemeral: without the database, scan
+            # history silently falls back to a JSONL file that is wiped on
+            # every redeploy. Scream instead of losing data quietly.
+            logger.error(
+                "RENDER is set but no database URL is configured — scan "
+                "history will use the ephemeral JSONL store and WILL BE LOST "
+                "on redeploy. Set CODESONAR_DATABASE_URL."
+            )
         _persistence = None
         return None
 

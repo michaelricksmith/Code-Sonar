@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Float,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -58,6 +59,7 @@ for column in (
     Column("grade", String(8), nullable=False),
     Column("total_debt_points", Integer, nullable=False),
     Column("finding_count", Integer, nullable=False),
+    Column("commit_sha", String(64), nullable=True),
     Column("aggregates", JSON, nullable=False),
 ):
     scans.append_column(column)
@@ -227,3 +229,16 @@ deletion_receipts = Table(
     Column("schema_version", String(32), nullable=False),
     Column("crypto_erasure_status", String(32), nullable=False),
 )
+
+
+# Cross-worker rate-limit buckets. Written on every rate-limited request when
+# SQL persistence is configured; the limiter falls back to process-local
+# memory when the database is unavailable, so this table is best-effort.
+rate_limit_hits = Table(
+    "rate_limit_hits",
+    metadata,
+    Column("hit_id", Integer, primary_key=True, autoincrement=True),
+    Column("bucket_key", String(255), nullable=False),
+    Column("hit_at", Float, nullable=False),
+)
+Index("ix_rate_limit_hits_bucket_time", rate_limit_hits.c.bucket_key, rate_limit_hits.c.hit_at)

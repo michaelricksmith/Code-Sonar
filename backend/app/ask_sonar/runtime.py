@@ -82,9 +82,7 @@ def _openai_provider_from_env(*, api_key: str) -> OpenAICompatibleProvider:
     from app.ask_sonar.providers import OpenAICompatibleProvider
 
     if not api_key:
-        raise ValueError(
-            "ASK_SONAR_PROVIDER=openai requires OPENAI_API_KEY to be set"
-        )
+        raise ValueError("ASK_SONAR_PROVIDER=openai requires OPENAI_API_KEY to be set")
     base_url = os.getenv("ASK_SONAR_BASE_URL", "https://api.openai.com/v1").strip()
     model_name = os.getenv("ASK_SONAR_MODEL", "gpt-4o-mini").strip()
     if not base_url:
@@ -102,9 +100,7 @@ def _anthropic_provider_from_env(*, api_key: str) -> AnthropicProvider:
     from app.ask_sonar.providers import AnthropicProvider
 
     if not api_key:
-        raise ValueError(
-            "ASK_SONAR_PROVIDER=anthropic requires ANTHROPIC_API_KEY to be set"
-        )
+        raise ValueError("ASK_SONAR_PROVIDER=anthropic requires ANTHROPIC_API_KEY to be set")
     model_name = os.getenv("ASK_SONAR_MODEL", "claude-haiku-4-5").strip()
     if not model_name:
         raise ValueError("ASK_SONAR_MODEL must be non-empty")
@@ -136,25 +132,26 @@ def configure_answer_provider_from_env() -> None:
     if provider_name == "ollama":
         set_answer_provider(_ollama_provider_from_env())
     elif provider_name == "openai":
-        set_answer_provider(
-            _openai_provider_from_env(
-                api_key=(
-                    os.getenv("OPENAI_API_KEY", "").strip()
-                    or os.getenv("GROQ_API_KEY", "").strip()
-                )
-            )
+        # The base URL and the API key must agree: an OpenAI key sent to a
+        # Groq endpoint (or vice versa) authenticates nowhere and Ask Sonar
+        # silently falls back to deterministic answers. Prefer the Groq key
+        # when the configured endpoint is Groq, the OpenAI key otherwise,
+        # with the other key as a fallback so a single-key setup keeps working.
+        base_url = os.getenv("ASK_SONAR_BASE_URL", "").strip().lower()
+        groq_first = "groq" in base_url
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+        api_key = (groq_key if groq_first else openai_key) or (
+            openai_key if groq_first else groq_key
         )
+        set_answer_provider(_openai_provider_from_env(api_key=api_key))
     elif provider_name == "anthropic":
         set_answer_provider(
-            _anthropic_provider_from_env(
-                api_key=os.getenv("ANTHROPIC_API_KEY", "").strip()
-            )
+            _anthropic_provider_from_env(api_key=os.getenv("ANTHROPIC_API_KEY", "").strip())
         )
 
 
-def build_transient_byok_provider(
-    provider_name: str, api_key: str
-) -> AnswerProviderProtocol:
+def build_transient_byok_provider(provider_name: str, api_key: str) -> AnswerProviderProtocol:
     """Build a single-request provider from BYOK headers.
 
     The key is used for this request only: it is held in memory on the
@@ -165,9 +162,7 @@ def build_transient_byok_provider(
     if normalized == "ollama":
         return _ollama_provider_from_env()
     if normalized not in ("openai", "anthropic"):
-        raise ValueError(
-            "Unsupported X-AI-Provider: use 'ollama', 'openai' or 'anthropic'"
-        )
+        raise ValueError("Unsupported X-AI-Provider: use 'ollama', 'openai' or 'anthropic'")
     if not api_key:
         raise ValueError("X-AI-API-Key is required when X-AI-Provider is set")
     if normalized == "openai":
@@ -186,8 +181,7 @@ def get_provider_registry() -> list[dict[str, object]]:
     env_provider = os.getenv("ASK_SONAR_PROVIDER", "").strip().lower()
     ollama_configured = env_provider == "ollama"
     openai_configured = bool(
-        os.getenv("OPENAI_API_KEY", "").strip()
-        or os.getenv("GROQ_API_KEY", "").strip()
+        os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip()
     )
     anthropic_configured = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
     return [

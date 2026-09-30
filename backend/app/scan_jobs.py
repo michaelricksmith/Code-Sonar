@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -131,6 +132,25 @@ def _parse_repo_input(repo: str) -> str:
     raise ValueError("Repository must be 'owner/name' or an https://github.com URL")
 
 
+def _head_commit_sha(repo_dir: Path) -> str | None:
+    """Return the cloned checkout's HEAD SHA, or None when unavailable.
+
+    Fail-soft by design: a missing SHA must never fail a scan.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        return None
+    sha = (completed.stdout or "").strip()
+    return sha if completed.returncode == 0 and len(sha) == 40 else None
+
+
 def _repository_slug(clone_url: str) -> str | None:
     """Return the ``owner/name`` slug for GitHub clone URLs, else None.
 
@@ -141,9 +161,8 @@ def _repository_slug(clone_url: str) -> str | None:
     if (parsed.hostname or "").lower() != "github.com":
         return None
     parts = parsed.path.strip("/").removesuffix(".git").split("/")
-    if (
-        len(parts) == 2
-        and all(part and part not in (".", "..") and _SLUG_PART_RE.match(part) for part in parts)
+    if len(parts) == 2 and all(
+        part and part not in (".", "..") and _SLUG_PART_RE.match(part) for part in parts
     ):
         return f"{parts[0]}/{parts[1]}"
     return None
@@ -229,6 +248,9 @@ def _run_job(
         # The OAuth token is supplied out-of-band (GIT_ASKPASS), never in argv.
         with clone_token(github_token):
             _clone_repo(clone_url, branch, dest)
+        # Capture the scanned commit SHA before the throwaway workspace is
+        # deleted, so re-scans can prove which commit they measured.
+        commit_sha = _head_commit_sha(dest)
 
         _update_job(job_id, step="Reading your files…", progress=0.3)
         try:
@@ -266,6 +288,7 @@ def _run_job(
                 scanned_at=scanned_at,
                 repository_slug=repository_slug,
                 branch=branch,
+                commit_sha=commit_sha,
                 owner_user_id=owner_user_id,
             )
             get_history_store().append(record)

@@ -824,8 +824,10 @@ class TestAlembicRevisionCheck:
 
     Regression: shipping migrations 0006/0007 without updating the startup
     revision check crashed production startup with "Database schema is not at
-    required Alembic revision". The expected revision is now derived from the
-    migration scripts instead of a hardcoded pin.
+    required Alembic revision". The pin lives in
+    ``app.persistence.runtime.REQUIRED_ALEMBIC_REVISION`` and
+    ``TestAlembicRevisionPinConsistency`` fails in CI if it drifts from the
+    migration scripts, so the desync can never reach production again.
     """
 
     def _fake_engine(self, version_num: str | None):
@@ -861,12 +863,11 @@ class TestAlembicRevisionCheck:
         )
 
     def test_accepts_database_at_shipped_head(self) -> None:
-        from app.persistence.runtime import _initialize_schema, _required_alembic_revision
+        from app.persistence.runtime import REQUIRED_ALEMBIC_REVISION, _initialize_schema
 
-        head = _required_alembic_revision()
-        assert head == "20260930_0007"
+        assert REQUIRED_ALEMBIC_REVISION == "20260930_0007"
         # Must not raise: the DB was migrated to the shipped head.
-        _initialize_schema(self._fake_engine(head), self._pg_config())
+        _initialize_schema(self._fake_engine(REQUIRED_ALEMBIC_REVISION), self._pg_config())
 
     def test_rejects_stale_database(self) -> None:
         import pytest
@@ -875,3 +876,25 @@ class TestAlembicRevisionCheck:
 
         with pytest.raises(RuntimeError, match="Alembic revision"):
             _initialize_schema(self._fake_engine("20260927_0005"), self._pg_config())
+
+
+class TestAlembicRevisionPinConsistency:
+    """The startup pin must match the actual head of the migration scripts."""
+
+    def test_pin_matches_migration_head(self) -> None:
+        from pathlib import Path
+
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        from app.persistence.runtime import REQUIRED_ALEMBIC_REVISION
+
+        script_location = Path(__file__).resolve().parents[2] / "alembic"
+        assert (script_location / "versions").is_dir(), script_location
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+        head = ScriptDirectory.from_config(config).get_current_head()
+        assert head == REQUIRED_ALEMBIC_REVISION, (
+            f"REQUIRED_ALEMBIC_REVISION={REQUIRED_ALEMBIC_REVISION!r} "
+            f"but migration head is {head!r}: bump the pin when shipping a migration"
+        )

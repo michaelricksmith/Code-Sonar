@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.ml.outcomes.api import router as outcomes_router
@@ -14,9 +14,34 @@ from app.ml.runtime import (
     get_prediction_model,
     get_similarity_index,
 )
+from app.security.ownership import assert_scan_access, visible_scans
 
 router = APIRouter(prefix="/api/ml", tags=["ml"])
 router.include_router(outcomes_router)
+
+
+def _assert_scan_id_access(http_request: Request, scan_id: str) -> None:
+    """Enforce per-scan ownership for scan-id-addressed ML endpoints.
+
+    The unguessable scan id is a bearer capability; owned scans additionally
+    require the owning user. When no record exists there is nothing to
+    protect, and the feature layer reports the miss as before.
+    """
+    from app.main import get_history_store
+
+    record = get_history_store().get(scan_id)
+    if record is not None:
+        assert_scan_access(record, http_request)
+
+
+def _filter_visible_cases(http_request: Request, cases: list[Any]) -> list[Any]:
+    """Drop similar-scan cases the caller may not enumerate."""
+    from app.main import get_history_store
+
+    store = get_history_store()
+    records = [r for r in (store.get(c.scan_id) for c in cases) if r is not None]
+    visible_ids = {r.scan_id for r in visible_scans(records, http_request)}
+    return [c for c in cases if c.scan_id in visible_ids]
 
 
 class PredictionRequest(BaseModel):
@@ -57,12 +82,13 @@ async def model_performance(
 
 
 @router.post("/predict")
-async def predict(request: PredictionRequest) -> dict[str, Any]:
+async def predict(http_request: Request, request: PredictionRequest) -> dict[str, Any]:
     """Predict from a stored scan using an explicitly loaded fitted model.
 
     This endpoint never trains a model, never triggers a repository scan, and
     never changes the deterministic Code Sonar score.
     """
+    _assert_scan_id_access(http_request, request.scan_id)
     model = get_prediction_model(request.task)
     if model is None:
         raise HTTPException(
@@ -108,11 +134,13 @@ async def predict(request: PredictionRequest) -> dict[str, Any]:
 
 @router.get("/similar-scans/{scan_id}")
 async def similar_scans(
+    http_request: Request,
     scan_id: str,
     task: str = Query(default="debt_risk", min_length=1),
     limit: int = Query(default=5, ge=1, le=25),
 ) -> dict[str, Any]:
     """Return historical scans nearest to a stored scan feature vector."""
+    _assert_scan_id_access(http_request, scan_id)
     index = get_similarity_index(task)
     if index is None:
         raise HTTPException(
@@ -147,6 +175,7 @@ async def similar_scans(
             },
         ) from exc
 
+    cases = _filter_visible_cases(http_request, cases)
     return {
         "scan_id": scan_id,
         "task": task,

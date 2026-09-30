@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from app.history import (
     InMemoryHistoryStore,
@@ -23,19 +22,12 @@ from app.history import (
     compute_repository_id_for_slug,
 )
 from app.main import (
-    ScanRequest,
-    _build_scan_response,
-    _record_public_dict,
-    _record_public_summary,
-    _record_summary,
-    _record_to_dict,
-    _spa_index,
     app,
     get_history_store,
     set_history_store,
 )
 from app.models.finding import Finding
-from app.scoring.engine import SCORING_VERSION, ScoringResult
+from app.scoring.engine import ScoringResult
 
 
 def _mk_scoring() -> ScoringResult:
@@ -66,6 +58,7 @@ def _mk_record(
         scoring=_mk_scoring(),
         scan_id=scan_id,
         scanned_at=scanned_at,
+        owner_user_id="test-user",
     )
 
 
@@ -102,10 +95,18 @@ def history_store() -> InMemoryHistoryStore:
     set_history_store(previous)
 
 
+@pytest.fixture(autouse=True)
+def _signed_in_user(monkeypatch: pytest.MonkeyPatch):
+    """Listings hide ownerless scans, so these route tests sign in an owner."""
+    from types import SimpleNamespace
+
+    import app.oauth as oauth_module
+
+    monkeypatch.setattr(oauth_module, "current_user", lambda r: SimpleNamespace(id="test-user"))
+
+
 class TestHistoryListRoute:
-    def test_list_returns_public_summaries(
-        self, client, history_store, sample_findings_fixture
-    ):
+    def test_list_returns_public_summaries(self, client, history_store, sample_findings_fixture):
         _seed(
             history_store,
             scan_id="scan-a",
@@ -128,9 +129,7 @@ class TestHistoryListRoute:
         assert "repository_path" not in data["scans"][0]
         assert "repository_path" not in data["scans"][1]
 
-    def test_list_filters_by_repository_id(
-        self, client, history_store, sample_findings_fixture
-    ):
+    def test_list_filters_by_repository_id(self, client, history_store, sample_findings_fixture):
         _seed(
             history_store,
             scan_id="scan-a",
@@ -173,9 +172,7 @@ class TestHistoryListRoute:
 
 class TestHistoryLatestRoute:
     def test_latest_404_without_history(self, client, history_store, tmp_path):
-        response = client.get(
-            "/api/history/latest", params={"repo_path": str(tmp_path)}
-        )
+        response = client.get("/api/history/latest", params={"repo_path": str(tmp_path)})
         assert response.status_code == 404
 
     def test_latest_400_for_invalid_path(self, client, history_store):
@@ -194,9 +191,7 @@ class TestHistoryLatestRoute:
             findings=sample_findings_fixture,
             scanned_at="2026-09-20T00:00:00+00:00",
         )
-        response = client.get(
-            "/api/history/latest", params={"repo_path": str(tmp_path)}
-        )
+        response = client.get("/api/history/latest", params={"repo_path": str(tmp_path)})
         assert response.status_code == 200
         data = response.json()
         assert data["scan_id"] == "scan-a"
@@ -208,9 +203,7 @@ class TestHistoryGetRoute:
         response = client.get("/api/history/no-such-scan")
         assert response.status_code == 404
 
-    def test_get_returns_public_record(
-        self, client, history_store, sample_findings_fixture
-    ):
+    def test_get_returns_public_record(self, client, history_store, sample_findings_fixture):
         _seed(
             history_store,
             scan_id="scan-a",

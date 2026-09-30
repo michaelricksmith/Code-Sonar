@@ -16,7 +16,7 @@ from typing import Any
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security.path_classifier import FIXTURE, SOURCE, TEST, classify_path
 
-SCORING_VERSION: str = "1.0"
+SCORING_VERSION: str = "1.1"
 
 
 class ScoringResult:
@@ -301,9 +301,7 @@ def _calculate_category_penalty(findings: list[Finding]) -> dict[str, float | bo
         capped = combined
         cap_applied = False
     else:
-        capped = MAX_PENALTY + MAX_PENALTY * 0.1 * log1p(
-            (combined - MAX_PENALTY) / MAX_PENALTY
-        )
+        capped = MAX_PENALTY + MAX_PENALTY * 0.1 * log1p((combined - MAX_PENALTY) / MAX_PENALTY)
         cap_applied = True
     return {
         "source_penalty": source_penalty,

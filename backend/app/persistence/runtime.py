@@ -132,6 +132,26 @@ def _resolve_encryption_provider() -> EncryptionProvider:
     raise RuntimeError("Configured production encryption provider is unavailable")
 
 
+def _required_alembic_revision() -> str:
+    """Head revision of the shipped Alembic migrations.
+
+    Derived from the script directory at startup so shipping a new migration
+    can never desync this check the way a hardcoded pin could.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script_location = Path(__file__).resolve().parents[2] / "alembic"
+    config = Config()
+    config.set_main_option("script_location", str(script_location))
+    heads = ScriptDirectory.from_config(config).get_current_head()
+    if not isinstance(heads, (tuple, list)):
+        heads = (heads,)
+    if len(heads) != 1:
+        raise RuntimeError(f"Expected exactly one Alembic head, found {heads!r}")
+    return heads[0]
+
+
 def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
     """Prepare the schema for the configured database."""
     # Local SQLite gets programmatic schema creation for developer convenience.
@@ -145,10 +165,13 @@ def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
         revision = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one_or_none()
-    # Bump this revision pin every time a new Alembic migration ships:
-    # startup fails closed when the database is not exactly here.
-    if revision != "20260927_0005":
-        raise RuntimeError("Database schema is not at required Alembic revision")
+    # Startup fails closed when the database has not been migrated to the
+    # head revision shipped with this build.
+    expected = _required_alembic_revision()
+    if revision != expected:
+        raise RuntimeError(
+            f"Database schema is at Alembic revision {revision!r}, expected {expected!r}"
+        )
 
 
 def _wire_runtime_stores(persistence: PersistenceUnitOfWork) -> None:

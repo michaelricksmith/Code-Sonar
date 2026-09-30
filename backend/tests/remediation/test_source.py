@@ -77,6 +77,9 @@ def test_reclone_on_demand_inside_scan_root(
     def fake_clone(clone_url: str, branch: str | None, dest: Path) -> None:
         seen["clone_url"] = clone_url
         seen["branch"] = branch
+        from app.security.git_auth import get_clone_token
+
+        seen["clone_token"] = get_clone_token()
         _fake_clone(dest)
 
     monkeypatch.setattr(remediation_source, "_shallow_clone", fake_clone)
@@ -88,7 +91,10 @@ def test_reclone_on_demand_inside_scan_root(
 
     source = resolve_remediation_source(record, github_token="token-123")
 
-    assert seen["clone_url"] == "https://x-access-token:token-123@github.com/octocat/Hello-World.git"
+    # The OAuth token must never be embedded in the clone URL (visible in
+    # process listings); it reaches the clone layer out-of-band.
+    assert seen["clone_url"] == "https://github.com/octocat/Hello-World.git"
+    assert seen["clone_token"] == "token-123"
     assert seen["branch"] == "main"
     cloned = Path(source.path)
     assert cloned.parent == workspaces
@@ -129,14 +135,19 @@ def test_clone_failure_redacts_oauth_token(
             stderr="https://x-access-token:secret-token-abc@github.com/o/n.git: auth failed",
         )
 
-    monkeypatch.setattr(remediation_source.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # The token now travels out-of-band (GIT_ASKPASS env), never in the URL;
+    # redaction here is defense-in-depth for legacy token-bearing URLs.
+    from app.security.git_auth import clone_token, run_git_clone
 
     with pytest.raises(RuntimeError) as excinfo:
-        remediation_source._shallow_clone(
-            "https://x-access-token:secret-token-abc@github.com/o/n.git",
-            None,
-            Path("/tmp/unused-dest"),
-        )
+        with clone_token("secret-token-abc"):
+            run_git_clone(
+                "https://x-access-token:secret-token-abc@github.com/o/n.git",
+                None,
+                Path("/tmp/unused-dest"),
+            )
     assert "secret-token-abc" not in str(excinfo.value)
     assert "x-access-token:***@" in str(excinfo.value)
 

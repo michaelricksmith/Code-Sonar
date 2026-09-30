@@ -685,6 +685,15 @@ async def github_app_callback(
         raise HTTPException(status_code=502, detail="GitHub installation lookup failed") from exc
     account = details.get("account") or {}
     now = _utcnow()
+    # The caller-supplied installation_id is not covered by the signed state.
+    # Refuse to dual-register an installation that already belongs to another
+    # tenant: otherwise its webhooks resolve to no tenant and push scans die.
+    bound_tenant = get_installation_store().tenant_for_installation(installation_id)
+    if bound_tenant is not None and bound_tenant != current_tenant_id():
+        raise HTTPException(
+            status_code=409,
+            detail="This GitHub App installation is already connected to another workspace",
+        )
     existing = get_installation_store().get(installation_id)
     record = get_installation_store().upsert(
         GitHubInstallation(

@@ -226,6 +226,7 @@ def test_message_has_message_id_and_date() -> None:
 def test_marketing_email_gets_one_click_unsubscribe_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SONAR_SESSION_SECRET", "test-unsubscribe-secret")
     monkeypatch.setenv("SONAR_PUBLIC_URL", "https://app.example.com")
     email = email_module.marketing_announcement_email(
         to="fan@example.com",
@@ -240,7 +241,10 @@ def test_marketing_email_gets_one_click_unsubscribe_headers(
     assert msg["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
 
 
-def test_unsubscribe_token_round_trip_verifies() -> None:
+def test_unsubscribe_token_round_trip_verifies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SONAR_SESSION_SECRET", "test-unsubscribe-secret")
     token = email_module.unsubscribe_token("user-123")
     assert email_module.verify_unsubscribe_token(token) == "user-123"
     assert email_module.verify_unsubscribe_token("bogus") is None

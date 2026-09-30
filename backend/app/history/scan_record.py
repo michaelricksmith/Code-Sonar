@@ -155,6 +155,7 @@ class ScanRecord:
     __slots__ = (
         "scan_id",
         "tenant_id",
+        "owner_user_id",
         "repository_id",
         "repository_path",
         "repository_slug",
@@ -193,9 +194,11 @@ class ScanRecord:
         branch: str | None = None,
         scoring_version: str = "legacy-unversioned",
         tenant_id: str = LOCAL_TENANT_ID,
+        owner_user_id: str | None = None,
     ) -> None:
         self.scan_id = scan_id
         self.tenant_id = tenant_id
+        self.owner_user_id = owner_user_id
         self.repository_id = repository_id
         self.repository_path = repository_path
         self.repository_slug = repository_slug
@@ -217,6 +220,7 @@ class ScanRecord:
         return {
             "scan_id": self.scan_id,
             "tenant_id": self.tenant_id,
+            "owner_user_id": self.owner_user_id,
             "repository_id": self.repository_id,
             "repository_path": self.repository_path,
             "repository_slug": self.repository_slug,
@@ -240,6 +244,8 @@ class ScanRecord:
         record = cls.__new__(cls)
         record.scan_id = data["scan_id"]
         record.tenant_id = data.get("tenant_id", LOCAL_TENANT_ID)
+        # Records persisted before ownership tracking remain readable.
+        record.owner_user_id = data.get("owner_user_id")
         record.repository_id = data["repository_id"]
         record.repository_path = data["repository_path"]
         # Records persisted before slug/branch tracking remain readable.
@@ -275,6 +281,7 @@ def build_scan_record(
     scanned_at: str | None = None,
     repository_slug: str | None = None,
     branch: str | None = None,
+    owner_user_id: str | None = None,
 ) -> ScanRecord:
     """Build a ``ScanRecord`` from a finished scan.
 
@@ -289,6 +296,7 @@ def build_scan_record(
     return ScanRecord(
         scan_id=scan_id or uuid.uuid4().hex,
         tenant_id=current_tenant_id(),
+        owner_user_id=owner_user_id,
         repository_id=repository_id,
         repository_path=repository_path,
         repository_slug=repository_slug,

@@ -28,6 +28,8 @@ from app.remediation.runtime import (
 )
 from app.remediation.source import resolve_remediation_source
 from app.scan_jobs import _github_token_for_request
+from app.security.ownership import assert_scan_access
+from app.security.rate_limit import rate_limit
 from app.security.tenant import current_tenant_id
 
 router = APIRouter(prefix="/api/ask-sonar", tags=["ask-sonar"])
@@ -41,6 +43,9 @@ class AskSonarRequest(BaseModel):
     task: str = Field(default="debt_risk", min_length=1)
     top_findings_limit: int = Field(default=10, ge=1, le=50)
     similar_limit: int = Field(default=3, ge=1, le=20)
+    # Bring-your-own-key: sent in the POST body (not a header) so it is less
+    # likely to land in server/proxy access logs. Transient: never persisted.
+    ai_api_key: str | None = Field(default=None, max_length=500)
 
 
 class AskSonarRemediationApproval(BaseModel):
@@ -54,7 +59,7 @@ class AskSonarRemediationApproval(BaseModel):
     remediation_kind: str = Field(default="ask_sonar_approved_patch", min_length=1, max_length=100)
 
 
-def _require_scan(scan_id: str) -> ScanRecord:
+def _require_scan(request: Request, scan_id: str) -> ScanRecord:
     record = get_scan(scan_id)
     if record is None or record.tenant_id != current_tenant_id():
         raise HTTPException(
@@ -65,6 +70,8 @@ def _require_scan(scan_id: str) -> ScanRecord:
                 "message": "No persisted scan is available for Ask Sonar grounding",
             },
         )
+    # Cross-user protection: a scan owned by another user is not visible.
+    assert_scan_access(record, request)
     return record
 
 
@@ -91,13 +98,14 @@ async def ask_sonar_status() -> dict[str, Any]:
 
 @router.get("/context/{scan_id}")
 async def grounding_context(
+    http_request: Request,
     scan_id: str,
     task: str = Query(default="debt_risk", min_length=1),
     top_findings_limit: int = Query(default=10, ge=1, le=50),
     similar_limit: int = Query(default=3, ge=1, le=20),
 ) -> dict[str, Any]:
     """Return a source-separated context bundle for Ask Sonar reasoning."""
-    record = _require_scan(scan_id)
+    record = _require_scan(http_request, scan_id)
     return build_grounding_context(
         record,
         task=task,
@@ -155,6 +163,7 @@ def _record_usage(http_request: Request, kind: Literal["scans", "ask_sonar"]) ->
 
 
 @router.post("/ask")
+@rate_limit(limit=30, window_seconds=600)
 async def ask_sonar(
     request: AskSonarRequest,
     http_request: Request,
@@ -163,10 +172,12 @@ async def ask_sonar(
 ) -> dict[str, Any]:
     """Answer only from the sanitized grounding bundle for the requested scan.
 
-    Optional X-AI-Provider ("ollama" | "openai" | "anthropic") + X-AI-API-Key
-    headers select a transient bring-your-own-key provider for this request
-    only. Ollama needs no API key. Without the headers, the server's
-    configured provider answers.
+    Optional X-AI-Provider ("ollama" | "openai" | "anthropic") header plus a
+    BYOK key selects a transient bring-your-own-key provider for this request
+    only. The key belongs in the POST body's ``ai_api_key`` (headers are more
+    likely to be captured in access logs); the ``X-AI-API-Key`` header is still
+    honored as a fallback. Ollama needs no API key. Without either, the
+    server's configured provider answers.
 
     Every question counts against the caller's monthly Ask Sonar quota
     (anonymous callers meter against the free tier); the counter increments
@@ -174,9 +185,9 @@ async def ask_sonar(
     """
     _enforce_quota(http_request, "ask_sonar")
 
-    provider = _resolve_provider(x_ai_provider, x_ai_api_key)
+    provider = _resolve_provider(x_ai_provider, request.ai_api_key or x_ai_api_key)
 
-    record = _require_scan(request.scan_id)
+    record = _require_scan(http_request, request.scan_id)
     context = build_grounding_context(
         record,
         task=request.task,
@@ -219,9 +230,11 @@ async def ask_sonar(
 
 
 @router.get("/remediation-plan/{scan_id}/{finding_id}")
-async def remediation_plan(scan_id: str, finding_id: str) -> dict[str, Any]:
+async def remediation_plan(
+    http_request: Request, scan_id: str, finding_id: str
+) -> dict[str, Any]:
     """Build a deterministic, approval-gated remediation plan for one finding."""
-    record = _require_scan(scan_id)
+    record = _require_scan(http_request, scan_id)
     try:
         plan = build_remediation_plan(record, finding_id)
     except LookupError as exc:
@@ -247,6 +260,7 @@ async def remediation_plan(scan_id: str, finding_id: str) -> dict[str, Any]:
 
 
 @router.post("/remediation/approve-and-run")
+@rate_limit(limit=5, window_seconds=3600)
 async def approve_and_run_remediation(
     request: Request,
     approval: AskSonarRemediationApproval,
@@ -266,7 +280,11 @@ async def approve_and_run_remediation(
             },
         )
 
-    record = _require_scan(approval.scan_id)
+    # Remediation burns a full clone + LLM rewrite + rescan: meter it against
+    # the scans quota like any other scan.
+    _enforce_quota(request, "scans")
+
+    record = _require_scan(request, approval.scan_id)
     try:
         plan = build_remediation_plan(record, approval.finding_id)
     except LookupError as exc:
@@ -325,6 +343,7 @@ async def approve_and_run_remediation(
         if source is not None:
             source.dispose()
 
+    _record_usage(request, "scans")
     return {
         "plan": plan.to_dict(),
         "approval": {

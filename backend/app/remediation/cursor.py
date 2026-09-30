@@ -139,12 +139,22 @@ class CursorRemediationExecutor:
 
         try:
             workspace = self._verified_workspace(request.repository_path)
+            # The instruction is free text from the approved plan. Insert a
+            # "--" separator before it so a leading "-" can't be parsed as a
+            # CLI flag by the operator-configured cursor binary.
             command = [
                 token.replace("{workspace}", str(workspace)).replace(
                     "{instruction}", request.instruction
                 )
                 for token in self.command_template
             ]
+            # The instruction is free text from the approved plan. Insert a
+            # "--" separator before the substituted token so a leading "-"
+            # can't be parsed as a CLI flag by the operator-configured binary.
+            for position, template_token in enumerate(self.command_template):
+                if "{instruction}" in template_token:
+                    command.insert(position, "--")
+                    break
             result = self.runner(command, workspace, self.timeout_seconds)
             if result.returncode != 0:
                 return RemediationExecutionResult(

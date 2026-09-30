@@ -24,6 +24,7 @@ from app.remediation.contracts import (
     RemediationExecutionState,
     RemediationRequest,
 )
+from app.remediation.validation import resolve_within
 
 # Rule IDs this executor can handle deterministically.
 SUPPORTED_RULES: frozenset[str] = frozenset({
@@ -307,7 +308,7 @@ def _split_oversized_file(
     under `<name>_split/`. Raises ValueError if the file cannot be
     split deterministically.
     """
-    full = repo_root / file_path
+    full = resolve_within(repo_root, file_path)
     if not full.is_file():
         raise ValueError(f"File not found: {file_path}")
 

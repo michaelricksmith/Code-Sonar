@@ -34,3 +34,6 @@ def clean_email_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SONAR_EMAIL_OUTBOX_DIR", str(tmp_path / "outbox"))
+    # Unsubscribe tokens fail closed without SONAR_SESSION_SECRET; give the
+    # test suite a deterministic secret unless a test overrides it.
+    monkeypatch.setenv("SONAR_SESSION_SECRET", "test-unsubscribe-secret")

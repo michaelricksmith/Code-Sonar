@@ -86,9 +86,24 @@ def _public_url() -> str:
     return os.environ.get("SONAR_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def _unsubscribe_secret() -> str:
+    """Return the HMAC secret for unsubscribe tokens, failing closed.
+
+    A hardcoded fallback here would let anyone mint valid unsubscribe tokens
+    for any user id (the fallback is public - it ships in the repo). Refuse
+    instead of minting forgeable tokens.
+    """
+    secret = os.environ.get("SONAR_SESSION_SECRET")
+    if not secret:
+        raise RuntimeError(
+            "SONAR_SESSION_SECRET must be set to mint or verify unsubscribe tokens"
+        )
+    return secret
+
+
 def unsubscribe_token(user_id: str) -> str:
     """HMAC-signed one-click unsubscribe token (no DB row needed)."""
-    secret = os.environ.get("SONAR_SESSION_SECRET", "dev-unsubscribe-secret")
+    secret = _unsubscribe_secret()
     mac = hmac.new(secret.encode(), f"unsub:{user_id}".encode(), hashlib.sha256).digest()
     raw = f"{user_id}:{base64.urlsafe_b64encode(mac).decode()}".encode()
     return base64.urlsafe_b64encode(raw).decode()
@@ -105,7 +120,7 @@ def verify_unsubscribe_token(token: str) -> str | None:
 
 
 def _token_mac(user_id: str) -> str:
-    secret = os.environ.get("SONAR_SESSION_SECRET", "dev-unsubscribe-secret")
+    secret = _unsubscribe_secret()
     mac = hmac.new(secret.encode(), f"unsub:{user_id}".encode(), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(mac).decode()
 

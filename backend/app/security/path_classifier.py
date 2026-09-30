@@ -4,40 +4,48 @@ from __future__ import annotations
 
 from typing import Final
 
-FIXTURE_FILENAMES: Final[frozenset[str]] = frozenset({
-    ".env.example",
-    "example.env",
-    "config.example.yaml",
-    "config.example.yml",
-    "config.example.json",
-    "settings.example.json",
-    "pytest.ini.example",
-    "conftest.example.py",
-})
+FIXTURE_FILENAMES: Final[frozenset[str]] = frozenset(
+    {
+        ".env.example",
+        "example.env",
+        "config.example.yaml",
+        "config.example.yml",
+        "config.example.json",
+        "settings.example.json",
+        "pytest.ini.example",
+        "conftest.example.py",
+    }
+)
 
-TEST_DIR_NAMES: Final[frozenset[str]] = frozenset({
-    "tests",
-    "test",
-    "tests_",
-    "__tests__",
-})
+TEST_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "tests",
+        "test",
+        "tests_",
+        "__tests__",
+    }
+)
 
-FIXTURE_DIR_NAMES: Final[frozenset[str]] = frozenset({
-    "fixtures",
-    "testdata",
-    "test_data",
-    "examples",
-    "example",
-    "example_data",
-})
+FIXTURE_DIR_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "fixtures",
+        "testdata",
+        "test_data",
+        "examples",
+        "example",
+        "example_data",
+    }
+)
 
-FIXTURE_ROOT_NAMES: Final[frozenset[str]] = frozenset({
-    "demo",
-    "demos",
-    "sample",
-    "samples",
-    "sample_repo",
-})
+FIXTURE_ROOT_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "demo",
+        "demos",
+        "sample",
+        "samples",
+        "sample_repo",
+    }
+)
 
 _TEST_PREFIX: Final[str] = "test_"
 _TEST_SUFFIX_PY: Final[str] = "_test.py"

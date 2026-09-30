@@ -40,6 +40,7 @@ from app.remediation.deterministic import (
     DeterministicRemediationExecutor,
     _parse_instruction,
 )
+from app.remediation.validation import resolve_within
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # llama-3.3-70b-versatile was decommissioned by Groq on 2026-08-16;
@@ -292,7 +293,7 @@ class GroqRemediationExecutor:
     ) -> RemediationExecutionResult:
         # Use Groq API for everything else.
         repo_root = Path(request.repository_path)
-        full = repo_root / file_path
+        full = resolve_within(repo_root, file_path)
         if not full.is_file():
             return self._failed(request, f"File not found: {file_path}",
                                 f"Groq executor could not find {file_path}.")

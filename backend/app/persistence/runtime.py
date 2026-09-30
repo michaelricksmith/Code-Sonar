@@ -132,24 +132,13 @@ def _resolve_encryption_provider() -> EncryptionProvider:
     raise RuntimeError("Configured production encryption provider is unavailable")
 
 
-def _required_alembic_revision() -> str:
-    """Head revision of the shipped Alembic migrations.
-
-    Derived from the script directory at startup so shipping a new migration
-    can never desync this check the way a hardcoded pin could.
-    """
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    script_location = Path(__file__).resolve().parents[2] / "alembic"
-    config = Config()
-    config.set_main_option("script_location", str(script_location))
-    heads = ScriptDirectory.from_config(config).get_current_head()
-    if not isinstance(heads, (tuple, list)):
-        heads = (heads,)
-    if len(heads) != 1:
-        raise RuntimeError(f"Expected exactly one Alembic head, found {heads!r}")
-    return heads[0]
+# Expected Alembic head revision for the configured database. Bump this every
+# time a new migration ships; TestAlembicRevisionPinConsistency fails loudly
+# in CI if the pin drifts from the migration scripts, so production startup
+# can never desync again. (The pin is hardcoded rather than derived from the
+# script directory because the app runs pip-installed on Render, where the
+# migration scripts are not next to the installed package.)
+REQUIRED_ALEMBIC_REVISION = "20260930_0007"
 
 
 def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
@@ -167,10 +156,10 @@ def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
         ).scalar_one_or_none()
     # Startup fails closed when the database has not been migrated to the
     # head revision shipped with this build.
-    expected = _required_alembic_revision()
-    if revision != expected:
+    if revision != REQUIRED_ALEMBIC_REVISION:
         raise RuntimeError(
-            f"Database schema is at Alembic revision {revision!r}, expected {expected!r}"
+            f"Database schema is at Alembic revision {revision!r}, "
+            f"expected {REQUIRED_ALEMBIC_REVISION!r}"
         )
 
 

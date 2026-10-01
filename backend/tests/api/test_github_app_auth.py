@@ -27,13 +27,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
 from app.github_app import (
-    GitHubAppAuth,
     _INSTALL_STATE_TTL_SECONDS,
+    GitHubAppAuth,
     _install_url,
     _issue_install_state,
     _verify_install_state,
     _verify_signature,
 )
+
 
 @dataclass
 class _FakeGitHubResponse:

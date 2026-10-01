@@ -25,35 +25,20 @@ fresh per-test sqlite file with a bound tenant.
 
 from __future__ import annotations
 
-import json
-import time
 from collections.abc import Generator
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import Engine, create_engine
 
-from app.github_app import GitHubInstallation, WebhookAuditRecord
+from app.github_app import GitHubInstallation
 from app.history import SCHEMA_VERSION, FindingSnapshot, ScanRecord
-from app.ml.outcomes.schema import RemediationOutcome
-from app.models.user import STATUS_ACTIVE, STATUS_SUSPENDED
-from app.oauth import OAuthUser
 from app.persistence.crypto import LocalDevelopmentEncryptionProvider
 from app.persistence.repositories import (
-    SqlComplianceRecordStore,
     SqlGitHubInstallationStore,
     SqlHistoryStore,
-    SqlOutcomeStore,
     SqlProjectStore,
-    SqlUserStore,
-    SqlWebhookAuditStore,
-    SqlWebhookScanJobStore,
-    _effective_identity,
-    _identity_columns,
-    _normalize_email,
-    _utcnow_iso,
 )
 from app.persistence.schema import metadata
 from app.projects import ProjectRecord

@@ -19,11 +19,13 @@ from collections.abc import Generator
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+
 import pytest
 from sqlalchemy import (
     Engine,
     create_engine,
 )
+
 from app.github_app import WebhookAuditRecord
 from app.ml.outcomes.schema import RemediationOutcome
 from app.models.user import (
@@ -48,6 +50,7 @@ from app.security.tenant import (
     bind_tenant,
     reset_tenant,
 )
+
 TENANT = "tenant-a"
 
 @pytest.fixture

@@ -28,7 +28,6 @@ filename patterns, and nested-scope behavior.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 from app.analyzers.dead_code import (
     DeadCodeAnalyzer,

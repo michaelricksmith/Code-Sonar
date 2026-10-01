@@ -16,7 +16,6 @@ Copyright © 2026 Michael Smith. All rights reserved.
 
 from __future__ import annotations
 
-import base64
 import smtplib
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -28,16 +27,11 @@ from app.compliance.email import (
     MARKETING,
     MAX_ATTEMPTS,
     TRANSACTIONAL,
-    LogTransport,
     OutgoingEmail,
     SmtpTransport,
     _as_message,
     _transient,
-    annual_renewal_reminder_email,
     build_transport,
-    cancellation_confirmation_email,
-    fee_change_notice_email,
-    from_address,
     marketing_announcement_email,
     marketing_headers,
     purchase_receipt_email,

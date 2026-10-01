@@ -111,7 +111,8 @@ def _answer_for_question(q: str, summary: _ScanSummary) -> str:
         )
     if _mentions(q, ("break", "risk", "danger", "safe", "worried")):
         return (
-            f"Your score is {summary.score} (grade {summary.grade}) with {summary.finding_count} issues. "
+            f"Your score is {summary.score} (grade {summary.grade}) "
+            f"with {summary.finding_count} issues. "
             f"The {summary.urgent} urgent ones are the real break-risk — "
             f"starting with {summary.top_label}. "
             f"{summary.top_message} "
@@ -119,7 +120,8 @@ def _answer_for_question(q: str, summary: _ScanSummary) -> str:
         )
     if _mentions(q, ("summar", "overview", "health", "how bad", "status")):
         return (
-            f"Code health: score {summary.score} (grade {summary.grade}), {summary.finding_count} issues "
+            f"Code health: score {summary.score} (grade {summary.grade}), "
+            f"{summary.finding_count} issues "
             f"— {summary.urgent} urgent, {summary.warning} high. "
             f"Biggest single item: {summary.top_label}. {summary.top_message}"
         )

@@ -217,5 +217,7 @@ def evaluate(cases: Sequence[dict[str, Any]], reviews: Sequence[dict[str, Any]])
     counts, severity = _review_stats(reviews)
     result["per_analyzer_precision"] = _per_analyzer_precision(counts, reviews)
     result["severity_agreement"] = _severity_agreement(severity)
-    result["strata"] = {name: _case_metrics(group) for name, group in sorted(_group_strata(cases).items())}
+    result["strata"] = {
+        name: _case_metrics(group) for name, group in sorted(_group_strata(cases).items())
+    }
     return result

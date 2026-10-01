@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -34,7 +35,7 @@ def _assert_scan_id_access(http_request: Request, scan_id: str) -> None:
         assert_scan_access(record, http_request)
 
 
-def _filter_visible_cases(http_request: Request, cases: list[Any]) -> list[Any]:
+def _filter_visible_cases(http_request: Request, cases: Sequence[Any]) -> list[Any]:
     """Drop similar-scan cases the caller may not enumerate."""
     from app.main import get_history_store
 
@@ -175,12 +176,12 @@ async def similar_scans(
             },
         ) from exc
 
-    cases = _filter_visible_cases(http_request, cases)
+    visible_cases = _filter_visible_cases(http_request, cases)
     return {
         "scan_id": scan_id,
         "task": task,
-        "count": len(cases),
+        "count": len(visible_cases),
         "advisory_only": True,
         "deterministic_score_unchanged": True,
-        "similar_scans": [case.to_dict() for case in cases],
+        "similar_scans": [case.to_dict() for case in visible_cases],
     }

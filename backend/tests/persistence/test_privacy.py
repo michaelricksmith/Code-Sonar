@@ -206,7 +206,9 @@ class TestDataclassShapes:
 
     def test_deletion_state_and_receipt_fields(self):
         state = DeletionState("active", None, None)
-        receipt = DeletionReceipt("del_1", "2026-09-28T00:00:00+00:00", RECEIPT_VERSION, "destroyed")
+        receipt = DeletionReceipt(
+            "del_1", "2026-09-28T00:00:00+00:00", RECEIPT_VERSION, "destroyed"
+        )
         assert state.state == "active"
         assert state.delete_requested_at is None
         assert receipt.receipt_id == "del_1"
@@ -223,7 +225,9 @@ class TestRetentionPolicyPersistence:
     def test_second_set_updates_existing_row(self, privacy_uow: PersistenceUnitOfWork) -> None:
         token = bind_tenant("t-policy")
         try:
-            returned = privacy_uow.privacy.set_retention_policy(RetentionPolicy(scan_retention_days=10))
+            returned = privacy_uow.privacy.set_retention_policy(
+                RetentionPolicy(scan_retention_days=10)
+            )
             assert returned == RetentionPolicy(scan_retention_days=10)
             second = privacy_uow.privacy.set_retention_policy(
                 RetentionPolicy(scan_retention_days=20, audit_retention_days=5)
@@ -245,7 +249,9 @@ class TestRetentionPolicyPersistence:
 
 
 class TestDeletionLifecycle:
-    def test_get_deletion_state_defaults_to_active(self, privacy_uow: PersistenceUnitOfWork) -> None:
+    def test_get_deletion_state_defaults_to_active(
+        self, privacy_uow: PersistenceUnitOfWork
+    ) -> None:
         token = bind_tenant("t-state")
         try:
             assert privacy_uow.privacy.get_deletion_state() == DeletionState("active", None, None)

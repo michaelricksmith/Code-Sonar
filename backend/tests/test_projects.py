@@ -34,8 +34,6 @@ from app.projects import (
 )
 from app.security.tenant import bind_tenant, reset_tenant
 
-import app.projects as projects
-
 
 def _record(project_id: str = "proj_1", **overrides: Any) -> ProjectRecord:
     base = {

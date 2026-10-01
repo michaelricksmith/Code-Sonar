@@ -18,7 +18,6 @@ behaviors reached only through narrower analyzer inputs:
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 from app.analyzers.dead_code import DeadCodeAnalyzer

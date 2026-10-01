@@ -31,8 +31,6 @@ from app.history import (
     InMemoryHistoryStore,
     ScanRecord,
     build_scan_record,
-    compute_repository_id,
-    compute_repository_id_for_slug,
 )
 from app.main import (
     ScanRequest,

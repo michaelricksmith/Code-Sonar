@@ -30,7 +30,6 @@ import pytest
 import app.remediation.groq as groq_mod
 from app.remediation.contracts import RemediationExecutionState, RemediationRequest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

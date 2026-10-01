@@ -160,10 +160,10 @@ def reset_rate_limits() -> None:
         _WINDOW_BUCKETS.clear()
 
 
-def rate_limit(limit: int, window_seconds: int) -> Callable:
+def rate_limit(limit: int, window_seconds: int) -> Callable[..., Callable[..., Any]]:
     """Endpoint decorator applying :func:`check_rate_limit` first."""
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             request: Request | None = None

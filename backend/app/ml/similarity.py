@@ -78,8 +78,13 @@ class SimilarityIndex:
         exclude_scan_id: str | None,
     ) -> tuple[Any, Any]:
         requested = min(len(self._rows), limit + (1 if exclude_scan_id else 0))
-        vector = self._scaler.transform([list(features.ordered_values())])
-        distances, indices = self._neighbors.kneighbors(vector, n_neighbors=requested)
+        scaler = self._scaler
+        neighbors = self._neighbors
+        assert scaler is not None and neighbors is not None, (
+            "Similarity index must be fitted before query"
+        )
+        vector = scaler.transform([list(features.ordered_values())])
+        distances, indices = neighbors.kneighbors(vector, n_neighbors=requested)
         return distances[0], indices[0]
 
     @staticmethod

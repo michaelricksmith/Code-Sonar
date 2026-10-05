@@ -605,9 +605,10 @@ confirmations, and GPC opt-outs are stored in the append-only
 fallback; see `/api/compliance/*` (`status`, `age-gate`,
 `marketing-consent`, `gpc`, one-click `unsubscribe/{token}`).
 Annual renewal reminders go out via `scripts/annual_reminders.py`
-(`--list` / `--send`; run monthly). Draft Terms, Privacy Policy, and
+(`--list` / `--send`; run monthly). Terms, Privacy Policy, and
 Accessibility Statement ship at `#/legal/terms`, `#/legal/privacy`,
-`#/legal/accessibility` — marked **DRAFT, pending legal review**.
+`#/legal/accessibility` — Terms and Privacy now carry the full founder
+drafts in-app, all marked **DRAFT, pending legal review**.
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth
 client**, then set each provider's authorized redirect URI to

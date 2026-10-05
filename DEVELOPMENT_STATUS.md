@@ -21,7 +21,8 @@
   first sign-in (13+/18+; under-13 accounts deleted, no attempt record);
   marketing opt-in unchecked + one-click unsubscribe (RFC 8058);
   GPC honored; annual reminders via `scripts/annual_reminders.py`.
-  Draft Terms/Privacy/Accessibility at `#/legal/*` (pending legal
+  Draft Terms/Privacy/Accessibility at `#/legal/*` — Terms and Privacy now
+  carry the full founder drafts in-app, still marked DRAFT (pending legal
   review). 25 new compliance tests pass; ruff + strict mypy clean.
 - **Stripe billing (test-mode ready, unmerged).** Flat-rate tiers with
   monthly quotas — free ($0: 1 repo, 5 scans/mo, 25 Ask Sonar/mo),

@@ -40,7 +40,8 @@ attempt record), marketing opt-in unchecked by default, GPC honored,
 annual reminders via `scripts/annual_reminders.py --list/--send`.
 Frontend: consent checkbox + disclosure on the pricing page, subscription
 panel with two-step in-app cancel/resume, age gate on first sign-in,
-draft legal pages at `#/legal/terms|privacy|accessibility` (pending
+draft legal pages at `#/legal/terms|privacy|accessibility` (Terms and
+Privacy now carry the full founder drafts in-app, still pending
 legal review), footer Terms/Privacy/Accessibility links, a11y pass
 (skip link, landmarks, focus-visible). 25 new compliance tests; ruff +
 strict mypy clean; full backend suite green except the 4 known Ask

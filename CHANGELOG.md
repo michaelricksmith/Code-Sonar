@@ -1,3 +1,18 @@
+## Unreleased — Full legal drafts live in-app
+
+- **Terms of Service and Privacy Policy now carry the full founder drafts**
+  in `frontend/src/components/LegalPage.tsx` (`#/legal/terms`,
+  `#/legal/privacy`), still marked **DRAFT, pending attorney review** behind
+  the existing DRAFT banner. Tables from the drafts were converted to
+  prose; placeholders use the `[TBD — founder to provide]` /
+  `[Company legal name — to be provided]` / `[To be decided]` conventions
+  (see task notes for the full list). Service name rendered as "Code Sonar",
+  AI provider named as Groq, contact emails as drafted
+  (support@ / privacy@ / dmca@codevitals.tech). `updated` set to
+  "October 2026" for both documents; Accessibility Statement unchanged.
+- Verified: frontend `tsc --noEmit` clean, `eslint` on LegalPage.tsx clean
+  (no LegalPage-specific tests exist).
+
 ## Unreleased — Cyclomatic complexity reduction (priority #2)
 
 - **Zero `cyclomatic_complexity:over-threshold` findings.** Refactored all

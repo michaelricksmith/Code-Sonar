@@ -670,6 +670,7 @@ class SqlUserStore:
             stripe_customer_id=_coalesce(row["stripe_customer_id"], ""),
             status=_coalesce(row["status"], STATUS_ACTIVE),
             is_admin=bool(row["is_admin"]),
+            is_staff=bool(row.get("is_staff", False)),
             last_login_at=_coalesce(row["last_login_at"], ""),
         )
 
@@ -801,6 +802,7 @@ class SqlUserStore:
                     "plan": PLAN_FREE,
                     "status": STATUS_ACTIVE,
                     "is_admin": False,
+                    "is_staff": False,
                     "github_token_ciphertext": self._encrypt_token(user_id, github_access_token),
                     "created_at": now,
                     "updated_at": now,
@@ -858,6 +860,17 @@ class SqlUserStore:
                 update(users)
                 .where(users.c.id == user_id)
                 .values(is_admin=is_admin, updated_at=_utcnow_iso())
+            )
+            if updated.rowcount != 1:
+                raise LookupError("User not found")
+            return self._get_or_raise(connection, user_id)
+
+    def set_staff(self, user_id: str, is_staff: bool) -> OAuthUser:
+        with self.engine.begin() as connection:
+            updated = connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(is_staff=is_staff, updated_at=_utcnow_iso())
             )
             if updated.rowcount != 1:
                 raise LookupError("User not found")
@@ -921,6 +934,7 @@ class SqlUserStore:
             "stripe_customer_id": record.stripe_customer_id or None,
             "status": record.status or STATUS_ACTIVE,
             "is_admin": bool(record.is_admin),
+            "is_staff": bool(getattr(record, "is_staff", False)),
             "github_token_ciphertext": self._encrypt_token(record.id, record.github_access_token),
             "created_at": record.created_at,
             "updated_at": record.updated_at,

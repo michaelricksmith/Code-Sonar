@@ -50,6 +50,10 @@ users = Table(
     Column("stripe_customer_id", String(255), unique=True),
     Column("status", String(32), nullable=False, default=STATUS_ACTIVE),
     Column("is_admin", Boolean, nullable=False, default=False),
+    # Staff: internal team members with unlimited quota for testing.
+    # Separate from is_admin (compliance/data powers) so QA hires get
+    # unlimited testing without admin powers.
+    Column("is_staff", Boolean, nullable=False, default=False),
     # OAuth tokens are encrypted at rest; see app.persistence.crypto.
     Column("github_token_ciphertext", Text),
     # ISO-8601 timestamps, matching the rest of the persistence schema.

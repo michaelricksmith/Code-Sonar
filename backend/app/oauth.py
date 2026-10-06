@@ -214,6 +214,7 @@ class OAuthUser:
     stripe_customer_id: str = ""
     status: str = "active"
     is_admin: bool = False
+    is_staff: bool = False
     last_login_at: str = ""
 
     @property
@@ -301,6 +302,7 @@ def _merge_existing_oauth_user(
         stripe_customer_id=existing.stripe_customer_id,
         status=existing.status,
         is_admin=existing.is_admin,
+        is_staff=existing.is_staff,
         last_login_at=now,
     )
 
@@ -429,6 +431,32 @@ class OAuthUserStore:
                         stripe_customer_id=stripe_customer_id or existing.stripe_customer_id,
                         updated_at=now,
                     )
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def set_staff(self, user_id: str, is_staff: bool) -> OAuthUser | None:
+        """Grant or revoke the staff flag (unlimited testing quota)."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(existing, is_staff=is_staff, updated_at=now)
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def set_admin(self, user_id: str, is_admin: bool) -> OAuthUser | None:
+        """Grant or revoke the admin flag."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(existing, is_admin=is_admin, updated_at=now)
                     records[index] = updated
                     self._save(records)
                     return updated
@@ -625,6 +653,54 @@ def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]
     }
 
 
+def _owner_email() -> str:
+    """Normalized owner email for the one-time admin bootstrap (empty when unset)."""
+    return os.environ.get("CODESONAR_OWNER_EMAIL", "").strip().lower()
+
+
+def _store_has_admin(store: Any) -> bool:
+    """True when any admin already exists in the user store."""
+    if hasattr(store, "list_users"):
+        users = store.list_users(limit=500, offset=0)
+    elif hasattr(store, "load_all"):
+        users = list(store.load_all())
+    else:
+        return False
+    return any(getattr(u, "is_admin", False) for u in users)
+
+
+def _grant_owner_flags(store: Any, user_id: str) -> None:
+    """Grant admin + staff through whichever setters the store provides."""
+    for kind in ("admin", "staff"):
+        setter = getattr(store, f"set_{kind}", None)
+        if setter is not None:
+            setter(user_id, True)
+
+
+def _maybe_bootstrap_owner(user: OAuthUser) -> OAuthUser:
+    """One-time owner bootstrap: first login matching CODESONAR_OWNER_EMAIL.
+
+    When the env var is set and the logging-in user's email matches it
+    (case-insensitive), and no admin exists yet in the user store, that
+    user is granted admin + staff. This seeds the first admin without
+    touching the database by hand, and becomes a no-op afterwards.
+    """
+    if not _owner_email() or (user.email or "").strip().lower() != _owner_email():
+        return user
+    if user.is_admin and user.is_staff:
+        return user
+    store = get_oauth_user_store()
+    try:
+        if _store_has_admin(store):
+            return user
+        _grant_owner_flags(store, user.id)
+        logger.warning("Owner bootstrap: granted admin+staff to %s", user.id)
+        return store.get(user.id) or user
+    except Exception:
+        logger.exception("Owner bootstrap failed for %s", user.id)
+        return user
+
+
 @router.get("/github/callback")
 async def github_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
     config = oauth_config()
@@ -638,6 +714,7 @@ async def github_callback(code: str | None = None, state: str | None = None) -> 
     token = _exchange_github_code(config, code)
     profile = _github_profile(token)
     user = get_oauth_user_store().upsert(**_github_upsert_fields(profile, token))
+    user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
@@ -664,6 +741,7 @@ async def google_callback(code: str | None = None, state: str | None = None) -> 
         email=str(profile.get("email") or ""),
         avatar_url=str(profile.get("picture") or ""),
     )
+    user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
@@ -697,7 +775,16 @@ def require_user(request: Request) -> OAuthUser:
 
 @router.get("/me")
 async def auth_me(request: Request) -> dict[str, Any]:
-    return require_user(request).public_dict()
+    user = require_user(request)
+    # The public projection hides account internals; the signed-in user
+    # additionally sees their own plan and privilege flags so the UI can
+    # gate the admin console. Other users' flags stay admin-only.
+    return {
+        **user.public_dict(),
+        "plan": user.plan,
+        "is_admin": bool(getattr(user, "is_admin", False)),
+        "is_staff": bool(getattr(user, "is_staff", False)),
+    }
 
 
 @router.post("/logout")

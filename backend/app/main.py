@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.admin.api import router as admin_router
 from app.ask_sonar.api import router as ask_sonar_router
 from app.billing.api import router as billing_router
 from app.compliance.api import router as compliance_router
@@ -75,6 +76,7 @@ async def validate_security_configuration() -> None:
 
 
 app.include_router(ml_router)
+app.include_router(admin_router)
 app.include_router(ask_sonar_router)
 app.include_router(billing_router)
 app.include_router(compliance_router)

@@ -9,7 +9,7 @@ Copyright © 2026 Michael Smith. All rights reserved.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -93,7 +93,10 @@ class AdminRequest(BaseModel):
 
 def _apply_flag(user_id: str, kind: str, value: bool) -> OAuthUser:
     store = get_oauth_user_store()
-    setter = getattr(store, f"set_{kind}", None)
+    setter = cast(
+        "Callable[[str, bool], OAuthUser | None] | None",
+        getattr(store, f"set_{kind}", None),
+    )
     if setter is None:
         raise HTTPException(status_code=501, detail="User store does not support flag changes")
     try:

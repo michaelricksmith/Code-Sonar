@@ -10,7 +10,7 @@ import { isPaidPlan } from "../api/billing";
 import type { BillingStatus } from "../api/billing";
 import { SiteFooter } from "./SiteFooter";
 
-export type ShellView = "overview" | "issues" | "fixes" | "pricing";
+export type ShellView = "overview" | "issues" | "fixes" | "pricing" | "admin";
 
 export interface PromptActivity {
   inProgress: number;
@@ -137,8 +137,7 @@ export function Shell({
           {billing && (
             <>
               <div className="side-label">Plan</div>
-              <div className="side-detail" aria-label="Plan usage">
-                <div className="side-detail-row">
+              <div className="side-detail" aria-label="Plan usage">                <div className="side-detail-row">
                   <span className={`plan-badge plan-${billing.plan}`}>
                     {billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
                   </span>
@@ -148,11 +147,17 @@ export function Shell({
                 </div>
                 <div className="side-detail-row">
                   <span>◈</span>
-                  <span>Scans {billing.usage.scans_used}/{billing.limits.scans_per_month}</span>
+                  <span>
+                    Scans {billing.usage.scans_used}
+                    {user.is_staff ? " · unlimited" : `/${billing.limits.scans_per_month}`}
+                  </span>
                 </div>
                 <div className="side-detail-row">
                   <span>✦</span>
-                  <span>Ask Sonar {billing.usage.ask_sonar_used}/{billing.limits.ask_sonar_per_month}</span>
+                  <span>
+                    Ask Sonar {billing.usage.ask_sonar_used}
+                    {user.is_staff ? " · unlimited" : `/${billing.limits.ask_sonar_per_month}`}
+                  </span>
                 </div>
                 {paid && onManageBilling && (
                   <div className="side-detail-row">
@@ -165,6 +170,14 @@ export function Shell({
               </div>
             </>
           )}
+          {user.is_admin && (
+            <>
+              <div className="side-label">Admin</div>
+              <button className={`side-item ${view === "admin" ? "active" : ""}`} onClick={() => onNavigate("admin")}>
+                ⚙ Console
+              </button>
+            </>
+          )}
         </div>
 
         <div className="side-foot">
@@ -173,6 +186,16 @@ export function Shell({
             <span className="who">
               <b title={user.name}>{user.name}</b>
               <span title={user.email}>{user.email}</span>
+              {(user.is_admin || user.is_staff) && (
+                <span style={{ display: "inline-flex", gap: 4, marginTop: 2 }}>
+                  {user.is_admin && (
+                    <span className="plan-badge" title="Admin access">admin</span>
+                  )}
+                  {user.is_staff && (
+                    <span className="plan-badge" title="Unlimited testing quota">staff</span>
+                  )}
+                </span>
+              )}
             </span>
             <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
           </div>

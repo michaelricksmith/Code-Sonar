@@ -865,7 +865,7 @@ class TestAlembicRevisionCheck:
     def test_accepts_database_at_shipped_head(self) -> None:
         from app.persistence.runtime import REQUIRED_ALEMBIC_REVISION, _initialize_schema
 
-        assert REQUIRED_ALEMBIC_REVISION == "20260930_0007"
+        assert REQUIRED_ALEMBIC_REVISION == "20261006_0008"
         # Must not raise: the DB was migrated to the shipped head.
         _initialize_schema(self._fake_engine(REQUIRED_ALEMBIC_REVISION), self._pg_config())
 

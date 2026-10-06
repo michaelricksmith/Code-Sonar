@@ -48,6 +48,7 @@ import { UpgradeNudge } from "./components/UpgradeNudge";
 import { Shell, SonarFab } from "./components/Shell";
 import type { ShellView } from "./components/Shell";
 import { ScanAnimation } from "./components/ScanAnimation";
+import { AdminConsole } from "./components/AdminConsole";
 import { timeAgo } from "./copy";
 
 type Route =
@@ -57,6 +58,7 @@ type Route =
   | { name: "issue"; id: string }
   | { name: "fixes" }
   | { name: "pricing" }
+  | { name: "admin" }
   | { name: "legal"; page: LegalPageId };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
@@ -74,6 +76,7 @@ function parseRoute(): Route {
   if (hash === "/app") return { name: "app" };
   if (hash === "/app/issues") return { name: "issues" };
   if (hash === "/app/fixes") return { name: "fixes" };
+  if (hash === "/app/admin") return { name: "admin" };
   const match = hash.match(/^\/app\/issues\/(.+)$/);
   if (match) return { name: "issue", id: decodeURIComponent(match[1]) };
   return { name: "landing" };
@@ -313,6 +316,8 @@ export default function App() {
     // Pricing and the legal pages are public: signed-out visitors can read them.
     if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal") navigate("/");
     if (user && route.name === "landing") navigate("/app");
+    // The admin console is only for admins; everyone else goes back to the app.
+    if (user && route.name === "admin" && !user.is_admin) navigate("/app");
   }, [authChecked, user, route.name]);
 
   // Resume a pricing upgrade interrupted by sign-in. A signed-out visitor
@@ -588,9 +593,14 @@ export default function App() {
       ? "issues"
       : route.name === "fixes"
         ? "fixes"
-        : route.name === "pricing"
-          ? "pricing"
-          : "overview";
+        : route.name === "admin"
+          ? "admin"
+          : route.name === "pricing"
+            ? "pricing"
+            : "overview";
+  // Scan-related banners and the onboarding wizard live on the scan
+  // routes only; the pricing page and admin console render on their own.
+  const showScanChrome = route.name !== "pricing" && route.name !== "admin";
   const activeFinding =
     route.name === "issue" ? result?.findings.find((f) => f.id === route.id) ?? null : null;
 
@@ -605,7 +615,17 @@ export default function App() {
         issueCount={result?.finding_count ?? null}
         fixCount={fixCount}
         promptActivity={promptActivity}
-        onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : view === "fixes" ? "/app/fixes" : "/app")}
+        onNavigate={(view) =>
+          navigate(
+            view === "issues"
+              ? "/app/issues"
+              : view === "fixes"
+                ? "/app/fixes"
+                : view === "admin"
+                  ? "/app/admin"
+                  : "/app"
+          )
+        }
         onSignOut={() => void handleSignOut()}
         onOpenSonar={() => openSonar()}
         onRescan={() => void handleRescan()}
@@ -647,7 +667,9 @@ export default function App() {
           <PricingView user={user} billing={billing} billingLoading={billingLoading} />
         )}
 
-        {route.name !== "pricing" && scanNotice && (
+        {route.name === "admin" && user.is_admin && <AdminConsole currentUserId={user.id} />}
+
+        {showScanChrome && scanNotice && (
           <div className="page" style={{ marginBottom: 4 }}>
             <div className={`notice ${scanNotice.startsWith("Re-scanned") ? "warning" : "danger"}`} style={{ marginBottom: 18 }}>
               {scanNotice}
@@ -655,7 +677,7 @@ export default function App() {
           </div>
         )}
 
-        {route.name !== "pricing" && !result && (
+        {showScanChrome && !result && (
           <OnboardingWizard
             userName={user.name}
             onComplete={handleOnboardingComplete}
@@ -713,7 +735,7 @@ export default function App() {
           </div>
         )}
 
-        {route.name !== "pricing" && rescanning && (
+        {showScanChrome && rescanning && (
           <div className="page">
             <div className="wizard-card">
               <ScanAnimation

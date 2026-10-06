@@ -30,6 +30,7 @@ import type { ComplianceStatus } from "./api/compliance";
 import { isQuotaError } from "./api/errors";
 import type { ApiError, QuotaErrorBody } from "./api/errors";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
+import type { ScanJobState } from "./api/scanJobs";
 import { fetchFixLog } from "./api/outcomes";
 import { fetchPromptStatus } from "./api/prompts";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
@@ -46,6 +47,7 @@ import { PricingView } from "./components/PricingView";
 import { UpgradeNudge } from "./components/UpgradeNudge";
 import { Shell, SonarFab } from "./components/Shell";
 import type { ShellView } from "./components/Shell";
+import { ScanAnimation } from "./components/ScanAnimation";
 import { timeAgo } from "./copy";
 
 type Route =
@@ -111,6 +113,7 @@ export default function App() {
     newCount: number;
   } | null>(null);
   const [rescanning, setRescanning] = useState(false);
+  const [rescanJob, setRescanJob] = useState<ScanJobState | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [sonarOpen, setSonarOpen] = useState(false);
   const [sonarQuestion, setSonarQuestion] = useState<string | null>(null);
@@ -403,6 +406,7 @@ export default function App() {
   const handleRescan = useCallback(async () => {
     if (!repoLabel || rescanning) return;
     setRescanning(true);
+    setRescanJob(null);
     setScanNotice(null);
     // Capture the previous scan before it is replaced, so we can show a
     // local score-delta + fixed/new breakdown even when the backend has no
@@ -410,7 +414,7 @@ export default function App() {
     const previous = result;
     try {
       const jobId = await createScanJob(repoLabel);
-      const { done } = pollScanJob(jobId, () => undefined);
+      const { done } = pollScanJob(jobId, (state) => setRescanJob(state));
       const final = await done;
       if (final.status === "error") throw new Error(final.error ?? "Re-scan failed.");
       if (!final.result) throw new Error("Re-scan finished without a result.");
@@ -711,7 +715,15 @@ export default function App() {
 
         {route.name !== "pricing" && rescanning && (
           <div className="page">
-            <div className="notice warning"><b>Re-scan running…</b>Sonar is reading your repo again. This page will update when it lands.</div>
+            <div className="wizard-card">
+              <ScanAnimation
+                title="Re-scan running…"
+                liveStep={rescanJob?.step}
+                progress={rescanJob?.progress}
+                repoLabel={repoLabel}
+                note="nothing is changed in your repo"
+              />
+            </div>
           </div>
         )}
       </Shell>

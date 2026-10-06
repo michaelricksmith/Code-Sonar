@@ -15,6 +15,7 @@ import type { ScanJobState } from "../api/scanJobs";
 import { isQuotaError } from "../api/errors";
 import { GRADE_TONE, GRADE_WORDS, gradeForScore, timeAgo, verdictForScore } from "../copy";
 import { ScoreDial } from "./ScoreDial";
+import { ScanAnimation } from "./ScanAnimation";
 
 type Step = "pick" | "scanning" | "revealing";
 
@@ -24,12 +25,6 @@ interface OnboardingWizardProps {
   /** Called with the error when the first scan hits a 402 quota limit. */
   onQuotaExceeded?: (e: unknown) => void;
 }
-
-const HUMAN_STEPS = [
-  "Reading your files…",
-  "Running 8 checks…",
-  "Tallying your score…",
-];
 
 function shortRepoName(fullName: string): string {
   const parts = fullName.split("/");
@@ -47,7 +42,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
   const [pickedRepo, setPickedRepo] = useState<string | null>(null);
   const [jobState, setJobState] = useState<ScanJobState | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [humanStep, setHumanStep] = useState(0);
   const [revealResult, setRevealResult] = useState<ScanResponse | null>(null);
   const pollRef = useRef<{ cancel: () => void } | null>(null);
 
@@ -57,13 +51,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
       .catch((e) => setReposError(e instanceof Error ? e.message : String(e)))
       .finally(() => setReposLoading(false));
   }, []);
-
-  // Rotate the human-readable step captions while the scan runs.
-  useEffect(() => {
-    if (step !== "scanning") return;
-    const timer = setInterval(() => setHumanStep((n) => (n + 1) % HUMAN_STEPS.length), 2600);
-    return () => clearInterval(timer);
-  }, [step]);
 
   useEffect(() => () => pollRef.current?.cancel(), []);
 
@@ -78,7 +65,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
     setStep("scanning");
     setScanError(null);
     setJobState(null);
-    setHumanStep(0);
     try {
       const jobId = await createScanJob(repo);
       const poll = pollScanJob(jobId, (state) => setJobState(state));
@@ -221,22 +207,13 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
             <i className="on" />
             <i className="on" />
           </div>
-          <h2>First scan is running…</h2>
-          <div className="sonar-ring-wrap">
-            <div className="sonar-ring" aria-hidden="true">
-              <div className="ring r1" />
-              <div className="ring r2" />
-              <div className="ring r3" />
-              <div className="core" />
-            </div>
-            <div className="scan-step">{jobState?.step || HUMAN_STEPS[humanStep]}</div>
-            <div className="scan-sub">
-              {pickedRepo ? <span className="mono">{pickedRepo}</span> : "Preparing…"} · nothing is changed in your repo
-            </div>
-            <div className="scan-progress" role="progressbar" aria-label="Scan progress">
-              <i style={{ width: `${Math.round((jobState?.progress ?? 0.15) * 100)}%` }} />
-            </div>
-          </div>
+          <ScanAnimation
+            title="First scan is running…"
+            liveStep={jobState?.step}
+            progress={jobState?.progress}
+            repoLabel={pickedRepo}
+            note="nothing is changed in your repo"
+          />
         </div>
       )}
 

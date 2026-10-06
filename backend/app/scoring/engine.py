@@ -2,21 +2,26 @@
 
 The score is authoritative and reproducible. Each finding contributes based on
 its analyzer debt points, severity, confidence, category, and repository-path
-context. Source/test/fixture context is applied per finding. Non-production
-contributions are additionally bounded within each category so intentionally
-large test suites and fixtures cannot overwhelm real production findings.
+context. Source/test/fixture context is applied per finding. The penalty is
+linear in the findings within each category: fixing any finding always moves
+the score, so a rescan after a fix visibly reflects the fix. Category balance
+comes from the category weights rather than caps, so no single category can
+dominate the score on its own. Test/fixture findings additionally receive a
+0.25 per-finding modifier and their aggregate per-category contribution is
+bounded, so intentionally large test suites cannot overwhelm production
+findings.
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from math import fsum, log1p
+from math import fsum
 from typing import Any
 
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security.path_classifier import FIXTURE, SOURCE, TEST, classify_path
 
-SCORING_VERSION: str = "1.1"
+SCORING_VERSION: str = "1.2"
 
 
 class ScoringResult:
@@ -265,13 +270,15 @@ def _finding_explanation(finding: Finding) -> dict[str, Any]:
 
 
 def _calculate_category_penalty(findings: list[Finding]) -> dict[str, float | bool]:
-    """Calculate a bounded category penalty with per-finding context weighting.
+    """Calculate the category penalty with per-finding context weighting.
 
-    Production and non-production contributions are accumulated separately.
-    Test/fixture findings still receive their 0.25 per-finding modifier, and
-    their aggregate contribution is capped at 25% of the category's available
-    penalty. This prevents intentionally repetitive fixtures from dominating a
-    repository's score while leaving their raw findings and debt visible.
+    The penalty is linear in the findings: every finding contributes its
+    full weighted penalty, so fixing any finding always moves the score and
+    a rescan after a fix visibly reflects it. Category balance comes from
+    CATEGORY_WEIGHTS, not from caps. Test/fixture findings still receive
+    their 0.25 per-finding modifier, and their aggregate contribution per
+    category is bounded so intentionally large test suites cannot overwhelm
+    production findings.
     """
     if not findings:
         return {
@@ -292,24 +299,13 @@ def _calculate_category_penalty(findings: list[Finding]) -> dict[str, float | bo
     )
 
     bounded_non_source = min(NON_SOURCE_CATEGORY_CAP, non_source_penalty)
-    combined = source_penalty + bounded_non_source
-    # Responsive cap: linear up to MAX_PENALTY, then logarithmic growth.
-    # A hard cap created dead zones where fixing issues didn't move the
-    # score; this keeps every fix meaningful while preventing huge
-    # finding counts from linearly exploding the penalty.
-    if combined <= MAX_PENALTY:
-        capped = combined
-        cap_applied = False
-    else:
-        capped = MAX_PENALTY + MAX_PENALTY * 0.1 * log1p((combined - MAX_PENALTY) / MAX_PENALTY)
-        cap_applied = True
     return {
         "source_penalty": source_penalty,
         "non_source_penalty": non_source_penalty,
         "bounded_non_source_penalty": bounded_non_source,
         "non_source_cap_applied": non_source_penalty > NON_SOURCE_CATEGORY_CAP,
-        "category_cap_applied": cap_applied,
-        "capped_penalty": capped,
+        "category_cap_applied": False,
+        "capped_penalty": source_penalty + bounded_non_source,
     }
 
 

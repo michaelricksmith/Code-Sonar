@@ -101,7 +101,7 @@ def _apply_flag(user_id: str, kind: str, value: bool) -> OAuthUser:
     if setter is None:
         raise HTTPException(status_code=501, detail="User store does not support flag changes")
     try:
-        updated = setter(user_id, value)
+        updated: OAuthUser = setter(user_id, value)
     except LookupError:
         raise HTTPException(status_code=404, detail="User not found")
     if updated is None:

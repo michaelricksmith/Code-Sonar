@@ -1,3 +1,28 @@
+## Unreleased — Admin console: plan grants, quota reset, user deletion
+
+- **Admins can now grant billing plans directly** (`POST /api/admin/users/{id}/plan`):
+  set any user to free, hobby, or plus with no Stripe involvement. The admin
+  console shows a plan dropdown per user.
+- **Admins can reset a user's quota** (`POST /api/admin/users/{id}/usage/reset`):
+  zeroes the current-period scans and Ask Sonar counters. "Reset quota" button
+  in the console.
+- **Admins can delete users** (`DELETE /api/admin/users/{id}`): permanently
+  removes the account and its quota counters. Guards: cannot delete yourself,
+  cannot delete the last remaining admin. "Delete" button in the console with
+  a confirmation step.
+- **Ask Sonar "Scan not found" hardened**: the dashboard now verifies the
+  specific cached scan against the server before rendering it, instead of only
+  checking that the user has any history. Stale caches (different account,
+  deleted scan) are dropped instead of rendering a phantom scan that Ask Sonar
+  cannot load. The drawer also shows a friendly message when the scan is
+  unavailable.
+- **Landing page offers Google sign-in**: the landing previously only linked
+  GitHub OAuth. "Continue with Google" links were added (Google already sends
+  `prompt=select_account`), plus a hint to sign out of github.com first when
+  switching GitHub accounts, since GitHub offers no account-chooser parameter.
+- New tests: plan/usage/delete endpoint coverage in
+  `tests/admin/test_admin.py` (24 passed).
+
 ## Unreleased — Stable finding IDs across processes
 
 - **Finding IDs are now deterministic across processes.** Six analyzers

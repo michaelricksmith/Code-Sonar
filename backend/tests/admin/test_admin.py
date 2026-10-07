@@ -252,3 +252,113 @@ class TestOwnerBootstrap:
         assert body["is_admin"] is True
         assert body["is_staff"] is True
         assert body["plan"] == "free"
+
+
+class TestAdminPlanAndUsage:
+    def test_admin_can_set_plan(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        target = _make_user(user_store, email="target@example.com")
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.post(
+            f"/api/admin/users/{target.id}/plan", json={"plan": "plus"}, headers=headers
+        )
+        assert res.status_code == 200
+        assert res.json()["user"]["plan"] == "plus"
+        assert user_store.get(target.id).plan == "plus"
+
+    def test_admin_cannot_set_unknown_plan(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        target = _make_user(user_store, email="target@example.com")
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.post(
+            f"/api/admin/users/{target.id}/plan", json={"plan": "ultra"}, headers=headers
+        )
+        assert res.status_code == 400
+
+    def test_non_admin_cannot_set_plan(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        regular = _make_user(user_store, email="regular@example.com")
+        target = _make_user(user_store, email="target@example.com")
+        headers = _auth_headers(regular, monkeypatch)
+
+        res = client.post(
+            f"/api/admin/users/{target.id}/plan", json={"plan": "plus"}, headers=headers
+        )
+        assert res.status_code == 403
+
+    def test_admin_can_reset_usage(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        target = _make_user(user_store, email="target@example.com")
+        _use_up_scans(target.id)
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.post(f"/api/admin/users/{target.id}/usage/reset", headers=headers)
+        assert res.status_code == 200
+        assert res.json()["usage"]["scans_used"] == 0
+        # quota now passes again
+        check_quota(target.id, "scans")
+
+
+class TestAdminDeleteUser:
+    def test_admin_can_delete_user(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        target = _make_user(user_store, email="target@example.com")
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.delete(f"/api/admin/users/{target.id}", headers=headers)
+        assert res.status_code == 200
+        assert res.json()["deleted"] == target.id
+        assert user_store.get(target.id) is None
+
+    def test_admin_cannot_delete_self(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.delete(f"/api/admin/users/{admin.id}", headers=headers)
+        assert res.status_code == 400
+        assert user_store.get(admin.id) is not None
+
+    def test_admin_cannot_delete_last_admin(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # With two admins, deleting one is fine (one remains).
+        admin = _make_user(user_store, email="admin@example.com")
+        user_store.set_admin(admin.id, True)
+        other_admin = _make_user(user_store, email="other@example.com")
+        user_store.set_admin(other_admin.id, True)
+        headers = _auth_headers(admin, monkeypatch)
+
+        res = client.delete(f"/api/admin/users/{other_admin.id}", headers=headers)
+        assert res.status_code == 200
+        assert user_store.get(other_admin.id) is None
+        # the caller remains admin
+        assert user_store.get(admin.id).is_admin is True
+
+    def test_non_admin_cannot_delete(
+        self, client: TestClient, user_store: OAuthUserStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        regular = _make_user(user_store, email="regular@example.com")
+        target = _make_user(user_store, email="target@example.com")
+        headers = _auth_headers(regular, monkeypatch)
+
+        res = client.delete(f"/api/admin/users/{target.id}", headers=headers)
+        assert res.status_code == 403
+        assert user_store.get(target.id) is not None

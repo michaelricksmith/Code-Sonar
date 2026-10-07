@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { DriftResult, Finding, ScanResponse } from "./api/analyzers";
-import { fetchDrift, fetchHistoryCount } from "./api/analyzers";
+import { fetchDrift, fetchHistoryCount, fetchScan } from "./api/analyzers";
 import { assertBillingUrl, stripSensitiveKeys } from "./utils/security";
 import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
@@ -158,11 +158,34 @@ export default function App() {
         setUser(me);
         if (me) {
           const saved = loadSavedScan();
-          if (saved) {
-            // Self-heal a stale cache: if the server has no scan history
-            // (e.g. after a server-side data reset), drop the cached scan
-            // instead of rendering phantom results. If the check itself
-            // fails, keep the cache (offline-friendly).
+          if (saved?.result?.scan_id) {
+            // Verify the specific cached scan is still accessible to this
+            // user before rendering it. The old check (any history at all)
+            // could show a phantom scan — e.g. cached from a different
+            // account, or deleted server-side — that Ask Sonar and other
+            // server-backed features then fail to load ("Scan not found").
+            // A fresh server copy also beats a stale cache. Network errors
+            // keep the cache (offline-friendly).
+            fetchScan(saved.result.scan_id)
+              .then((fresh) => {
+                if (fresh) {
+                  setResult(fresh);
+                  setRepoLabel(saved.repoLabel);
+                } else {
+                  try {
+                    window.localStorage.removeItem(LAST_SCAN_KEY);
+                  } catch {
+                    // best-effort
+                  }
+                }
+              })
+              .catch(() => {
+                setResult(saved.result);
+                setRepoLabel(saved.repoLabel);
+              });
+          } else if (saved) {
+            // Legacy cache without a scan id: fall back to the old
+            // any-history check.
             fetchHistoryCount()
               .then((count) => {
                 if (count > 0) {

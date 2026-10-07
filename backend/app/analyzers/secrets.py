@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Iterator, Pattern
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -221,9 +222,9 @@ class SecretsAnalyzer(Analyzer):
         severity: FindingSeverity,
         debt_points: int,
     ) -> Finding:
-        finding_id = (
-            "finding_secrets_"
-            f"{hash((rel_path, line_num, kind, match_text[:8])) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_secrets_",
+            rel_path, line_num, kind, match_text[:8],
         )
         return Finding(
             id=finding_id,

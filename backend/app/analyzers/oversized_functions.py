@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -263,9 +264,9 @@ class OversizedFunctionsAnalyzer(Analyzer):
         name = getattr(node, "name", "<lambda>")
         qualified = _join(parent_qualname, name)
         severity, debt_points = _severity_for(length, self._threshold)
-        finding_id = (
-            "finding_oversized_functions_"
-            f"{hash((rel_path, qualified, length, self._threshold)) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_oversized_functions_",
+            rel_path, qualified, length, self._threshold,
         )
         start = getattr(node, "lineno", 1) or 1
         end = getattr(node, "end_lineno", start) or start

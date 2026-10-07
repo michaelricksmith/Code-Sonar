@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Iterator, Set
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -241,9 +242,9 @@ class TestingDebtAnalyzer(Analyzer):
             lines_bucket = 1
         else:
             lines_bucket = 0
-        finding_id = (
-            "finding_testing_debt_"
-            f"{hash((rel, 'untested-module', lines_bucket)) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_testing_debt_",
+            rel, "untested-module", lines_bucket,
         )
         evidence = (
             f"module={rel} lines={line_count} "
@@ -284,9 +285,9 @@ class TestingDebtAnalyzer(Analyzer):
 
     def _build_missing_tests_dir_finding(self, repo_root: Path) -> Finding:
         rel = "tests/"
-        finding_id = (
-            "finding_testing_debt_"
-            f"{hash((rel, 'missing-tests-dir')) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_testing_debt_",
+            rel, "missing-tests-dir",
         )
         return Finding(
             id=finding_id,

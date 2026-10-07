@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -144,9 +145,9 @@ class OversizedFilesAnalyzer(Analyzer):
     ) -> Finding:
         rel = file_path.resolve().relative_to(repo_root).as_posix()
         severity, debt_points = _severity_for(line_count, self._threshold)
-        finding_id = (
-            "finding_oversized_files_"
-            f"{hash((rel, line_count, self._threshold)) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_oversized_files_",
+            rel, line_count, self._threshold,
         )
         evidence = (
             f"line_count={line_count}, threshold={self._threshold}, file={rel}"

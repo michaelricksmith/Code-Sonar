@@ -42,11 +42,11 @@ produce byte-identical IDs.
 from __future__ import annotations
 
 import ast
-import hashlib
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -348,11 +348,6 @@ def _find_unreachable(
         )
 
 
-def _stable_finding_id(*parts: object) -> str:
-    payload = "\x1f".join(str(part) for part in parts).encode("utf-8")
-    return "finding_dead_code_" + hashlib.sha256(payload).hexdigest()[:16]
-
-
 def _build_unreachable_finding(
     rel_path: str,
     parent_qualname: Optional[str],
@@ -363,8 +358,9 @@ def _build_unreachable_finding(
     stmt_count: int,
 ) -> Finding:
     scope_key = parent_qualname if parent_qualname else "<module>"
-    finding_id = _stable_finding_id(
-        rel_path, "unreachable", scope_key, start_line, end_line, terminal_line
+    finding_id = stable_finding_id(
+        "finding_dead_code_",
+        rel_path, "unreachable", scope_key, start_line, end_line, terminal_line,
     )
     where = f"in {parent_qualname}" if parent_qualname else "at module scope"
     evidence = (
@@ -412,7 +408,9 @@ def _build_unused_private_finding(
 ) -> Finding:
     start = getattr(node, "lineno", 1) or 1
     end = getattr(node, "end_lineno", start) or start
-    finding_id = _stable_finding_id(rel_path, "unused-private", qualname, start, end)
+    finding_id = stable_finding_id(
+        "finding_dead_code_", rel_path, "unused-private", qualname, start, end
+    )
     severity = FindingSeverity.WARNING
     debt_points = 4
     return Finding(
@@ -451,7 +449,9 @@ def _build_stale_fixture_finding(
     references_in_repo: int,
     start_line: int,
 ) -> Finding:
-    finding_id = _stable_finding_id(rel_path, "stale-fixture", qualname, start_line)
+    finding_id = stable_finding_id(
+        "finding_dead_code_", rel_path, "stale-fixture", qualname, start_line
+    )
     return Finding(
         id=finding_id,
         rule_id="dead_code:stale-fixture",

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import is_lockfile
 
@@ -178,9 +179,10 @@ class CommentMarkersAnalyzer(Analyzer):
                         comment_text = match.group(1).strip()
 
                         # Create finding
-                        finding_id = (
-                            f"finding_{marker_type.lower()}_"
-                            f"{hash((file_path.as_posix(), line_num)) & 0xFFFFFFFF:08x}"
+                        finding_id = stable_finding_id(
+                            f"finding_{marker_type.lower()}_",
+                            file_path.as_posix(),
+                            line_num,
                         )
                         finding = Finding(
                             id=finding_id,

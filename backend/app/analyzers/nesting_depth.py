@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -254,9 +255,9 @@ class NestingDepthAnalyzer(Analyzer):
             if parent_qualname else name
         )
         severity, debt_points = _severity_for(depth, self._threshold)
-        finding_id = (
-            "finding_nesting_depth_"
-            f"{hash((rel_path, qualified, depth, self._threshold)) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_nesting_depth_",
+            rel_path, qualified, depth, self._threshold,
         )
         line_start = getattr(node, "lineno", 1) or 1
         line_end = getattr(node, "end_lineno", line_start) or line_start

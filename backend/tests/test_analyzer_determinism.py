@@ -12,6 +12,12 @@ fixture list is the contract.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from app.analyzers.base import Analyzer
@@ -169,3 +175,84 @@ class TestOrderingInvariants:
 
         findings = [_mk(i) for i in range(10)]
         assert_score_input_order_irrelevant(findings)
+
+
+# ---------------------------------------------------------------------------
+# Cross-process determinism
+# ---------------------------------------------------------------------------
+
+_SCAN_SCRIPT = (
+    "import json, sys; "
+    "sys.path.insert(0, sys.argv[1]); "
+    "from app.services.repository import scan_repository; "
+    "result = scan_repository(sys.argv[2]); "
+    "print(json.dumps(sorted(f.id for f in result)))"
+)
+
+
+def _scan_ids_in_subprocess(repo: Path, hash_seed: str) -> list[str]:
+    """Scan the repo in a fresh interpreter and return sorted finding IDs."""
+    backend_dir = str(Path(__file__).resolve().parent.parent)
+    env = dict(os.environ)
+    env["PYTHONHASHSEED"] = hash_seed
+    env["CODESONAR_UNSAFE_ALLOW_ANY_SCAN_PATH"] = "1"
+    proc = subprocess.run(
+        [sys.executable, "-c", _SCAN_SCRIPT, backend_dir, str(repo)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"subprocess scan failed (seed={hash_seed}):\n{proc.stderr[-2000:]}"
+    )
+    return json.loads(proc.stdout)
+
+
+class TestCrossProcessDeterminism:
+    """Finding IDs must be identical across interpreter restarts.
+
+    Regression test for the salted-hash() bug: six analyzers built finding
+    IDs with Python's built-in hash(), which is randomized per process, so
+    identical scans produced different IDs after any restart or redeploy.
+    The drift view matches findings by ID, so this silently corrupted drift
+    (every finding reported NEW, every baseline finding RESOLVED). The
+    in-process tests above cannot catch this; two subprocesses with
+    different PYTHONHASHSEED values reproduce the production condition.
+    """
+
+    def test_finding_ids_identical_across_processes(self):
+        repo = make_temp_repo(
+            {
+                "m.py": (
+                    "def _unused():\n"
+                    "    return 1\n"
+                    "\n"
+                    "def public():\n"
+                    "    # TODO: ship\n"
+                    "    x = 1\n"
+                    "    if x > 0:\n"
+                    "        if x > 1:\n"
+                    "            if x > 2:\n"
+                    "                if x > 3:\n"
+                    "                    if x > 4:\n"
+                    "                        return x\n"
+                    "    return 0\n"
+                    "\n"
+                    "AKIAIOSFODNN7EXAMPLE\n"
+                ),
+            }
+        )
+        try:
+            ids_seed_0 = _scan_ids_in_subprocess(repo, "0")
+            ids_seed_42 = _scan_ids_in_subprocess(repo, "42")
+            assert ids_seed_0, "fixture produced no findings; test is vacuous"
+            assert ids_seed_0 == ids_seed_42, (
+                "finding IDs differ across processes: "
+                f"{len(ids_seed_0)} vs {len(ids_seed_42)} IDs"
+            )
+        finally:
+            import shutil
+
+            shutil.rmtree(repo, ignore_errors=True)

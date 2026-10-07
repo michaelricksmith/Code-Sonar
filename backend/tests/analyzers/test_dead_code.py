@@ -8,7 +8,8 @@ errors). This file covers the *gaps*: the module-level helpers and
 builder functions that the end-to-end tests never touch directly,
 plus edge-case behaviors reached only through narrower inputs:
 
-- ``_stable_finding_id`` — ID prefix, determinism, part sensitivity.
+- ``stable_finding_id`` — ID prefix, determinism, part sensitivity
+  (in ``app.analyzers.finding_ids``).
 - ``_is_test_file_rel`` — directory names, filename patterns, and the
   empty-path edge case.
 - ``_is_eligible`` — called directly for symlink / outside-root paths
@@ -38,8 +39,8 @@ from app.analyzers.dead_code import (
     _is_test_file_rel,
     _join,
     _safe_read,
-    _stable_finding_id,
 )
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import FindingCategory, FindingSeverity
 
 
@@ -49,16 +50,16 @@ def _private_node():
 
 class TestStableFindingId:
     def test_prefix_and_determinism(self):
-        fid = _stable_finding_id("m.py", "unreachable", "f", 3, 5)
+        fid = stable_finding_id("finding_dead_code_", "m.py", "unreachable", "f", 3, 5)
         assert fid.startswith("finding_dead_code_")
-        assert fid == _stable_finding_id("m.py", "unreachable", "f", 3, 5)
+        assert fid == stable_finding_id("finding_dead_code_", "m.py", "unreachable", "f", 3, 5)
         assert len(fid) == len("finding_dead_code_") + 16
 
     def test_different_parts_produce_different_ids(self):
-        base = _stable_finding_id("m.py", "unreachable", "f", 3, 5)
-        assert base != _stable_finding_id("m.py", "unreachable", "f", 3, 6)
-        assert base != _stable_finding_id("m.py", "unreachable", "g", 3, 5)
-        assert base != _stable_finding_id("m.py", "unused-private", "f", 3, 5)
+        base = stable_finding_id("finding_dead_code_", "m.py", "unreachable", "f", 3, 5)
+        assert base != stable_finding_id("finding_dead_code_", "m.py", "unreachable", "f", 3, 6)
+        assert base != stable_finding_id("finding_dead_code_", "m.py", "unreachable", "g", 3, 5)
+        assert base != stable_finding_id("finding_dead_code_", "m.py", "unused-private", "f", 3, 5)
 
 
 class TestJoin:

@@ -1,3 +1,23 @@
+## Unreleased — Stable finding IDs across processes
+
+- **Finding IDs are now deterministic across processes.** Six analyzers
+  (`comment_markers`, `cyclomatic_complexity`, `nesting_depth`,
+  `oversized_files`, `oversized_functions`, `secrets`) built finding IDs
+  with Python's salted `hash()`, which is randomized per process — identical
+  scans produced different IDs after any restart or redeploy. The drift view
+  matches findings by ID, so drift silently reported every finding as NEW
+  and every baseline finding as RESOLVED across restarts. All seven call
+  sites now use the new shared `app.analyzers.finding_ids.stable_finding_id`
+  helper (SHA-256, the pattern `dead_code` already used); `dead_code` IDs
+  are byte-identical to before.
+- **New cross-process regression test** in
+  `tests/test_analyzer_determinism.py`: scans a fixture repo in two
+  subprocesses with different `PYTHONHASHSEED` values and asserts identical
+  finding IDs (verified to fail on the old `hash()` code).
+- Verified: full backend suite **1297 passed, 1 skipped**; `ruff` clean;
+  `mypy` clean on all touched files (the one remaining `mypy` error in
+  `app/admin/api.py:105` predates this change).
+
 ## Unreleased — Full legal drafts live in-app
 
 - **Terms of Service and Privacy Policy now carry the full founder drafts**

@@ -3,15 +3,17 @@
 This module intentionally:
 - Splits record aggregation into small, focused helpers so every
   function stays within the complexity threshold.
-- Contains a hardcoded AWS access key so that
-  ``secrets:aws-access-key`` fires as a NEW finding in drift.
+- Reads the AWS access key ID from the environment instead of
+  hardcoding it, so ``secrets:aws-access-key`` no longer fires.
 """
 
 from __future__ import annotations
 
-# Hardcoded AWS access key (intentionally fake-looking — not a real
-# credential; the secrets analyzer redacts it in the dashboard).
-AWS_ACCESS_KEY_ID = "AKIA0000000000000000"
+import os
+
+# AWS access key ID is read from the environment at runtime; never
+# hardcode credentials in source.
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
 
 
 def _count_statuses(records: list[dict]) -> dict:

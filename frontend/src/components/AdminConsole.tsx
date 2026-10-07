@@ -19,17 +19,18 @@ import {
 } from "../api/admin";
 
 function FlagBadge({ label, on }: { label: string; on: boolean }) {
+  const text = label.charAt(0).toUpperCase() + label.slice(1);
   return (
     <span
       className="plan-badge"
       style={
         on
-          ? { background: "var(--teal)", color: "#fff", borderColor: "transparent" }
+          ? { background: "var(--teal)", color: "#000", borderColor: "transparent" }
           : { opacity: 0.45 }
       }
-      title={on ? `${label} granted` : `${label} not granted`}
+      title={on ? `${text} granted` : `${text} not granted`}
     >
-      {label}
+      {text}
     </span>
   );
 }
@@ -213,7 +214,13 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
                     {u.is_staff ? (
                       <span
                         className="plan-badge"
-                        style={{ background: "var(--teal)", color: "#000", borderColor: "transparent" }}
+                        style={{
+                          background: "var(--teal)",
+                          color: "#000",
+                          borderColor: "transparent",
+                          fontSize: 10,
+                          padding: "2px 8px",
+                        }}
                         title="Internal team: unlimited testing quota, no billing plan"
                       >
                         Staff

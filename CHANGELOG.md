@@ -16,6 +16,11 @@
   deleted scan) are dropped instead of rendering a phantom scan that Ask Sonar
   cannot load. The drawer also shows a friendly message when the scan is
   unavailable.
+- **Ask Sonar answers score impact in score terms**: the grounding context now
+  includes a `score_projection` (computed by re-running the deterministic
+  scorer with the top 10 findings removed), and the system prompt directs the
+  model to quote the 300-850 score numbers instead of debt points when the
+  user asks how fixing something will move their score.
 - **Landing page offers Google sign-in**: the landing previously only linked
   GitHub OAuth. "Continue with Google" links were added (Google already sends
   `prompt=select_account`), plus a hint to sign out of github.com first when

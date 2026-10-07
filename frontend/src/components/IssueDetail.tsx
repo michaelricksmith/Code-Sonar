@@ -215,7 +215,7 @@ export function IssueDetail({
           <div className="detail-head">
             <div>
               <span className={`sev-chip tone-${sevTone}`}>{sevLabel}</span>
-              <span className="sev-chip tone-ok" style={{ marginLeft: 8, background: "#f4f1ea", color: "var(--muted)" }}>
+              <span className="sev-chip tone-ok" style={{ marginLeft: 8, background: "rgba(255,255,255,0.06)", color: "var(--muted)" }}>
                 {CATEGORY_AREA[finding.category]}
               </span>
             </div>

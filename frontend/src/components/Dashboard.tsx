@@ -124,7 +124,7 @@ function HealthByArea({ result }: { result: ScanResponse }) {
             <i
               style={{
                 width: avg == null ? "0%" : `${Math.max(4, Math.min(100, ((avg - 300) / 550) * 100))}%`,
-                background: avg == null ? "#e3dccb" : avg >= 740 ? "var(--good)" : avg >= 580 ? "var(--ok)" : "var(--bad)",
+                background: avg == null ? "rgba(255,255,255,0.08)" : avg >= 740 ? "var(--good)" : avg >= 580 ? "var(--ok)" : "var(--bad)",
               }}
             />
           </div>

@@ -85,9 +85,9 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
         <div
           role="alert"
           style={{
-            background: "#fdecec",
-            border: "1px solid #f5c2c2",
-            color: "#8a1f1f",
+            background: "rgba(251,113,133,0.08)",
+            border: "1px solid rgba(251,113,133,0.35)",
+            color: "#fda4af",
             borderRadius: 12,
             padding: "12px 16px",
             marginBottom: 16,
@@ -136,7 +136,17 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px" }}>
-                    <span className={`plan-badge plan-${u.plan}`}>{u.plan}</span>
+                    {u.is_staff ? (
+                      <span
+                        className="plan-badge"
+                        style={{ background: "var(--teal)", color: "#000", borderColor: "transparent" }}
+                        title="Internal team: unlimited testing quota, no billing plan"
+                      >
+                        Staff
+                      </span>
+                    ) : (
+                      <span className={`plan-badge plan-${u.plan}`}>{u.plan}</span>
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px", color: "var(--muted)", whiteSpace: "nowrap" }}>
                     ◈ {u.usage.scans_used} scans · ✦ {u.usage.ask_sonar_used} asks

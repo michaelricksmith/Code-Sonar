@@ -139,11 +139,13 @@ export function Shell({
               <div className="side-label">Plan</div>
               <div className="side-detail" aria-label="Plan usage">                <div className="side-detail-row">
                   <span className={`plan-badge plan-${billing.plan}`}>
-                    {billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
+                    {user.is_staff ? "Staff" : billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
                   </span>
-                  <a className="side-link" href="#/pricing" title="See plans">
-                    {paid ? "Plans" : "Upgrade"}
-                  </a>
+                  {!user.is_staff && (
+                    <a className="side-link" href="#/pricing" title="See plans">
+                      {paid ? "Plans" : "Upgrade"}
+                    </a>
+                  )}
                 </div>
                 <div className="side-detail-row">
                   <span>◈</span>
@@ -184,18 +186,16 @@ export function Shell({
           <div className="user-chip" style={{ padding: "0 0 10px" }}>
             {user.avatar_url ? <img src={user.avatar_url} alt="" /> : <span className="brand-mark" style={{ width: 32, height: 32 }} />}
             <span className="who">
-              <b title={user.name}>{user.name}</b>
+              <span className="who-name">
+                <b title={user.name}>{user.name}</b>
+                {user.is_admin && (
+                  <span className="mini-badge is-admin" title="Admin access">admin</span>
+                )}
+                {user.is_staff && (
+                  <span className="mini-badge is-staff" title="Unlimited testing quota">staff</span>
+                )}
+              </span>
               <span title={user.email}>{user.email}</span>
-              {(user.is_admin || user.is_staff) && (
-                <span style={{ display: "inline-flex", gap: 4, marginTop: 2 }}>
-                  {user.is_admin && (
-                    <span className="plan-badge" title="Admin access">admin</span>
-                  )}
-                  {user.is_staff && (
-                    <span className="plan-badge" title="Unlimited testing quota">staff</span>
-                  )}
-                </span>
-              )}
             </span>
             <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
           </div>

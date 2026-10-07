@@ -920,6 +920,10 @@ class SqlUserStore:
             connection.execute(delete(users).where(users.c.id == user_id))
             return True
 
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
+        return self.scrub_underage(user_id)
+
     # -- legacy import ------------------------------------------------
 
     def _legacy_insert_values(self, record: OAuthUser) -> dict[str, Any]:

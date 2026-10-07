@@ -268,6 +268,10 @@ class UserStore(Protocol):
         """
         ...
 
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
+        ...
+
 
 def _merge_existing_oauth_user(
     existing: OAuthUser,
@@ -464,6 +468,16 @@ class OAuthUserStore:
 
     def scrub_underage(self, user_id: str) -> bool:
         """Delete a just-created under-13 account (age-gate block)."""
+        with self._lock:
+            records = self._load()
+            kept = [u for u in records if u.id != user_id]
+            if len(kept) == len(records):
+                return False
+            self._save(kept)
+            return True
+
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
         with self._lock:
             records = self._load()
             kept = [u for u in records if u.id != user_id]

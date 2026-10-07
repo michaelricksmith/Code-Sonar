@@ -1,9 +1,12 @@
 /**
  * Code Sonar — admin console API client (admin only).
  *
- *   GET  /api/admin/users                → {users, total}
- *   POST /api/admin/users/{id}/staff     → {user}
- *   POST /api/admin/users/{id}/admin     → {user}
+ *   GET    /api/admin/users                → {users, total}
+ *   POST   /api/admin/users/{id}/staff     → {user}
+ *   POST   /api/admin/users/{id}/admin     → {user}
+ *   POST   /api/admin/users/{id}/plan     → {user}
+ *   POST   /api/admin/users/{id}/usage/reset → {usage}
+ *   DELETE /api/admin/users/{id}          → {deleted}
  */
 
 export interface AdminUserUsage {
@@ -57,4 +60,32 @@ export async function setUserAdmin(id: string, isAdmin: boolean): Promise<AdminU
   });
   const data = await decode(res, "Failed to update admin flag");
   return data.user as AdminUser;
+}
+
+export async function setUserPlan(id: string, plan: string): Promise<AdminUser> {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(id)}/plan`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  const data = await decode(res, "Failed to update plan");
+  return data.user as AdminUser;
+}
+
+export async function resetUserUsage(id: string): Promise<AdminUserUsage> {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(id)}/usage/reset`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  const data = await decode(res, "Failed to reset usage");
+  return data.usage as AdminUserUsage;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  });
+  await decode(res, "Failed to delete user");
 }

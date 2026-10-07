@@ -91,6 +91,10 @@ class AdminRequest(BaseModel):
     is_admin: bool
 
 
+class PlanRequest(BaseModel):
+    plan: str
+
+
 def _apply_flag(user_id: str, kind: str, value: bool) -> OAuthUser:
     store = get_oauth_user_store()
     setter = getattr(store, f"set_{kind}", None)
@@ -129,3 +133,61 @@ async def set_user_admin(user_id: str, body: AdminRequest, request: Request) -> 
             raise HTTPException(status_code=400, detail="Cannot demote the last remaining admin")
     updated = _apply_flag(user_id, "admin", body.is_admin)
     return {"user": _admin_user_view(updated)}
+
+
+@router.post("/users/{user_id}/plan")
+async def set_user_plan(user_id: str, body: PlanRequest, request: Request) -> dict[str, Any]:
+    """Set a user's billing plan directly (free/hobby/plus), no Stripe needed.
+
+    Lets admins grant free pro-tier access. The plan name must be a known
+    tier; unknown values fall back to free-tier limits server-side, so we
+    reject them here.
+    """
+    from app.billing.plans import PLAN_FREE, PLAN_HOBBY, PLAN_PLUS
+
+    require_admin(request)
+    plan = body.plan.strip().lower()
+    if plan not in (PLAN_FREE, PLAN_HOBBY, PLAN_PLUS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown plan {body.plan!r}; use free, hobby, or plus",
+        )
+    store = get_oauth_user_store()
+    updated = store.set_billing(user_id, plan=plan, stripe_customer_id="")
+    if updated is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user": _admin_user_view(updated)}
+
+
+@router.post("/users/{user_id}/usage/reset")
+async def reset_user_usage(user_id: str, request: Request) -> dict[str, Any]:
+    """Zero a user's current-period usage counters (fresh quota grant)."""
+    require_admin(request)
+    if get_oauth_user_store().get(user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    usage = get_usage_store().reset_usage(user_id)
+    return {"usage": usage}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, request: Request) -> dict[str, Any]:
+    """Permanently delete a user and their usage counters.
+
+    Guards: an admin cannot delete themselves, and the last remaining
+    admin cannot be deleted. The user's scan history is left intact
+    (it is keyed by scan id, not user id) — only the account and its
+    quota counters are removed.
+    """
+    caller = require_admin(request)
+    if user_id == caller.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    target = get_oauth_user_store().get(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if getattr(target, "is_admin", False):
+        admins = [u for u in _all_users() if getattr(u, "is_admin", False) and u.id != user_id]
+        if not admins:
+            raise HTTPException(status_code=400, detail="Cannot delete the last remaining admin")
+    get_oauth_user_store().delete_user(user_id)
+    get_usage_store().reset_usage(user_id)
+    return {"deleted": user_id}

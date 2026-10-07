@@ -9,7 +9,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { AdminUser } from "../api/admin";
-import { fetchAdminUsers, setUserAdmin, setUserStaff } from "../api/admin";
+import {
+  deleteUser,
+  fetchAdminUsers,
+  resetUserUsage,
+  setUserAdmin,
+  setUserPlan,
+  setUserStaff,
+} from "../api/admin";
 
 function FlagBadge({ label, on }: { label: string; on: boolean }) {
   return (
@@ -74,11 +81,78 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
     []
   );
 
+  const changePlan = useCallback(async (target: AdminUser, plan: string) => {
+    if (plan === target.plan) return;
+    if (
+      !window.confirm(
+        `Set ${target.name || target.email}'s plan to ${plan}?\nNo Stripe charge — this is a direct admin grant.`
+      )
+    )
+      return;
+    const key = `${target.id}:plan`;
+    setBusy(key);
+    setError(null);
+    try {
+      const updated = await setUserPlan(target.id, plan);
+      setUsers((prev) => prev?.map((u) => (u.id === target.id ? updated : u)) ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
+  const resetUsage = useCallback(async (target: AdminUser) => {
+    if (
+      !window.confirm(
+        `Reset usage counters for ${target.name || target.email}?\nTheir scans and Ask Sonar quota go back to zero for this period.`
+      )
+    )
+      return;
+    const key = `${target.id}:usage`;
+    setBusy(key);
+    setError(null);
+    try {
+      const usage = await resetUserUsage(target.id);
+      setUsers((prev) => prev?.map((u) => (u.id === target.id ? { ...u, usage } : u)) ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
+  const removeUser = useCallback(
+    async (target: AdminUser) => {
+      if (target.id === currentUserId) return;
+      if (
+        !window.confirm(
+          `Permanently delete ${target.name || target.email}?\nTheir account and quota counters are removed. This cannot be undone.`
+        )
+      )
+        return;
+      const key = `${target.id}:delete`;
+      setBusy(key);
+      setError(null);
+      try {
+        await deleteUser(target.id);
+        setUsers((prev) => prev?.filter((u) => u.id !== target.id) ?? null);
+        setTotal((t) => Math.max(0, t - 1));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [currentUserId]
+  );
+
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto", padding: "28px 20px 60px" }}>
       <h1 style={{ fontSize: 26, letterSpacing: "-0.01em", marginBottom: 6 }}>Admin console</h1>
       <p style={{ color: "var(--muted)", marginBottom: 20 }}>
         {total} user{total === 1 ? "" : "s"}. Staff get unlimited scans and Ask Sonar for testing.
+        Admins can also grant plans, reset quota, and delete accounts.
       </p>
 
       {error && (
@@ -145,7 +219,24 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
                         Staff
                       </span>
                     ) : (
-                      <span className={`plan-badge plan-${u.plan}`}>{u.plan}</span>
+                      <select
+                        value={u.plan}
+                        disabled={busy !== null}
+                        onChange={(e) => changePlan(u, e.target.value)}
+                        title="Set billing plan (admin grant, no Stripe charge)"
+                        style={{
+                          background: "var(--surface)",
+                          color: "var(--ink)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 8,
+                          padding: "4px 8px",
+                          fontSize: 13,
+                        }}
+                      >
+                        <option value="free">free</option>
+                        <option value="hobby">hobby</option>
+                        <option value="plus">plus</option>
+                      </select>
                     )}
                   </td>
                   <td style={{ padding: "12px 16px", color: "var(--muted)", whiteSpace: "nowrap" }}>
@@ -173,6 +264,27 @@ export function AdminConsole({ currentUserId }: { currentUserId: string }) {
                       title={u.id === currentUserId ? "You cannot change your own admin flag" : u.is_admin ? "Remove admin access" : "Grant admin access"}
                     >
                       {busy === `${u.id}:admin` ? "…" : u.is_admin ? "Remove admin" : "Make admin"}
+                    </button>{" "}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy !== null}
+                      onClick={() => resetUsage(u)}
+                      title="Zero this user's scans and Ask Sonar counters for the current period"
+                    >
+                      {busy === `${u.id}:usage` ? "…" : "Reset quota"}
+                    </button>{" "}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy !== null || u.id === currentUserId}
+                      onClick={() => removeUser(u)}
+                      title={
+                        u.id === currentUserId
+                          ? "You cannot delete your own account"
+                          : "Permanently delete this user"
+                      }
+                      style={{ color: "#fda4af" }}
+                    >
+                      {busy === `${u.id}:delete` ? "…" : "Delete"}
                     </button>
                   </td>
                 </tr>

@@ -85,6 +85,14 @@ class UsageStore:
             return self._increment_sql(key, period, kind)
         return self._increment_json(key, period, kind)
 
+    def reset_usage(self, user_id: str | None) -> dict[str, Any]:
+        """Zero the current-period counters (admin grant of fresh quota)."""
+        period = current_period_start()
+        key = self._key(user_id)
+        if self._engine is not None:
+            return self._reset_sql(key, period)
+        return self._reset_json(key, period)
+
     # -- SQL backend ---------------------------------------------------
 
     def _get_sql(self, user_id: str, period: str) -> dict[str, Any]:
@@ -203,6 +211,30 @@ class UsageStore:
             records.append(record)
             self._save_json(records)
             return self._record_dict(record)
+
+    def _reset_sql(self, user_id: str, period: str) -> dict[str, Any]:
+        assert self._engine is not None
+        with self._engine.begin() as connection:
+            connection.execute(
+                usage_counters.update()
+                .where(
+                    usage_counters.c.user_id == user_id,
+                    usage_counters.c.period_start == period,
+                )
+                .values(scans_used=0, ask_sonar_used=0)
+            )
+        return _fresh_usage(user_id, period)
+
+    def _reset_json(self, user_id: str, period: str) -> dict[str, Any]:
+        with self._lock:
+            records = self._load_json()
+            kept = [
+                r for r in records
+                if not (r.get("user_id") == user_id and r.get("period_start") == period)
+            ]
+            if len(kept) != len(records):
+                self._save_json(kept)
+        return _fresh_usage(user_id, period)
 
 
 _usage_store: UsageStore | None = None

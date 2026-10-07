@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 
-import { GITHUB_LOGIN_URL } from "../api/auth";
+import { GITHUB_LOGIN_URL, GOOGLE_LOGIN_URL } from "../api/auth";
 import { GRADE_TONE, GRADE_WORDS, gradeForScore } from "../copy";
 import { ScoreDial } from "./ScoreDial";
 import { SiteFooter } from "./SiteFooter";
@@ -103,6 +103,27 @@ export function LandingPage() {
         </div>
         <p className="fine">
           <b>Free for your first repo.</b> No credit card. Your code is never used to train AI.
+          <br />
+          <span style={{ fontSize: 12.5 }}>
+            Continue with{" "}
+            <a href={GITHUB_LOGIN_URL} style={{ color: "var(--muted)", textDecoration: "underline" }}>
+              GitHub
+            </a>{" "}
+            or{" "}
+            <a href={GOOGLE_LOGIN_URL} style={{ color: "var(--muted)", textDecoration: "underline" }}>
+              Google
+            </a>
+            {" "}· switching accounts?{" "}
+            <a
+              href="https://github.com/logout"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "var(--muted)", textDecoration: "underline" }}
+              title="GitHub remembers your login — sign out there first to switch GitHub accounts"
+            >
+              sign out of GitHub first
+            </a>
+          </span>
         </p>
       </header>
 
@@ -192,7 +213,7 @@ export function LandingPage() {
           </p>
           <div className="signin-row">
             <a className="btn btn-primary" href={GITHUB_LOGIN_URL}>Get my score</a>
-            <a className="btn btn-ghost" href={GITHUB_LOGIN_URL}>Sign in</a>
+            <a className="btn btn-ghost" href={GOOGLE_LOGIN_URL}>Continue with Google</a>
           </div>
         </div>
       </section>

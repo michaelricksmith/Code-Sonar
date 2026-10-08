@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Sequence, overload
+from typing import Callable, Iterator, Sequence, overload
 
 from app.analyzers.base import Analyzer
 from app.analyzers.comment_markers import CommentMarkersAnalyzer
@@ -25,6 +25,11 @@ from app.security import (
 )
 
 ANALYZER_CONTRACT_VERSION = "1.0"
+
+# Called after each analyzer finishes: (index, total, analyzer_name, finding_count).
+# Lets callers (e.g. the async scan-job worker) report truthful per-analyzer
+# progress instead of one coarse "running checks" step.
+AnalyzerProgressCallback = Callable[[int, int, str, int], None]
 
 
 def get_registered_analyzers() -> list[Analyzer]:
@@ -103,7 +108,10 @@ class ScanExecutionResult(Sequence[Finding]):
         return iter(self.findings)
 
 
-def _scan_path(repo_path: Path) -> ScanExecutionResult:
+def _scan_path(
+    repo_path: Path,
+    on_analyzer: AnalyzerProgressCallback | None = None,
+) -> ScanExecutionResult:
     """Run analyzers and return findings with explicit execution status."""
     file_count = 0
     total_size = 0
@@ -119,7 +127,9 @@ def _scan_path(repo_path: Path) -> ScanExecutionResult:
 
     findings: list[Finding] = []
     statuses: list[AnalyzerExecutionStatus] = []
-    for analyzer in get_registered_analyzers():
+    analyzers = get_registered_analyzers()
+    total = len(analyzers)
+    for index, analyzer in enumerate(analyzers):
         try:
             produced = analyzer.analyze(repo_path)
         except Exception as exc:
@@ -146,10 +156,15 @@ def _scan_path(repo_path: Path) -> ScanExecutionResult:
                 finding_count=accepted,
             )
         )
+        if on_analyzer is not None:
+            on_analyzer(index, total, analyzer.name, accepted)
     return ScanExecutionResult(tuple(findings), tuple(statuses))
 
 
-def scan_repository(repo_path: object) -> ScanExecutionResult:
+def scan_repository(
+    repo_path: object,
+    on_analyzer: AnalyzerProgressCallback | None = None,
+) -> ScanExecutionResult:
     """Validate, scan, and return findings plus analyzer completeness."""
     resolved = validate_repo_path(repo_path)
-    return _scan_path(resolved)
+    return _scan_path(resolved, on_analyzer=on_analyzer)

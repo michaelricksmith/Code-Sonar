@@ -258,8 +258,15 @@ def _run_job(
         except RepositoryValidationError as exc:
             raise RuntimeError("Cloned repository failed validation: " + str(exc)) from exc
 
-        _update_job(job_id, step="Running 8 checks…", progress=0.5)
-        execution = scan_repository(repo_path)
+        def _report_analyzer(index: int, total: int, name: str, count: int) -> None:
+            noun = "finding" if count == 1 else "findings"
+            _update_job(
+                job_id,
+                step=f"{name} · {count} {noun}",
+                progress=0.5 + 0.3 * (index + 1) / total,
+            )
+
+        execution = scan_repository(repo_path, on_analyzer=_report_analyzer)
         if not execution.complete:
             failures = [item.analyzer for item in execution.analyzers if item.status == "failed"]
             raise RuntimeError("Scan incomplete; failed analyzers: " + ", ".join(failures))

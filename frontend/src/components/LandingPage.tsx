@@ -98,22 +98,14 @@ export function LandingPage() {
           with AI.
         </p>
         <div className="hero-cta">
-          <a className="btn btn-primary" href={GITHUB_LOGIN_URL}>Get my score</a>
-          <a className="btn btn-ghost" href="#features">See how it works</a>
+          <a className="btn btn-primary" href={GITHUB_LOGIN_URL}>Continue with GitHub</a>
+          <a className="btn btn-ghost" href={GOOGLE_LOGIN_URL}>Continue with Google</a>
         </div>
         <p className="fine">
           <b>Free for your first repo.</b> No credit card. Your code is never used to train AI.
           <br />
           <span style={{ fontSize: 12.5 }}>
-            Continue with{" "}
-            <a href={GITHUB_LOGIN_URL} style={{ color: "var(--muted)", textDecoration: "underline" }}>
-              GitHub
-            </a>{" "}
-            or{" "}
-            <a href={GOOGLE_LOGIN_URL} style={{ color: "var(--muted)", textDecoration: "underline" }}>
-              Google
-            </a>
-            {" "}· switching accounts?{" "}
+            Switching GitHub accounts?{" "}
             <a
               href="https://github.com/logout"
               target="_blank"
@@ -123,6 +115,7 @@ export function LandingPage() {
             >
               sign out of GitHub first
             </a>
+            {" "}— Google always asks which account to use.
           </span>
         </p>
       </header>

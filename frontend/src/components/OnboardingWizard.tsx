@@ -15,7 +15,7 @@ import type { ScanJobState } from "../api/scanJobs";
 import { isQuotaError } from "../api/errors";
 import { GRADE_TONE, GRADE_WORDS, gradeForScore, timeAgo, verdictForScore } from "../copy";
 import { ScoreDial } from "./ScoreDial";
-import { ScanAnimation } from "./ScanAnimation";
+import { ScanTerminal } from "./ScanTerminal";
 
 type Step = "pick" | "scanning" | "revealing";
 
@@ -207,13 +207,9 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
             <i className="on" />
             <i className="on" />
           </div>
-          <ScanAnimation
-            title="First scan is running…"
-            liveStep={jobState?.step}
-            progress={jobState?.progress}
-            repoLabel={pickedRepo}
-            note="nothing is changed in your repo"
-          />
+          <h2>First scan is running…</h2>
+          <ScanTerminal job={jobState} repoLabel={pickedRepo} />
+          <div className="scan-sub">nothing is changed in your repo</div>
         </div>
       )}
 

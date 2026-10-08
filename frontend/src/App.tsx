@@ -47,7 +47,7 @@ import { PricingView } from "./components/PricingView";
 import { UpgradeNudge } from "./components/UpgradeNudge";
 import { Shell, SonarFab } from "./components/Shell";
 import type { ShellView } from "./components/Shell";
-import { ScanAnimation } from "./components/ScanAnimation";
+import { ScanTerminal } from "./components/ScanTerminal";
 import { AdminConsole } from "./components/AdminConsole";
 import { timeAgo } from "./copy";
 
@@ -761,13 +761,9 @@ export default function App() {
         {showScanChrome && rescanning && (
           <div className="page">
             <div className="wizard-card">
-              <ScanAnimation
-                title="Re-scan running…"
-                liveStep={rescanJob?.step}
-                progress={rescanJob?.progress}
-                repoLabel={repoLabel}
-                note="nothing is changed in your repo"
-              />
+              <h2>Re-scan running…</h2>
+              <ScanTerminal job={rescanJob} repoLabel={repoLabel} />
+              <div className="scan-sub">nothing is changed in your repo</div>
             </div>
           </div>
         )}

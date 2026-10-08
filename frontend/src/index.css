@@ -374,21 +374,13 @@ button { font-family: inherit; }
 .url-row { display: flex; gap: 10px; }
 .url-row .input { flex: 1; }
 
-.sonar-ring-wrap { display: flex; flex-direction: column; align-items: center; padding: 20px 0 8px; position: relative; }
-.sonar-ring { position: relative; width: 148px; height: 148px; }
-.sonar-ring .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
-.sonar-ring .r1 { border-top-color: var(--teal); box-shadow: 0 0 18px rgba(255, 255, 255, 0.25); animation: spin 1.6s linear infinite; }
-.sonar-ring .r2 { inset: 18px; border-top-color: rgba(255, 255, 255, 0.45); animation: spin 2.4s linear infinite reverse; }
-.sonar-ring .r3 { inset: 38px; border-top-color: rgba(255, 255, 255, 0.2); animation: spin 3.2s linear infinite; }
-.sonar-ring .core { position: absolute; inset: 56px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 24px var(--teal); animation: pulse 2s ease-in-out infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.82); opacity: 0.75; } }
-.scan-step { margin-top: 22px; font-size: 16px; font-weight: 600; text-align: center; min-height: 28px; }
-.scan-sub { margin-top: 8px; font-size: 13px; color: var(--muted); text-align: center; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; letter-spacing: 0.04em; }
-.scan-progress { width: 100%; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden; margin-top: 22px; }
-.scan-progress i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--teal-deep), var(--teal), var(--cyan)); box-shadow: 0 0 14px rgba(255, 255, 255, 0.5); transition: width 0.6s ease; position: relative; overflow: hidden; }
-.scan-progress i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent); animation: shimmer 1.8s linear infinite; }
-@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.scan-terminal { margin-top: 18px; background: #0a0a0a; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.scan-terminal-body { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 13.5px; line-height: 1.8; color: #d4d4d4; padding: 18px 20px; max-height: 320px; overflow-y: auto; }
+.scan-terminal-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.scan-terminal-mark { color: var(--faint); flex: none; width: 14px; }
+.scan-terminal-line .scan-terminal-active { color: #fafafa; }
+.scan-terminal-cursor { display: inline-block; width: 8px; height: 15px; background: #fafafa; vertical-align: -2px; margin-left: 4px; animation: termblink 1s steps(1) infinite; }
+@keyframes termblink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 .reveal-num { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 88px; font-weight: 700; letter-spacing: -0.045em; text-align: center; line-height: 1; margin: 12px 0 4px; text-shadow: 0 0 40px rgba(255, 255, 255, 0.45); position: relative; }
 .welcome-card { background: var(--teal-soft); border: 1px solid var(--teal-line); border-radius: 14px; padding: 18px 20px; margin-top: 22px; font-size: 15px; line-height: 1.6; color: var(--ink); position: relative; }

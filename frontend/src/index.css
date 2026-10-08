@@ -381,6 +381,21 @@ button { font-family: inherit; }
 .scan-terminal-line .scan-terminal-active { color: #fafafa; }
 .scan-terminal-cursor { display: inline-block; width: 8px; height: 15px; background: #fafafa; vertical-align: -2px; margin-left: 4px; animation: termblink 1s steps(1) infinite; }
 @keyframes termblink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.scan-sub { margin-top: 8px; font-size: 13px; color: var(--muted); text-align: center; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; letter-spacing: 0.04em; }
+
+/* ---------- vitals trace (code health monitor) ---------- */
+.vitals { display: flex; flex-direction: column; }
+.vitals-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.vitals-num { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.vitals-grade { font-size: 12px; color: #0a0a0a; background: #fafafa; border-radius: 4px; padding: 3px 9px; font-weight: 700; margin-left: 10px; vertical-align: 13px; white-space: nowrap; }
+.vitals-label { font-size: 10px; letter-spacing: 0.2em; color: var(--faint); text-transform: uppercase; text-align: right; }
+.vitals-live { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.18em; color: var(--muted); justify-content: flex-end; margin-top: 4px; }
+.vitals-live i { width: 7px; height: 7px; border-radius: 50%; background: #fafafa; animation: vitalspulse 1.6s ease-in-out infinite; }
+@keyframes vitalspulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.vitals-ekg { width: 100%; height: 110px; display: block; }
+.vitals-scroll { animation: vitalscroll 2.8s linear infinite; }
+@keyframes vitalscroll { from { transform: translateX(0); } to { transform: translateX(-140px); } }
+.vitals-foot { margin-top: 8px; font-size: 11px; color: var(--faint); letter-spacing: 0.06em; }
 
 .reveal-num { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 88px; font-weight: 700; letter-spacing: -0.045em; text-align: center; line-height: 1; margin: 12px 0 4px; text-shadow: 0 0 40px rgba(255, 255, 255, 0.45); position: relative; }
 .welcome-card { background: var(--teal-soft); border: 1px solid var(--teal-line); border-radius: 14px; padding: 18px 20px; margin-top: 22px; font-size: 15px; line-height: 1.6; color: var(--ink); position: relative; }

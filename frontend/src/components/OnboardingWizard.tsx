@@ -13,8 +13,8 @@ import type { RepoOption } from "../api/auth";
 import { createScanJob, pollScanJob } from "../api/scanJobs";
 import type { ScanJobState } from "../api/scanJobs";
 import { isQuotaError } from "../api/errors";
-import { GRADE_TONE, GRADE_WORDS, gradeForScore, timeAgo, verdictForScore } from "../copy";
-import { ScoreDial } from "./ScoreDial";
+import { timeAgo, verdictForScore } from "../copy";
+import { VitalsTrace } from "./VitalsTrace";
 import { ScanTerminal } from "./ScanTerminal";
 
 type Step = "pick" | "scanning" | "revealing";
@@ -219,24 +219,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
 }
 
 function Reveal({ result }: { result: ScanResponse }) {
-  const [shown, setShown] = useState(0);
-  const target = result.score;
-
-  useEffect(() => {
-    let raf = 0;
-    const start = performance.now();
-    const duration = 1800;
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 4);
-      setShown(Math.round(target * eased));
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
-
-  const grade = gradeForScore(shown);
   const urgentCount = result.findings.filter((f) => f.severity === "critical").length;
 
   return (
@@ -248,16 +230,12 @@ function Reveal({ result }: { result: ScanResponse }) {
       </div>
       <h2>Your code has a score</h2>
       <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-        <ScoreDial score={shown} width={220} id="revealGrad" />
-      </div>
-      <div className="reveal-num">{shown}</div>
-      <div style={{ textAlign: "center", marginTop: 10 }}>
-        <span className={`grade-chip tone-${GRADE_TONE[grade]}`}>Grade {grade} · {GRADE_WORDS[grade]}</span>
+        <VitalsTrace score={result.score} findings={result.findings} width={320} />
       </div>
       <div className="welcome-card">
         <b>Your code scored — here&rsquo;s what that means.</b>
         <br />
-        {verdictForScore(target, urgentCount)}
+        {verdictForScore(result.score, urgentCount)}
       </div>
     </div>
   );

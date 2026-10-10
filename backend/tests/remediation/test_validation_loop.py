@@ -8,6 +8,7 @@ from app.history import InMemoryHistoryStore, build_scan_record
 from app.ml.outcomes import JsonlOutcomeStore
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.remediation.validation import (
+    RemediationValidationResult,
     RemediationValidationService,
     ValidationCommand,
     ValidationProcessResult,
@@ -78,9 +79,9 @@ def _runner(workspace: Path, *, tests_returncode: int = 0):
     return run
 
 
-def test_resolved_finding_with_passing_validation_creates_high_trust_label(
+def _resolved_validation_context(
     tmp_path: Path,
-) -> None:
+) -> tuple[RemediationValidationResult, InMemoryHistoryStore, JsonlOutcomeStore]:
     root, workspace = _workspace(tmp_path)
     history = _history()
     outcomes = JsonlOutcomeStore(tmp_path / "outcomes.jsonl")
@@ -105,6 +106,13 @@ def test_resolved_finding_with_passing_validation_creates_high_trust_label(
         remediation_kind="automated_patch",
         attempted_at="2026-08-30T21:00:00+00:00",
     )
+    return result, history, outcomes
+
+
+def test_resolved_finding_with_passing_validation_reports_success(
+    tmp_path: Path,
+) -> None:
+    result, _, _ = _resolved_validation_context(tmp_path)
 
     assert result.finding_resolved is True
     assert result.build_passed is True
@@ -112,6 +120,13 @@ def test_resolved_finding_with_passing_validation_creates_high_trust_label(
     assert result.regression_detected is False
     assert result.score_delta > 0
     assert result.debt_points_delta < 0
+
+
+def test_resolved_finding_with_passing_validation_creates_high_trust_label(
+    tmp_path: Path,
+) -> None:
+    result, history, outcomes = _resolved_validation_context(tmp_path)
+
     assert result.training_label_value == "1"
     assert result.training_label_trust_tier == "remediation_outcome"
     assert len(history.load_all("repo-1")) == 2

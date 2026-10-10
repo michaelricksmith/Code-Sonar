@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, func, select
 from app.history import ScanRecord
 from app.main import app
 from app.persistence.crypto import LocalDevelopmentEncryptionProvider
-from app.persistence.privacy import EXPORT_VERSION, RetentionPolicy
+from app.persistence.privacy import EXPORT_VERSION, ExportJob, RetentionPolicy
 from app.persistence.runtime import PersistenceUnitOfWork
 from app.persistence.schema import (
     deletion_receipts,
@@ -99,24 +99,42 @@ def test_retention_policy_and_jobs_are_tenant_isolated(
         reset_tenant(second)
 
 
-def test_export_is_encrypted_integrity_bound_and_contains_no_host_path_or_tenant_id(
+def _export_with_project(
+    uow: PersistenceUnitOfWork, tmp_path: Path
+) -> tuple[ExportJob, str]:
+    uow.projects.upsert(_project(tmp_path))
+    job = uow.privacy.create_export_job()
+    archive = uow.privacy.get_export_archive(job.job_id)
+    assert archive is not None
+    return job, archive
+
+
+def test_export_is_encrypted_and_integrity_bound(
     privacy_uow: tuple[PersistenceUnitOfWork, RecordingErasure], tmp_path: Path
 ) -> None:
     uow, _ = privacy_uow
     token = bind_tenant("tenant-private")
     try:
-        uow.projects.upsert(_project(tmp_path))
-        job = uow.privacy.create_export_job()
-        archive = uow.privacy.get_export_archive(job.job_id)
-        assert archive is not None
+        job, archive = _export_with_project(uow, tmp_path)
         assert job.state == "completed"
         assert job.archive_version == EXPORT_VERSION
         assert job.archive_sha256 == hashlib.sha256(archive.encode()).hexdigest()
         assert "secret-checkout" not in archive
         assert "tenant-private" not in archive
-        manifest = uow.privacy.verify_export_archive(job.job_id, archive)
         with pytest.raises(ValueError, match="integrity"):
             uow.privacy.verify_export_archive(job.job_id, archive[:-1] + "A")
+    finally:
+        reset_tenant(token)
+
+
+def test_export_manifest_contains_no_host_path_or_tenant_id(
+    privacy_uow: tuple[PersistenceUnitOfWork, RecordingErasure], tmp_path: Path
+) -> None:
+    uow, _ = privacy_uow
+    token = bind_tenant("tenant-private")
+    try:
+        job, archive = _export_with_project(uow, tmp_path)
+        manifest = uow.privacy.verify_export_archive(job.job_id, archive)
     finally:
         reset_tenant(token)
     assert manifest["archive_version"] == EXPORT_VERSION

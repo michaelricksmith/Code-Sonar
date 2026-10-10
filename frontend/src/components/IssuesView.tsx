@@ -55,7 +55,7 @@ export function IssuesView({ result, onOpenIssue }: IssuesViewProps) {
             <button
               key={f.id}
               className={`suggest ${filter === f.id ? "" : ""}`}
-              style={filter === f.id ? { background: "var(--teal)", color: "#fff", borderColor: "var(--teal)" } : undefined}
+              style={filter === f.id ? { background: "var(--teal)", color: "#000", borderColor: "var(--teal)" } : undefined}
               onClick={() => setFilter(f.id)}
             >
               {f.label}

@@ -12,7 +12,6 @@ import {
   AREA_NOTE,
   AREA_ORDER,
   CATEGORY_AREA,
-  GRADE_TONE,
   GRADE_WORDS,
   SEVERITY_LABEL,
   checkSummary,
@@ -29,7 +28,7 @@ import {
 import type { HealthArea } from "../copy";
 import { issueCardTitle, rankIssues } from "../copy/issues";
 import { NerdsDetails } from "./NerdsDetails";
-import { ScoreDial } from "./ScoreDial";
+import { VitalsTrace } from "./VitalsTrace";
 
 interface DashboardProps {
   result: ScanResponse;
@@ -124,7 +123,7 @@ function HealthByArea({ result }: { result: ScanResponse }) {
             <i
               style={{
                 width: avg == null ? "0%" : `${Math.max(4, Math.min(100, ((avg - 300) / 550) * 100))}%`,
-                background: avg == null ? "#e3dccb" : avg >= 740 ? "var(--good)" : avg >= 580 ? "var(--ok)" : "var(--bad)",
+                background: avg == null ? "rgba(255,255,255,0.08)" : avg >= 740 ? "var(--good)" : avg >= 580 ? "var(--ok)" : "var(--bad)",
               }}
             />
           </div>
@@ -178,11 +177,7 @@ export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onO
         <div className="score-hero-left">
           <div className="lbl">Sonar score</div>
           <div style={{ display: "flex", justifyContent: "center", margin: "10px 0 2px" }}>
-            <ScoreDial score={result.score} width={200} id="dashGrad" />
-          </div>
-          <div className="num">{result.score}</div>
-          <div style={{ marginTop: 6 }}>
-            <span className={`grade-chip tone-${GRADE_TONE[grade]}`}>Grade {grade} · {GRADE_WORDS[grade]}</span>
+            <VitalsTrace score={result.score} findings={result.findings} width={300} />
           </div>
           <div className={`score-delta ${delta == null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat"}`}>
             {delta == null ? "First scan — no previous score yet" : deltaText(delta)}

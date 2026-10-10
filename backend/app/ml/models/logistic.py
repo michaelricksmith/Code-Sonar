@@ -65,13 +65,25 @@ class LogisticDebtRiskModel:
 
     def fit(self, rows: list[DatasetRow]) -> None:
         """Fit using labeled rows from the current feature schema."""
+        labeled = self._require_labeled_rows(rows)
+        labels = self._binary_label_values(labeled)
+
+        x_train = [list(row.features.ordered_values()) for row in labeled]
+        self._pipeline.fit(x_train, labels)
+        self._is_fitted = True
+
+    def _require_labeled_rows(self, rows: list[DatasetRow]) -> list[DatasetRow]:
+        """Return labeled rows, rejecting too few or wrong-schema rows."""
         labeled = [row for row in rows if row.label is not None]
         if len(labeled) < 2:
             raise ValueError("At least two labeled rows are required")
         for row in labeled:
             if row.feature_schema_version != FEATURE_SCHEMA_VERSION:
                 raise ValueError("Incompatible feature schema version")
+        return labeled
 
+    def _binary_label_values(self, labeled: list[DatasetRow]) -> list[int]:
+        """Validate binary labels and return their integer values."""
         labels: list[int] = []
         for row in labeled:
             assert row.label is not None
@@ -80,10 +92,7 @@ class LogisticDebtRiskModel:
             labels.append(int(row.label.value))
         if len(set(labels)) < 2:
             raise ValueError("Logistic Regression requires at least two label classes")
-
-        x_train = [list(row.features.ordered_values()) for row in labeled]
-        self._pipeline.fit(x_train, labels)
-        self._is_fitted = True
+        return labels
 
     def predict(self, features: ScanFeatureVector) -> LogisticPrediction:
         """Return probability plus linear feature contributions."""

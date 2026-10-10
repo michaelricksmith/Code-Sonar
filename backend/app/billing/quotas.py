@@ -29,13 +29,18 @@ def check_quota(user_id: str | None, kind: UsageKind) -> None:
     """Raise 402 when the user hit their monthly quota for ``kind``.
 
     The plan resolves from the user store; a missing user id or an
-    unknown plan string both fall back to free-tier limits.
+    unknown plan string both fall back to free-tier limits. Staff users
+    (internal team) bypass quota enforcement entirely so testing is
+    never blocked; their usage is still recorded.
     """
     plan = PLAN_FREE
     if user_id is not None:
         user = get_oauth_user_store().get(user_id)
-        if user is not None and user.plan:
-            plan = user.plan
+        if user is not None:
+            if getattr(user, "is_staff", False):
+                return
+            if user.plan:
+                plan = user.plan
     limits = limits_for(plan)
     limit = int(limits[_LIMIT_KEY[kind]])
     used = int(get_usage_store().get_usage(user_id)[_USED_KEY[kind]])

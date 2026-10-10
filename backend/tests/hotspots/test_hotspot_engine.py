@@ -67,26 +67,11 @@ class TestEmptyInput:
 
 
 class TestSingleFile:
-    def test_single_file_single_finding(self) -> None:
+    def _single_finding_result(self) -> HotspotResult:
         f = make_finding(file_path="src/a.py", debt_points=10, severity=FindingSeverity.ERROR)
-        r = compute_hotspots([f])
-        assert r.total_files == 1
-        assert r.files_with_findings == 1
-        assert r.total_findings == 1
-        assert r.total_debt == 10
-        assert len(r.hotspots) == 1
-        h = r.hotspots[0]
-        assert h.file_path == "src/a.py"
-        # score = debt_total + severity_max_weight + finding_count + analyzer_diversity * 2
-        # = 10 + 3 + 1 + 2 = 16
-        assert h.score == 16
-        assert h.debt_total == 10
-        assert h.finding_count == 1
-        assert h.severity_max == "error"
-        assert h.severity_max_weight == 3
-        assert h.analyzer_diversity == 1
+        return compute_hotspots([f])
 
-    def test_multiple_findings_on_one_file(self) -> None:
+    def _multiple_findings_result(self) -> HotspotResult:
         findings = [
             make_finding(
                 file_path="src/a.py",
@@ -118,7 +103,31 @@ class TestSingleFile:
                 finding_id="f3",
             ),
         ]
-        r = compute_hotspots(findings)
+        return compute_hotspots(findings)
+
+    def test_single_file_result_totals(self) -> None:
+        r = self._single_finding_result()
+        assert r.total_files == 1
+        assert r.files_with_findings == 1
+        assert r.total_findings == 1
+        assert r.total_debt == 10
+        assert len(r.hotspots) == 1
+        assert r.hotspots[0].file_path == "src/a.py"
+
+    def test_single_file_score_breakdown(self) -> None:
+        r = self._single_finding_result()
+        h = r.hotspots[0]
+        # score = debt_total + severity_max_weight + finding_count + analyzer_diversity * 2
+        # = 10 + 3 + 1 + 2 = 16
+        assert h.score == 16
+        assert h.debt_total == 10
+        assert h.finding_count == 1
+        assert h.severity_max == "error"
+        assert h.severity_max_weight == 3
+        assert h.analyzer_diversity == 1
+
+    def test_multiple_findings_aggregates(self) -> None:
+        r = self._multiple_findings_result()
         assert len(r.hotspots) == 1
         h = r.hotspots[0]
         # debt_total = 5 + 8 + 2 = 15
@@ -130,6 +139,10 @@ class TestSingleFile:
         assert h.finding_count == 3
         # analyzer_diversity = 3
         assert h.analyzer_diversity == 3
+
+    def test_multiple_findings_breakdowns(self) -> None:
+        r = self._multiple_findings_result()
+        h = r.hotspots[0]
         # complexity_max = 12 (from cc)
         assert h.complexity_max == 12
         # size_max = 600 (from loc)

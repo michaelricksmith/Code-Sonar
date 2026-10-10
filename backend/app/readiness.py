@@ -89,6 +89,96 @@ def _safe(call: Callable[[], bool]) -> bool:
         return False
 
 
+def _auth_tenant_ready(
+    environment: Mapping[str, str] | None, env: Mapping[str, str]
+) -> bool:
+    try:
+        credentials = (
+            configured_tenant_credentials() if environment is None else _credentials(env)
+        )
+        return bool(credentials) and all(key not in {"", "local"} for key in credentials)
+    except RuntimeError:
+        return False
+
+
+def _cors_origin_allowed(item: str) -> bool:
+    return (
+        urlsplit(item).scheme == "https"
+        and bool(urlsplit(item).netloc)
+        and urlsplit(item).hostname not in {"localhost", "127.0.0.1", "::1"}
+        and not urlsplit(item).path
+    )
+
+
+def _cors_ready(env: Mapping[str, str]) -> bool:
+    origins = [
+        item.strip().rstrip("/")
+        for item in env.get("CODESONAR_CORS_ORIGINS", "").split(",")
+        if item.strip()
+    ]
+    return bool(origins) and all(_cors_origin_allowed(item) for item in origins)
+
+
+def _database_url(env: Mapping[str, str]) -> str:
+    return env.get("CODESONAR_DATABASE_URL", "").strip()
+
+
+def _uses_postgresql(database_url: str) -> bool:
+    return database_url.startswith(("postgresql://", "postgresql+psycopg://"))
+
+
+def _revision_at_head(database_url: str, probes: ReadinessProbes) -> bool:
+    return _safe(lambda: probes.database_revision(database_url) == REQUIRED_ALEMBIC_REVISION)
+
+
+def _encryption_provider_ready(env: Mapping[str, str], probes: ReadinessProbes) -> bool:
+    provider = env.get("CODESONAR_ENCRYPTION_PROVIDER", "").strip()
+    return provider not in {"", "local", "local-aes-gcm"} and _safe(
+        lambda: probes.encryption_provider_available(provider)
+    )
+
+
+def _data_root_ready(env: Mapping[str, str], probes: ReadinessProbes) -> bool:
+    root_value = env.get("CODESONAR_DATA_ROOT", "").strip()
+    return bool(root_value) and _safe(lambda: probes.data_root_secure(Path(root_value)))
+
+
+_GITHUB_APP_KEYS: Final = (
+    "CODE_SONAR_GITHUB_APP_ID",
+    "CODE_SONAR_GITHUB_APP_PRIVATE_KEY",
+    "CODE_SONAR_GITHUB_APP_SLUG",
+    "CODE_SONAR_GITHUB_APP_STATE_SECRET",
+)
+
+
+def _github_app_ready(env: Mapping[str, str]) -> bool:
+    return all(env.get(key, "").strip() for key in _GITHUB_APP_KEYS)
+
+
+def _github_webhook_ready(env: Mapping[str, str]) -> bool:
+    return bool(env.get("CODE_SONAR_GITHUB_WEBHOOK_SECRET", "").strip())
+
+
+def _scoring_authority_ready() -> bool:
+    return (
+        bool(SCORING_VERSION)
+        and bool(ANALYZER_CONTRACT_VERSION)
+        and bool(get_registered_analyzers())
+    )
+
+
+def _calibration_ready(probes: ReadinessProbes) -> bool:
+    return _safe(probes.calibration_validated)
+
+
+def _remediation_authorization_ready(env: Mapping[str, str]) -> bool:
+    return len(env.get("CODESONAR_REMEDIATION_APPROVAL_SECRET", "")) >= 32
+
+
+def _ask_sonar_ready(env: Mapping[str, str]) -> bool:
+    return bool(env.get("CODE_SONAR_ASK_SONAR_PROVIDER", "").strip())
+
+
 def assess_readiness(
     environment: Mapping[str, str] | None = None,
     probes: ReadinessProbes = DEFAULT_PROBES,
@@ -100,86 +190,49 @@ def assess_readiness(
     def add(code: str, passed: bool, summary: str, *, blocking: bool = True) -> None:
         checks.append(ReadinessCheck(code, blocking, passed, summary))
 
-    try:
-        credentials = configured_tenant_credentials() if environment is None else _credentials(env)
-        auth_ready = bool(credentials) and all(key not in {"", "local"} for key in credentials)
-    except RuntimeError:
-        auth_ready = False
-    add("AUTH_TENANT_CREDENTIALS", auth_ready, "Server-owned unique tenant credentials configured")
-
-    origins = [
-        item.strip().rstrip("/")
-        for item in env.get("CODESONAR_CORS_ORIGINS", "").split(",")
-        if item.strip()
-    ]
-    cors_ready = bool(origins) and all(
-        urlsplit(item).scheme == "https"
-        and bool(urlsplit(item).netloc)
-        and urlsplit(item).hostname not in {"localhost", "127.0.0.1", "::1"}
-        and not urlsplit(item).path
-        for item in origins
+    add(
+        "AUTH_TENANT_CREDENTIALS",
+        _auth_tenant_ready(environment, env),
+        "Server-owned unique tenant credentials configured",
     )
-    add("CORS_EXACT_HTTPS", cors_ready, "Explicit HTTPS origin allowlist configured")
+    add("CORS_EXACT_HTTPS", _cors_ready(env), "Explicit HTTPS origin allowlist configured")
 
-    database_url = env.get("CODESONAR_DATABASE_URL", "").strip()
-    postgres = database_url.startswith(("postgresql://", "postgresql+psycopg://"))
+    database_url = _database_url(env)
+    postgres = _uses_postgresql(database_url)
     add("DATABASE_POSTGRESQL", postgres, "Shared persistence uses PostgreSQL")
-    revision_ok = postgres and _safe(
-        lambda: probes.database_revision(database_url) == REQUIRED_ALEMBIC_REVISION
-    )
-    add("DATABASE_ALEMBIC_HEAD", revision_ok, "Database is at the required migration head")
-
-    provider = env.get("CODESONAR_ENCRYPTION_PROVIDER", "").strip()
-    encryption_ready = provider not in {"", "local", "local-aes-gcm"} and _safe(
-        lambda: probes.encryption_provider_available(provider)
+    add(
+        "DATABASE_ALEMBIC_HEAD",
+        postgres and _revision_at_head(database_url, probes),
+        "Database is at the required migration head",
     )
     add(
         "ENCRYPTION_PROVIDER_INJECTED",
-        encryption_ready,
+        _encryption_provider_ready(env, probes),
         "Production-safe encryption provider is injected",
     )
-
-    root_value = env.get("CODESONAR_DATA_ROOT", "").strip()
-    root_ready = bool(root_value) and _safe(lambda: probes.data_root_secure(Path(root_value)))
     add(
         "DATA_ROOT_HARDENED",
-        root_ready,
+        _data_root_ready(env, probes),
         "Data root exists and passes shared-deployment permission checks",
-    )
-
-    github_ready = all(
-        env.get(key, "").strip()
-        for key in (
-            "CODE_SONAR_GITHUB_APP_ID",
-            "CODE_SONAR_GITHUB_APP_PRIVATE_KEY",
-            "CODE_SONAR_GITHUB_APP_SLUG",
-            "CODE_SONAR_GITHUB_APP_STATE_SECRET",
-        )
     )
     add(
         "GITHUB_APP_CONFIGURED",
-        github_ready,
+        _github_app_ready(env),
         "GitHub App identity and signed install state are configured",
     )
     add(
         "GITHUB_WEBHOOK_SECRET",
-        bool(env.get("CODE_SONAR_GITHUB_WEBHOOK_SECRET", "").strip()),
+        _github_webhook_ready(env),
         "GitHub webhook signature secret is configured",
-    )
-
-    analyzer_ready = (
-        bool(SCORING_VERSION)
-        and bool(ANALYZER_CONTRACT_VERSION)
-        and bool(get_registered_analyzers())
     )
     add(
         "SCORING_AUTHORITY_VERSIONED",
-        analyzer_ready,
+        _scoring_authority_ready(),
         "Scoring and analyzer contracts are versioned and incomplete scans fail closed",
     )
     add(
         "CALIBRATION_CORPUS_VALIDATED",
-        _safe(probes.calibration_validated),
+        _calibration_ready(probes),
         "Independent expert-label calibration corpus is validated",
     )
 
@@ -189,15 +242,14 @@ def assess_readiness(
         True,
         "Tenant privacy schema and authenticated API contract are present",
     )
-    remediation_ready = len(env.get("CODESONAR_REMEDIATION_APPROVAL_SECRET", "")) >= 32
     add(
         "REMEDIATION_AUTHORIZATION_CONFIGURED",
-        remediation_ready,
+        _remediation_authorization_ready(env),
         "Stable remediation authorization secret is configured",
     )
     add(
         "ASK_SONAR_PROVIDER",
-        bool(env.get("CODE_SONAR_ASK_SONAR_PROVIDER", "").strip()),
+        _ask_sonar_ready(env),
         "Optional Ask Sonar provider is configured",
         blocking=False,
     )

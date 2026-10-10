@@ -44,9 +44,7 @@ class HistoryStore(ABC):
         """Persist ``record``. Must be deterministic for fixed input."""
 
     @abstractmethod
-    def load_all(
-        self, repository_id: str | None = None
-    ) -> list[ScanRecord]:
+    def load_all(self, repository_id: str | None = None) -> list[ScanRecord]:
         """Return every persisted record, optionally filtered by repo.
 
         Ordering is deterministic: ascending by ``scanned_at`` then by
@@ -61,6 +59,15 @@ class HistoryStore(ABC):
     def get(self, scan_id: str) -> ScanRecord | None:
         """Return the record with ``scan_id`` or None."""
 
+    @abstractmethod
+    def update_owner(self, scan_id: str, owner_user_id: str) -> bool:
+        """Attribute an ownerless scan to ``owner_user_id``.
+
+        Returns True when a record was updated, False when no matching
+        scan exists. Implementations must only touch records in the
+        current tenant.
+        """
+
 
 class InMemoryHistoryStore(HistoryStore):
     """In-process history store for tests."""
@@ -71,9 +78,7 @@ class InMemoryHistoryStore(HistoryStore):
     def append(self, record: ScanRecord) -> None:
         self._records.append(record)
 
-    def load_all(
-        self, repository_id: str | None = None
-    ) -> list[ScanRecord]:
+    def load_all(self, repository_id: str | None = None) -> list[ScanRecord]:
         records = [
             r
             for r in self._records
@@ -92,6 +97,13 @@ class InMemoryHistoryStore(HistoryStore):
             if r.scan_id == scan_id and r.tenant_id == current_tenant_id():
                 return r
         return None
+
+    def update_owner(self, scan_id: str, owner_user_id: str) -> bool:
+        for r in self._records:
+            if r.scan_id == scan_id and r.tenant_id == current_tenant_id():
+                r.owner_user_id = owner_user_id
+                return True
+        return False
 
 
 class JsonlHistoryStore(HistoryStore):
@@ -117,9 +129,7 @@ class JsonlHistoryStore(HistoryStore):
         line = json.dumps(record.to_dict(), sort_keys=True, ensure_ascii=False)
         # Atomic write via sibling temp file.
         dirpath = self._path.parent
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=".history.", suffix=".jsonl.tmp", dir=str(dirpath)
-        )
+        fd, tmp_name = tempfile.mkstemp(prefix=".history.", suffix=".jsonl.tmp", dir=str(dirpath))
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(self._read_existing())
@@ -139,9 +149,7 @@ class JsonlHistoryStore(HistoryStore):
         except FileNotFoundError:
             return ""
 
-    def load_all(
-        self, repository_id: str | None = None
-    ) -> list[ScanRecord]:
+    def load_all(self, repository_id: str | None = None) -> list[ScanRecord]:
         records = [r for r in self._iter_records() if r.tenant_id == current_tenant_id()]
         if repository_id is not None:
             records = [r for r in records if r.repository_id == repository_id]
@@ -156,6 +164,49 @@ class JsonlHistoryStore(HistoryStore):
             if r.scan_id == scan_id and r.tenant_id == current_tenant_id():
                 return r
         return None
+
+    def update_owner(self, scan_id: str, owner_user_id: str) -> bool:
+        # Line-preserving rewrite: unparsable lines are carried over verbatim
+        # so a claim can never drop data that reads currently tolerate.
+        try:
+            raw_lines = self._path.read_text(encoding="utf-8").splitlines(keepends=True)
+        except FileNotFoundError:
+            return False
+        tenant_id = current_tenant_id()
+        updated = False
+        out_lines: list[str] = []
+        for raw in raw_lines:
+            stripped = raw.strip()
+            if not stripped:
+                out_lines.append(raw)
+                continue
+            try:
+                data = json.loads(stripped)
+            except json.JSONDecodeError:
+                out_lines.append(raw)
+                continue
+            if data.get("scan_id") == scan_id and data.get("tenant_id") == tenant_id:
+                data["owner_user_id"] = owner_user_id
+                out_lines.append(json.dumps(data, sort_keys=True, ensure_ascii=False) + "\n")
+                updated = True
+            else:
+                out_lines.append(raw if raw.endswith("\n") else raw + "\n")
+        if not updated:
+            return False
+        # Atomic rewrite via sibling temp file, mirroring append().
+        dirpath = self._path.parent
+        fd, tmp_name = tempfile.mkstemp(prefix=".history.", suffix=".jsonl.tmp", dir=str(dirpath))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.writelines(out_lines)
+            os.replace(tmp_name, self._path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
+        return True
 
     def _iter_records(self) -> Iterator[ScanRecord]:
         try:

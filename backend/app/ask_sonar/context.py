@@ -26,6 +26,40 @@ def _top_findings(record: ScanRecord, limit: int) -> list[dict[str, Any]]:
     return [finding.to_dict() for finding in ordered[:limit]]
 
 
+def _score_projection(record: ScanRecord, limit: int) -> dict[str, Any]:
+    """Project the score if the top findings were fixed.
+
+    Removes the top N findings (by risk) from the finding list and re-runs
+    the deterministic scorer, so Ask Sonar can answer "how much will my
+    score go up?" with the actual score number instead of debt points.
+    """
+    from app.scoring.engine import calculate_score
+
+    ordered = sorted(
+        record.findings,
+        key=lambda finding: (
+            -finding.risk,
+            -finding.debt_points,
+            finding.file_path,
+            finding.id,
+        ),
+    )
+    top_ids = {f.id for f in ordered[:limit]}
+    remaining = [f for f in record.findings if f.id not in top_ids]
+    try:
+        projected = calculate_score(remaining)
+        projected_score = projected.score
+    except Exception:
+        return {"status": "unavailable"}
+    return {
+        "status": "available",
+        "findings_fixed": len(top_ids),
+        "current_score": record.score,
+        "projected_score": projected_score,
+        "score_gain": projected_score - record.score,
+    }
+
+
 def build_grounding_context(
     record: ScanRecord,
     *,
@@ -54,6 +88,7 @@ def build_grounding_context(
         "findings_by_category": dict(record.findings_by_category),
         "findings_source_breakdown": dict(record.findings_source_breakdown),
         "top_findings": _top_findings(record, top_findings_limit),
+        "score_projection": _score_projection(record, top_findings_limit),
     }
 
     features = extract_scan_features(record)

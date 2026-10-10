@@ -214,6 +214,7 @@ class OAuthUser:
     stripe_customer_id: str = ""
     status: str = "active"
     is_admin: bool = False
+    is_staff: bool = False
     last_login_at: str = ""
 
     @property
@@ -257,6 +258,86 @@ class UserStore(Protocol):
         Returns the updated user, or None when the user does not exist.
         """
         ...
+
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block).
+
+        Removes the entire record — name, email, avatar, OAuth identities,
+        tokens, and the signup row itself. No record of the attempt is
+        retained. Returns True when a record was deleted.
+        """
+        ...
+
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
+        ...
+
+
+def _merge_existing_oauth_user(
+    existing: OAuthUser,
+    *,
+    provider: str,
+    provider_user_id: str,
+    name: str,
+    email: str,
+    avatar_url: str,
+    github_access_token: str,
+    github_username: str,
+    now: str,
+) -> OAuthUser:
+    """Refresh an existing OAuth record with a fresh sign-in.
+
+    Non-empty incoming values win; empty ones keep the stored values.
+    """
+    return OAuthUser(
+        id=existing.id,
+        provider=provider,
+        provider_user_id=provider_user_id,
+        name=name or existing.name,
+        email=email or existing.email,
+        avatar_url=avatar_url or existing.avatar_url,
+        github_access_token=github_access_token or existing.github_access_token,
+        created_at=existing.created_at,
+        updated_at=now,
+        github_id=provider_user_id if provider == "github" else existing.github_id,
+        github_username=github_username or existing.github_username,
+        google_sub=provider_user_id if provider == "google" else existing.google_sub,
+        plan=existing.plan,
+        stripe_customer_id=existing.stripe_customer_id,
+        status=existing.status,
+        is_admin=existing.is_admin,
+        is_staff=existing.is_staff,
+        last_login_at=now,
+    )
+
+
+def _new_oauth_user(
+    *,
+    provider: str,
+    provider_user_id: str,
+    name: str,
+    email: str,
+    avatar_url: str,
+    github_access_token: str,
+    github_username: str,
+    now: str,
+) -> OAuthUser:
+    """Build a first-time OAuth record."""
+    return OAuthUser(
+        id=uuid.uuid4().hex,
+        provider=provider,
+        provider_user_id=provider_user_id,
+        name=name,
+        email=email,
+        avatar_url=avatar_url,
+        github_access_token=github_access_token,
+        created_at=now,
+        updated_at=now,
+        github_id=provider_user_id if provider == "github" else "",
+        github_username=github_username,
+        google_sub=provider_user_id if provider == "google" else "",
+        last_login_at=now,
+    )
 
 
 class OAuthUserStore:
@@ -314,44 +395,29 @@ class OAuthUserStore:
             records = self._load()
             for index, existing in enumerate(records):
                 if existing.provider == provider and existing.provider_user_id == provider_user_id:
-                    updated = OAuthUser(
-                        id=existing.id,
+                    updated = _merge_existing_oauth_user(
+                        existing,
                         provider=provider,
                         provider_user_id=provider_user_id,
-                        name=name or existing.name,
-                        email=email or existing.email,
-                        avatar_url=avatar_url or existing.avatar_url,
-                        github_access_token=github_access_token or existing.github_access_token,
-                        created_at=existing.created_at,
-                        updated_at=now,
-                        github_id=provider_user_id if provider == "github" else existing.github_id,
-                        github_username=github_username or existing.github_username,
-                        google_sub=provider_user_id
-                        if provider == "google"
-                        else existing.google_sub,
-                        plan=existing.plan,
-                        stripe_customer_id=existing.stripe_customer_id,
-                        status=existing.status,
-                        is_admin=existing.is_admin,
-                        last_login_at=now,
+                        name=name,
+                        email=email,
+                        avatar_url=avatar_url,
+                        github_access_token=github_access_token,
+                        github_username=github_username,
+                        now=now,
                     )
                     records[index] = updated
                     self._save(records)
                     return updated
-            user = OAuthUser(
-                id=uuid.uuid4().hex,
+            user = _new_oauth_user(
                 provider=provider,
                 provider_user_id=provider_user_id,
                 name=name,
                 email=email,
                 avatar_url=avatar_url,
                 github_access_token=github_access_token,
-                created_at=now,
-                updated_at=now,
-                github_id=provider_user_id if provider == "github" else "",
                 github_username=github_username,
-                google_sub=provider_user_id if provider == "google" else "",
-                last_login_at=now,
+                now=now,
             )
             records.append(user)
             self._save(records)
@@ -373,6 +439,52 @@ class OAuthUserStore:
                     self._save(records)
                     return updated
         return None
+
+    def set_staff(self, user_id: str, is_staff: bool) -> OAuthUser | None:
+        """Grant or revoke the staff flag (unlimited testing quota)."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(existing, is_staff=is_staff, updated_at=now)
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def set_admin(self, user_id: str, is_admin: bool) -> OAuthUser | None:
+        """Grant or revoke the admin flag."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(existing, is_admin=is_admin, updated_at=now)
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block)."""
+        with self._lock:
+            records = self._load()
+            kept = [u for u in records if u.id != user_id]
+            if len(kept) == len(records):
+                return False
+            self._save(kept)
+            return True
+
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
+        with self._lock:
+            records = self._load()
+            kept = [u for u in records if u.id != user_id]
+            if len(kept) == len(records):
+                return False
+            self._save(kept)
+            return True
 
 
 _user_store: UserStore = OAuthUserStore()
@@ -542,6 +654,67 @@ def _set_session_cookie(response: RedirectResponse, user_id: str, secret: str) -
     )
 
 
+def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]:
+    """Map a GitHub profile payload to ``OAuthUserStore.upsert()`` kwargs."""
+    return {
+        "provider": "github",
+        "provider_user_id": str(profile["id"]),
+        "name": str(profile.get("name") or profile.get("login") or ""),
+        "email": str(profile.get("email") or ""),
+        "avatar_url": str(profile.get("avatar_url") or ""),
+        "github_access_token": token,
+        "github_username": str(profile.get("login") or ""),
+    }
+
+
+def _owner_email() -> str:
+    """Normalized owner email for the one-time admin bootstrap (empty when unset)."""
+    return os.environ.get("CODESONAR_OWNER_EMAIL", "").strip().lower()
+
+
+def _store_has_admin(store: Any) -> bool:
+    """True when any admin already exists in the user store."""
+    if hasattr(store, "list_users"):
+        users = store.list_users(limit=500, offset=0)
+    elif hasattr(store, "load_all"):
+        users = list(store.load_all())
+    else:
+        return False
+    return any(getattr(u, "is_admin", False) for u in users)
+
+
+def _grant_owner_flags(store: Any, user_id: str) -> None:
+    """Grant admin + staff through whichever setters the store provides."""
+    for kind in ("admin", "staff"):
+        setter = getattr(store, f"set_{kind}", None)
+        if setter is not None:
+            setter(user_id, True)
+
+
+def _maybe_bootstrap_owner(user: OAuthUser) -> OAuthUser:
+    """One-time owner bootstrap: first login matching CODESONAR_OWNER_EMAIL.
+
+    When the env var is set and the logging-in user's email matches it
+    (case-insensitive), and no admin exists yet in the user store, that
+    user is granted admin + staff. This seeds the first admin without
+    touching the database by hand, and becomes a no-op afterwards.
+    """
+    if not _owner_email() or (user.email or "").strip().lower() != _owner_email():
+        return user
+    if user.is_admin and user.is_staff:
+        return user
+    store = get_oauth_user_store()
+    try:
+        if _store_has_admin(store):
+            return user
+        _grant_owner_flags(store, user.id)
+        logger.warning("Owner bootstrap: granted admin+staff to %s", user.id)
+        return store.get(user.id) or user
+    except Exception:
+        logger.exception("Owner bootstrap failed for %s", user.id)
+        return user
+
+
 @router.get("/github/callback")
 async def github_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
     config = oauth_config()
@@ -554,15 +727,8 @@ async def github_callback(code: str | None = None, state: str | None = None) -> 
 
     token = _exchange_github_code(config, code)
     profile = _github_profile(token)
-    user = get_oauth_user_store().upsert(
-        provider="github",
-        provider_user_id=str(profile["id"]),
-        name=str(profile.get("name") or profile.get("login") or ""),
-        email=str(profile.get("email") or ""),
-        avatar_url=str(profile.get("avatar_url") or ""),
-        github_access_token=token,
-        github_username=str(profile.get("login") or ""),
-    )
+    user = get_oauth_user_store().upsert(**_github_upsert_fields(profile, token))
+    user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
@@ -589,6 +755,7 @@ async def google_callback(code: str | None = None, state: str | None = None) -> 
         email=str(profile.get("email") or ""),
         avatar_url=str(profile.get("picture") or ""),
     )
+    user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
     response = RedirectResponse(url="/app", status_code=302)
@@ -622,7 +789,16 @@ def require_user(request: Request) -> OAuthUser:
 
 @router.get("/me")
 async def auth_me(request: Request) -> dict[str, Any]:
-    return require_user(request).public_dict()
+    user = require_user(request)
+    # The public projection hides account internals; the signed-in user
+    # additionally sees their own plan and privilege flags so the UI can
+    # gate the admin console. Other users' flags stay admin-only.
+    return {
+        **user.public_dict(),
+        "plan": user.plan,
+        "is_admin": bool(getattr(user, "is_admin", False)),
+        "is_staff": bool(getattr(user, "is_staff", False)),
+    }
 
 
 @router.post("/logout")

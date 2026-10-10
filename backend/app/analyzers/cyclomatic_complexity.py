@@ -24,6 +24,7 @@ from typing import Any, Iterator, Optional, Tuple
 from radon.complexity import cc_visit  # type: ignore[import-untyped]
 
 from app.analyzers.base import Analyzer
+from app.analyzers.finding_ids import stable_finding_id
 from app.models.finding import Finding, FindingCategory, FindingSeverity
 from app.security import (
     EXCLUDED_DIRS,
@@ -202,9 +203,9 @@ class CyclomaticComplexityAnalyzer(Analyzer):
         )
         line_start = getattr(block, "lineno", 1) or 1
         line_end = getattr(block, "endline", line_start) or line_start
-        finding_id = (
-            "finding_cyclomatic_complexity_"
-            f"{hash((rel_path, qualified, cc_value, self._threshold)) & 0xFFFFFFFF:08x}"
+        finding_id = stable_finding_id(
+            "finding_cyclomatic_complexity_",
+            rel_path, qualified, cc_value, self._threshold,
         )
         evidence = (
             f"symbol={qualified} complexity={cc_value} threshold={self._threshold}"

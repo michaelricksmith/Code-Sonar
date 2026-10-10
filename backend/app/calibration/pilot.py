@@ -18,8 +18,8 @@ from app.calibration.validation import (
 )
 
 
-def validate_pilot_manifest(manifest: Mapping[str, Any]) -> None:
-    """Validate corpus metadata without implying that labels or accuracy exist."""
+def _validate_manifest_header(manifest: Mapping[str, Any]) -> list[Any]:
+    """Validate top-level pilot manifest metadata and return the cases list."""
     if manifest.get("contract_version") != CONTRACT_VERSION:
         raise EvidenceValidationError("incompatible contract_version")
     if not isinstance(manifest.get("benchmark_version"), str) or not manifest["benchmark_version"]:
@@ -29,35 +29,56 @@ def validate_pilot_manifest(manifest: Mapping[str, Any]) -> None:
     cases = manifest.get("cases")
     if not isinstance(cases, list) or len(cases) < 1:
         raise EvidenceValidationError("at least one case is required")
+    return cases
+
+
+def _validate_case_strata(metadata: Mapping[str, Any]) -> None:
+    """Validate the strata labels for a single pilot case."""
+    strata = metadata.get("strata")
+    if not isinstance(strata, Mapping) or any(
+        not isinstance(strata.get(key), str) or not strata[key].strip()
+        for key in ("size", "shape", "profile")
+    ):
+        raise EvidenceValidationError("strata require non-empty size, shape, and profile")
+    if any(
+        "replace" in str(value).lower() or "placeholder" in str(value).lower()
+        for value in strata.values()
+    ):
+        raise EvidenceValidationError("strata placeholders must be replaced")
+
+
+def _validate_case_scan_file(case: Mapping[str, Any]) -> None:
+    """Validate the optional scan file reference for a single pilot case."""
+    if case.get("scan_file") is not None and not isinstance(case["scan_file"], str):
+        raise EvidenceValidationError("scan_file must be a relative path")
+
+
+def _validate_manifest_case(case: Any, case_ids: set[str]) -> None:
+    """Validate one pilot manifest case and record its case id."""
+    if not isinstance(case, Mapping):
+        raise EvidenceValidationError("each case must be an object")
+    metadata = case.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise EvidenceValidationError("each case requires inline repository metadata")
+    validate_artifact(metadata)
+    if len(set(str(metadata["commit_sha"]))) == 1:
+        raise EvidenceValidationError(
+            "commit_sha must be a real pinned commit, not a placeholder"
+        )
+    case_id = str(metadata["case_id"])
+    if case_id in case_ids:
+        raise EvidenceValidationError("case_id values must be unique")
+    case_ids.add(case_id)
+    _validate_case_strata(metadata)
+    _validate_case_scan_file(case)
+
+
+def validate_pilot_manifest(manifest: Mapping[str, Any]) -> None:
+    """Validate corpus metadata without implying that labels or accuracy exist."""
+    cases = _validate_manifest_header(manifest)
     case_ids: set[str] = set()
     for case in cases:
-        if not isinstance(case, Mapping):
-            raise EvidenceValidationError("each case must be an object")
-        metadata = case.get("metadata")
-        if not isinstance(metadata, Mapping):
-            raise EvidenceValidationError("each case requires inline repository metadata")
-        validate_artifact(metadata)
-        if len(set(str(metadata["commit_sha"]))) == 1:
-            raise EvidenceValidationError(
-                "commit_sha must be a real pinned commit, not a placeholder"
-            )
-        case_id = str(metadata["case_id"])
-        if case_id in case_ids:
-            raise EvidenceValidationError("case_id values must be unique")
-        case_ids.add(case_id)
-        strata = metadata.get("strata")
-        if not isinstance(strata, Mapping) or any(
-            not isinstance(strata.get(key), str) or not strata[key].strip()
-            for key in ("size", "shape", "profile")
-        ):
-            raise EvidenceValidationError("strata require non-empty size, shape, and profile")
-        if any(
-            "replace" in str(value).lower() or "placeholder" in str(value).lower()
-            for value in strata.values()
-        ):
-            raise EvidenceValidationError("strata placeholders must be replaced")
-        if case.get("scan_file") is not None and not isinstance(case["scan_file"], str):
-            raise EvidenceValidationError("scan_file must be a relative path")
+        _validate_manifest_case(case, case_ids)
 
 
 def stratified_finding_sample(
@@ -136,11 +157,10 @@ def make_review_packet(
     }
 
 
-def load_finalized_independent_labels(
-    manifest: Mapping[str, Any], label_documents: Sequence[Mapping[str, Any]]
-) -> list[dict[str, Any]]:
-    """Return evaluator cases only when every case has independent finalized labels."""
-    validate_pilot_manifest(manifest)
+def _collect_finalized_labels(
+    label_documents: Sequence[Mapping[str, Any]]
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Group finalized independent expert labels by case id."""
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for label in label_documents:
         if label.get("artifact_type") != "expert_label":
@@ -149,49 +169,65 @@ def load_finalized_independent_labels(
             continue
         validate_artifact(label)
         grouped[str(label["case_id"])].append(label)
+    return grouped
+
+
+def _assemble_evaluator_case(
+    case: Mapping[str, Any], grouped: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> dict[str, Any]:
+    """Build the evaluator record for one manifest case, refusing on gaps."""
+    case_id = str(case["metadata"]["case_id"])
+    labels = grouped[case_id]
+    reviewers = {str(label["reviewer_id"]) for label in labels}
+    if len(reviewers) < 2:
+        raise EvidenceValidationError(
+            f"{case_id} requires at least two finalized independent expert labels; "
+            "accuracy evaluation refused"
+        )
+    adjudicated = case.get("adjudicated_label")
+    if not isinstance(adjudicated, Mapping):
+        raise EvidenceValidationError(
+            f"{case_id} requires finalized adjudication preserving reviewer disagreement; "
+            "accuracy evaluation refused"
+        )
+    validate_artifact(adjudicated)
+    disagreement = adjudicated.get("disagreement")
+    if (
+        adjudicated.get("status") != "finalized"
+        or not isinstance(disagreement, Mapping)
+        or not disagreement.get("resolution_rationale")
+    ):
+        raise EvidenceValidationError(
+            "adjudication must be finalized and preserve disagreement"
+        )
+    scan = case.get("scan")
+    if not isinstance(scan, Mapping):
+        raise EvidenceValidationError("validated in-memory scan is required for evaluation")
+    return {
+        "case_id": case_id,
+        "actual_grade": scan["grade"],
+        "expert_grade": adjudicated["grade"],
+        "expert_ordinal_health": adjudicated["ordinal_health"],
+        "strata": case["metadata"]["strata"],
+    }
+
+
+def load_finalized_independent_labels(
+    manifest: Mapping[str, Any], label_documents: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return evaluator cases only when every case has independent finalized labels."""
+    validate_pilot_manifest(manifest)
+    grouped = _collect_finalized_labels(label_documents)
     assembled = []
     for case in manifest["cases"]:
-        case_id = str(case["metadata"]["case_id"])
-        labels = grouped[case_id]
-        reviewers = {str(label["reviewer_id"]) for label in labels}
-        if len(reviewers) < 2:
-            raise EvidenceValidationError(
-                f"{case_id} requires at least two finalized independent expert labels; "
-                "accuracy evaluation refused"
-            )
-        adjudicated = case.get("adjudicated_label")
-        if not isinstance(adjudicated, Mapping):
-            raise EvidenceValidationError(
-                f"{case_id} requires finalized adjudication preserving reviewer disagreement; "
-                "accuracy evaluation refused"
-            )
-        validate_artifact(adjudicated)
-        disagreement = adjudicated.get("disagreement")
-        if (
-            adjudicated.get("status") != "finalized"
-            or not isinstance(disagreement, Mapping)
-            or not disagreement.get("resolution_rationale")
-        ):
-            raise EvidenceValidationError(
-                "adjudication must be finalized and preserve disagreement"
-            )
-        scan = case.get("scan")
-        if not isinstance(scan, Mapping):
-            raise EvidenceValidationError("validated in-memory scan is required for evaluation")
-        assembled.append(
-            {
-                "case_id": case_id,
-                "actual_grade": scan["grade"],
-                "expert_grade": adjudicated["grade"],
-                "expert_ordinal_health": adjudicated["ordinal_health"],
-                "strata": case["metadata"]["strata"],
-            }
-        )
+        assembled.append(_assemble_evaluator_case(case, grouped))
     return assembled
 
 
-def make_adjudication_packet(labels: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Create a blank adjudication form that retains each independent opinion."""
+def _finalized_adjudication_labels(
+    labels: Sequence[Mapping[str, Any]]
+) -> tuple[list[Mapping[str, Any]], str]:
+    """Return finalized labels and their shared case id, refusing on gaps."""
     finalized = [label for label in labels if label.get("status") == "finalized"]
     if len({str(label.get("reviewer_id")) for label in finalized}) < 2:
         raise EvidenceValidationError("adjudication requires two finalized independent reviews")
@@ -200,6 +236,12 @@ def make_adjudication_packet(labels: Sequence[Mapping[str, Any]]) -> dict[str, A
     case_ids = {str(label["case_id"]) for label in finalized}
     if len(case_ids) != 1:
         raise EvidenceValidationError("adjudication labels must describe one case")
+    return finalized, next(iter(case_ids))
+
+
+def make_adjudication_packet(labels: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Create a blank adjudication form that retains each independent opinion."""
+    finalized, case_id = _finalized_adjudication_labels(labels)
     opinions = [
         {
             "reviewer_id": label["reviewer_id"],
@@ -213,7 +255,7 @@ def make_adjudication_packet(labels: Sequence[Mapping[str, Any]]) -> dict[str, A
     return {
         "contract_version": CONTRACT_VERSION,
         "artifact_type": "adjudicated_label",
-        "case_id": next(iter(case_ids)),
+        "case_id": case_id,
         "reviewer_ids": [item["reviewer_id"] for item in opinions],
         "independent_opinions": opinions,
         "disagreement": {

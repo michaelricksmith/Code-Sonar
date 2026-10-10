@@ -21,15 +21,14 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlparse, urlunparse
 
 from app.scan_jobs import WORKSPACES_ROOT
 from app.security import validate_repo_path
+from app.security.git_auth import clone_token, run_git_clone
 
 _TOKEN_RE = re.compile(r"x-access-token:[^@]+@")
 
@@ -51,37 +50,18 @@ def _redact_token(message: str) -> str:
 
 
 def _shallow_clone(clone_url: str, branch: str | None, dest: Path) -> None:
-    cmd = ["git", "clone", "--depth", "1"]
-    if branch:
-        cmd += ["--branch", branch]
-    cmd += [clone_url, str(dest)]
-    completed = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
-    if completed.returncode != 0:
-        detail = (
-            completed.stderr.strip()
-            or completed.stdout.strip()
-            or "unknown error"
+    # The OAuth token (if any) travels via the clone_token context, never in
+    # argv, so it stays out of the process table. _redact_token is kept as
+    # defense-in-depth for tokens that reach us inside error text.
+    try:
+        run_git_clone(
+            clone_url,
+            branch,
+            dest,
+            failure_prefix="Remediation source clone failed",
         )
-        raise RuntimeError(
-            "Remediation source clone failed: " + _redact_token(detail)
-        )
-
-
-def _with_token(clone_url: str, token: str) -> str:
-    """Embed the OAuth token in the clone URL for private repos (never logged)."""
-    if not token:
-        return clone_url
-    parsed = urlparse(clone_url)
-    netloc = f"x-access-token:{token}@{parsed.hostname}"
-    if parsed.port:
-        netloc += f":{parsed.port}"
-    return urlunparse(parsed._replace(netloc=netloc))
+    except RuntimeError as exc:
+        raise RuntimeError(_redact_token(str(exc))) from exc
 
 
 def _existing_checkout(repository_path: str) -> Path | None:
@@ -113,11 +93,12 @@ def resolve_remediation_source(
         raise ValueError("Remediation source repository is unavailable")
 
     branch = getattr(record, "branch", None)
-    clone_url = _with_token(f"https://github.com/{slug}.git", github_token)
+    clone_url = f"https://github.com/{slug}.git"
     WORKSPACES_ROOT.mkdir(parents=True, exist_ok=True)
     dest = WORKSPACES_ROOT / f"remediation-{uuid.uuid4().hex}"
     try:
-        _shallow_clone(clone_url, branch, dest)
+        with clone_token(github_token):
+            _shallow_clone(clone_url, branch, dest)
         validated = validate_repo_path(dest, scan_root=WORKSPACES_ROOT)
     except Exception:
         shutil.rmtree(dest, ignore_errors=True)

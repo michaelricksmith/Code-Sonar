@@ -12,6 +12,12 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _post_scan(client, repo_path):
+    response = client.post("/api/scan", json={"repo_path": str(repo_path)})
+    assert response.status_code == 200
+    return response
+
+
 class TestHealthEndpoint:
     def test_health_returns_ok(self, client):
         response = client.get("/health")
@@ -28,13 +34,15 @@ class TestHealthEndpoint:
 class TestScanEndpoint:
     @pytest.mark.asyncio
     async def test_scan_with_valid_repo_returns_findings(self, client, test_repo_fixture):
-        response = client.post("/api/scan", json={"repo_path": str(test_repo_fixture)})
-        assert response.status_code == 200
-        data = response.json()
+        data = _post_scan(client, test_repo_fixture).json()
         assert "findings" in data
         assert isinstance(data["findings"], list)
         assert "summary" in data
         assert "scan_id" in data
+
+    @pytest.mark.asyncio
+    async def test_scan_findings_have_expected_fields(self, client, test_repo_fixture):
+        data = _post_scan(client, test_repo_fixture).json()
         if data["findings"]:
             finding = data["findings"][0]
             assert "id" in finding

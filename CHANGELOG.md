@@ -1,3 +1,185 @@
+## Unreleased — Admin console: plan grants, quota reset, user deletion
+
+- **Admins can now grant billing plans directly** (`POST /api/admin/users/{id}/plan`):
+  set any user to free, hobby, or plus with no Stripe involvement. The admin
+  console shows a plan dropdown per user.
+- **Admins can reset a user's quota** (`POST /api/admin/users/{id}/usage/reset`):
+  zeroes the current-period scans and Ask Sonar counters. "Reset quota" button
+  in the console.
+- **Admins can delete users** (`DELETE /api/admin/users/{id}`): permanently
+  removes the account and its quota counters. Guards: cannot delete yourself,
+  cannot delete the last remaining admin. "Delete" button in the console with
+  a confirmation step.
+- **Ask Sonar "Scan not found" hardened**: the dashboard now verifies the
+  specific cached scan against the server before rendering it, instead of only
+  checking that the user has any history. Stale caches (different account,
+  deleted scan) are dropped instead of rendering a phantom scan that Ask Sonar
+  cannot load. The drawer also shows a friendly message when the scan is
+  unavailable.
+- **Ask Sonar answers score impact in score terms**: the grounding context now
+  includes a `score_projection` (computed by re-running the deterministic
+  scorer with the top 10 findings removed), and the system prompt directs the
+  model to quote the 300-850 score numbers instead of debt points when the
+  user asks how fixing something will move their score.
+- **Landing page offers Google sign-in**: the landing previously only linked
+  GitHub OAuth. "Continue with Google" links were added (Google already sends
+  `prompt=select_account`), plus a hint to sign out of github.com first when
+  switching GitHub accounts, since GitHub offers no account-chooser parameter.
+- New tests: plan/usage/delete endpoint coverage in
+  `tests/admin/test_admin.py` (24 passed).
+
+## Unreleased — Stable finding IDs across processes
+
+- **Finding IDs are now deterministic across processes.** Six analyzers
+  (`comment_markers`, `cyclomatic_complexity`, `nesting_depth`,
+  `oversized_files`, `oversized_functions`, `secrets`) built finding IDs
+  with Python's salted `hash()`, which is randomized per process — identical
+  scans produced different IDs after any restart or redeploy. The drift view
+  matches findings by ID, so drift silently reported every finding as NEW
+  and every baseline finding as RESOLVED across restarts. All seven call
+  sites now use the new shared `app.analyzers.finding_ids.stable_finding_id`
+  helper (SHA-256, the pattern `dead_code` already used); `dead_code` IDs
+  are byte-identical to before.
+- **New cross-process regression test** in
+  `tests/test_analyzer_determinism.py`: scans a fixture repo in two
+  subprocesses with different `PYTHONHASHSEED` values and asserts identical
+  finding IDs (verified to fail on the old `hash()` code).
+- Verified: full backend suite **1297 passed, 1 skipped**; `ruff` clean;
+  `mypy` clean on all touched files (the one remaining `mypy` error in
+  `app/admin/api.py:105` predates this change).
+
+## Unreleased — Full legal drafts live in-app
+
+- **Terms of Service and Privacy Policy now carry the full founder drafts**
+  in `frontend/src/components/LegalPage.tsx` (`#/legal/terms`,
+  `#/legal/privacy`), still marked **DRAFT, pending attorney review** behind
+  the existing DRAFT banner. Tables from the drafts were converted to
+  prose; placeholders use the `[TBD — founder to provide]` /
+  `[Company legal name — to be provided]` / `[To be decided]` conventions
+  (see task notes for the full list). Service name rendered as "Code Sonar",
+  AI provider named as Groq, contact emails as drafted
+  (support@ / privacy@ / dmca@codevitals.tech). `updated` set to
+  "October 2026" for both documents; Accessibility Statement unchanged.
+- Verified: frontend `tsc --noEmit` clean, `eslint` on LegalPage.tsx clean
+  (no LegalPage-specific tests exist).
+
+## Unreleased — Cyclomatic complexity reduction (priority #2)
+
+- **Zero `cyclomatic_complexity:over-threshold` findings.** Refactored all
+  66 flagged functions across 46 files to radon complexity ≤ 10 via
+  extract-helper splits along branch boundaries: 23 source files
+  (including `DeadCodeAnalyzer.analyze` 27 → A, `calculate_score`
+  24 → A, `_split_typescript` 24 → B, `prompt_status` 23 → A,
+  `validate_pilot_manifest` 22 → A, `compute_drift` 21 → A,
+  `assess_readiness` 21 → A), 22 test files (assert-heavy tests split,
+  every assertion preserved), and the `demo/sample_repo/state-B`
+  fixture. No behavior changes; no public signature changes.
+- **Scan-verified.** Clean before/after scans: score 529 → 699,
+  findings 310 → 222, technical-debt points 1378 → 977. Zero new
+  complexity findings; the analyzer was sanity-checked against a
+  deliberately complex probe file first.
+- Full suite: **1184 passed, 1 skipped, zero exclusions** — the local
+  venv now has the declared `stripe>=10.0.0`, so the previously
+  excluded billing/compliance modules run too.
+
+## Unreleased — Test coverage for previously untested modules
+
+- **Zero critical `testing_debt:untested-module` findings.** Added 422
+  tests across 16 new test modules covering the 10 modules Code Sonar
+  flagged as untested: `analyzers/dead_code`,
+  `history/scan_record`, `persistence/privacy`,
+  `persistence/repositories`, `projects`,
+  `remediation/deterministic`, `remediation/groq`, `api/github_app`,
+  `compliance/email`, and `app.main`. No source files changed.
+- **Scan-verified.** Clean before/after scans: score 526 → 529,
+  findings 319 → 310, technical-debt points 1496 → 1378. The only new
+  finding is one info-level `dead_code:stale-fixture` on the shared
+  `clean_email_env` pytest fixture (same pattern as the pre-existing
+  `outbox_env` fixture) — the analyzer cannot see fixture injection
+  through test parameters.
+- Full suite: 1088 passed, 1 skipped (two billing/compliance modules
+  excluded locally pending `stripe` dependency sync; `stripe>=10.0.0`
+  is already declared in `backend/pyproject.toml`).
+
+## Unreleased — Email transport hardening
+
+- **Provider-agnostic email transport.** `backend/app/compliance/email.py`
+  now has an `EmailTransport` abstraction: `LogTransport` (safe default —
+  nothing leaves the machine, everything kept in the outbox),
+  `SmtpTransport` (stdlib `smtplib`, no new deps), and a Resend profile
+  that points the same SMTP path at `smtp.resend.com:587` with username
+  `resend` and `RESEND_API_KEY` as the password. Config via
+  `EMAIL_PROVIDER` (legacy `SONAR_EMAIL_TRANSPORT` alias), `SMTP_HOST` /
+  `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`, `EMAIL_FROM`,
+  `EMAIL_FROM_NAME`, `EMAIL_MARKETING_FROM`. Missing or unknown
+  provider config fails closed to the log transport — the app boots and
+  never crashes unconfigured.
+- **Headers + retries + observability.** Every message gets `Message-ID`
+  and `Date`; marketing mail carries RFC 8058 one-click
+  `List-Unsubscribe` headers from a single `list_unsubscribe_url` field
+  (fixed a double-angle-bracket bug). Bounded retries (3 attempts, 1s/4s
+  backoff) on transient SMTP failures; structured send logs record
+  routing metadata only (to, template, transport, message id, attempt) —
+  never bodies.
+- **Amount formatting fix.** Templates normalize amounts so receipts
+  render `$7/month`, never `$$7/month` (the audit defect).
+- **Tests.** `backend/tests/compliance/test_email_transport.py`: 17
+  tests covering provider resolution (incl. Resend profile and
+  legacy-alias compatibility), mocked-SMTP success, transient retry,
+  permanent-failure no-retry, retry exhaustion, template amounts, and
+  header/unsubscribe behavior. Full suite: 719 passed, 1 skipped.
+- **EMAIL-SETUP.md.** Founder setup guide: Resend account, domain
+  verification (waiting on `codevitals.tech`), Render env vars, test
+  checkout verification. No credentials committed.
+
+## Unreleased — Pre-public compliance
+
+- **Consumer compliance surface.** New `backend/app/compliance/` package:
+  append-only compliance records (auto-renewal consents, cancellations,
+  marketing consent, age-gate confirmations, GPC opt-outs, annual
+  reminders) in a `compliance_records` SQL table (Alembic
+  `20260927_0005`, revision pin bumped) with a JSON-file fallback;
+  transactional email (`log`/`smtp`/`resend` via `SONAR_EMAIL_TRANSPORT`)
+  for post-purchase receipts, cancellation confirmations, and annual
+  renewal reminders; RFC 8058 one-click unsubscribe with HMAC-signed
+  tokens; marketing stream separated from transactional and gated on
+  opt-in.
+- **Compliance API.** `GET /api/compliance/status`,
+  `POST /api/compliance/age-gate` (neutral birth-year question; only
+  the 13+/18+ bracket is stored, never the birth year),
+  `POST /api/compliance/age-gate/block` (deletes just-created under-13
+  accounts; no attempt record), `POST /api/compliance/marketing-consent`,
+  `POST /api/compliance/gpc` (honored; no-sale/no-ad-tech posture
+  recorded), `POST /api/compliance/unsubscribe/{token}` (no auth),
+  `GET /api/compliance/reminders/annual` (admin; pairs with
+  `scripts/annual_reminders.py --list/--send`, run monthly).
+- **Billing compliance.** Checkout now requires `autorenew_consent:
+  true` (400 without it); the timestamped consent (tier, amount,
+  monthly frequency, terms version `2026-09-27`) is recorded before the
+  Stripe session is created. New `GET /api/billing/subscription`
+  (plan + live Stripe status), `POST /api/billing/cancel` (schedules at
+  period end; access continues until then; immediate confirmation
+  email), `POST /api/billing/resume`; Stripe portal stays available.
+  Webhooks now send the post-purchase acknowledgment and cancellation
+  confirmation and record subscription links/cancellations.
+- **Frontend.** Pricing page shows the auto-renewal disclosure next to
+  an unchecked consent checkbox gating each paid-tier button; a
+  subscription panel (plan, renewal date, two-step in-app cancel with
+  inline confirm, resume, portal link) sits above the tiers for signed-in
+  paid users. Neutral age gate on first sign-in (birth-year select, no
+  preselection; under-13 → account deleted + signed out). Optional
+  unchecked marketing checkbox. GPC reported when
+  `navigator.globalPrivacyControl` is true. Draft Terms/Privacy/
+  Accessibility pages at `#/legal/terms|privacy|accessibility` (marked
+  DRAFT, pending legal review) and footer links everywhere. A11y: skip
+  link, `<main>` landmarks, global focus-visible ring, labeled controls.
+- **mypy fix (carries PR #84).** `answering.py` `_finding_label` now
+  coerces `finding["file_path"]` to `str` — the same one-line fix PR
+  #84 made on a branch this work's base does not contain.
+- 25 new compliance tests; existing checkout test updated for the
+  consent gate. **Not yet done:** sandbox end-to-end purchase,
+  real email provider, legal review of the draft policies.
+
 ## Unreleased — Prompt-first remediation
 
 - **Pricing nav link fix.** The landing-page "Pricing" nav link pointed at

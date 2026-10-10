@@ -15,6 +15,10 @@ export interface User {
   email: string;
   avatar_url: string | null;
   provider: "github" | "google" | string;
+  /** Present for the signed-in user; absent on older cached shapes. */
+  plan?: string;
+  is_admin?: boolean;
+  is_staff?: boolean;
 }
 
 export interface RepoOption {

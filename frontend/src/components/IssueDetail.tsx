@@ -35,6 +35,7 @@ import {
 } from "../copy";
 import { issueCardTitle } from "../copy/issues";
 import { NerdsDetails } from "./NerdsDetails";
+import { stripSensitiveKeys } from "../utils/security";
 
 interface IssueDetailProps {
   finding: Finding;
@@ -214,7 +215,7 @@ export function IssueDetail({
           <div className="detail-head">
             <div>
               <span className={`sev-chip tone-${sevTone}`}>{sevLabel}</span>
-              <span className="sev-chip tone-ok" style={{ marginLeft: 8, background: "#f4f1ea", color: "var(--muted)" }}>
+              <span className="sev-chip tone-ok" style={{ marginLeft: 8, background: "rgba(255,255,255,0.06)", color: "var(--muted)" }}>
                 {CATEGORY_AREA[finding.category]}
               </span>
             </div>
@@ -418,7 +419,7 @@ export function IssueDetail({
             <div className="kv"><span>Symbol</span><span className="mono">{finding.symbol ?? "—"}</span></div>
             {Object.keys(finding.metadata ?? {}).length > 0 && (
               <div style={{ marginTop: 12 }}>
-                <pre>{rawJson(finding.metadata)}</pre>
+                <pre>{rawJson(stripSensitiveKeys(finding.metadata))}</pre>
               </div>
             )}
           </NerdsDetails>

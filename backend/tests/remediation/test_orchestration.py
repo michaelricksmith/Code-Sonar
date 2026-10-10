@@ -8,7 +8,7 @@ from app.remediation.contracts import (
     RemediationExecutionState,
     RemediationRequest,
 )
-from app.remediation.orchestration import RemediationOrchestrator
+from app.remediation.orchestration import RemediationOrchestrator, RemediationWorkflowResult
 from app.remediation.validation import RemediationValidationResult
 from app.remediation.workspace import PreparedWorkspace
 
@@ -116,6 +116,24 @@ def _authorization() -> RemediationAuthorization:
     )
 
 
+def _run_successful_authorized(
+    workspace: str,
+) -> tuple[
+    FakeWorkspaceManager, FakeExecutor, FakeValidationService, RemediationWorkflowResult
+]:
+    manager = FakeWorkspaceManager(workspace)
+    executor = FakeExecutor(RemediationExecutionState.EXECUTED)
+    validator = FakeValidationService()
+    orchestrator = RemediationOrchestrator(
+        workspace_manager=manager,  # type: ignore[arg-type]
+        executor=executor,
+        validation_service=validator,  # type: ignore[arg-type]
+        authorization_service=FakeAuthorizationService(),  # type: ignore[arg-type]
+    )
+    result = orchestrator.run_authorized(_authorization())
+    return manager, executor, validator, result
+
+
 def test_unapproved_workflow_stops_before_workspace_preparation() -> None:
     manager = FakeWorkspaceManager("/isolated/worktree")
     executor = FakeExecutor(RemediationExecutionState.EXECUTED)
@@ -163,25 +181,21 @@ def test_execution_failure_prevents_validation() -> None:
     assert manager.cleanup_calls == ["ws_test"]
 
 
-def test_successful_execution_advances_to_validation_with_isolated_workspace() -> None:
+def test_successful_execution_advances_to_validation() -> None:
     workspace = str(Path("/isolated/worktree"))
-    manager = FakeWorkspaceManager(workspace)
-    executor = FakeExecutor(RemediationExecutionState.EXECUTED)
-    validator = FakeValidationService()
-    orchestrator = RemediationOrchestrator(
-        workspace_manager=manager,  # type: ignore[arg-type]
-        executor=executor,
-        validation_service=validator,  # type: ignore[arg-type]
-        authorization_service=FakeAuthorizationService(),  # type: ignore[arg-type]
-    )
-
-    result = orchestrator.run_authorized(_authorization())
+    _, _, _, result = _run_successful_authorized(workspace)
 
     assert result.completed is True
     assert result.stopped_at is None
     assert result.validation is not None
     assert result.validation.outcome_id == "outcome-1"
     assert result.validation.training_label_value == "1"
+
+
+def test_successful_execution_uses_isolated_workspace() -> None:
+    workspace = str(Path("/isolated/worktree"))
+    manager, executor, validator, _ = _run_successful_authorized(workspace)
+
     assert executor.requests[0].repository_path == workspace
     assert validator.calls[0]["workspace_path"] == workspace
     assert validator.calls[0]["before_scan_id"] == "scan-before"

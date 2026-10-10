@@ -13,6 +13,7 @@ from sqlalchemy import Engine, and_, delete, func, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from app.compliance.records import ComplianceRecord
 from app.github_app import (
     GitHubInstallation,
     WebhookAuditRecord,
@@ -79,6 +80,7 @@ class SqlHistoryStore:
                 grade=record.grade,
                 total_debt_points=record.total_debt_points,
                 finding_count=record.finding_count,
+                commit_sha=record.commit_sha,
                 aggregates=aggregate,
             )
         )
@@ -140,6 +142,26 @@ class SqlHistoryStore:
 
     def get(self, scan_id: str) -> ScanRecord | None:
         return next((item for item in self._records() if item.scan_id == scan_id), None)
+
+    def update_owner(self, scan_id: str, owner_user_id: str) -> bool:
+        """Attribute an ownerless scan; owner lives inside the aggregates JSON."""
+        tenant_id = current_tenant_id()
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                select(scans.c.aggregates).where(
+                    and_(scans.c.tenant_id == tenant_id, scans.c.scan_id == scan_id)
+                )
+            ).first()
+            if row is None:
+                return False
+            aggregates = dict(row[0] or {})
+            aggregates["owner_user_id"] = owner_user_id
+            connection.execute(
+                update(scans)
+                .where(and_(scans.c.tenant_id == tenant_id, scans.c.scan_id == scan_id))
+                .values(aggregates=aggregates)
+            )
+            return True
 
 
 class SqlProjectStore:
@@ -544,6 +566,55 @@ def _effective_identity(record: OAuthUser) -> dict[str, Any]:
     }
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    """Return ``value`` unless it is falsy, in which case return ``default``."""
+    return value or default
+
+
+def _row_provider_user_id(row: RowMapping, provider: str) -> str:
+    """Resolve the provider user id stored on a users-table row."""
+    if provider == PROVIDER_GITHUB:
+        return row["github_id"] or ""
+    if provider == PROVIDER_GOOGLE:
+        return row["google_sub"] or ""
+    return ""
+
+
+def _merge_key(record: OAuthUser) -> str:
+    """Key for merging legacy records: normalized email, else provider identity."""
+    return _normalize_email(record.email) or f"{record.provider}:{record.provider_user_id}"
+
+
+def _merged_legacy_record(existing: OAuthUser, record: OAuthUser) -> OAuthUser:
+    """Fold a duplicate legacy record into the surviving one, preferring kept values."""
+    return replace(
+        existing,
+        github_id=existing.github_id
+        or record.github_id
+        or (record.provider_user_id if record.provider == PROVIDER_GITHUB else ""),
+        github_username=existing.github_username or record.github_username,
+        google_sub=existing.google_sub
+        or record.google_sub
+        or (record.provider_user_id if record.provider == PROVIDER_GOOGLE else ""),
+        github_access_token=existing.github_access_token or record.github_access_token,
+    )
+
+
+def _merge_legacy(legacy: list[OAuthUser]) -> tuple[dict[str, OAuthUser], list[str]]:
+    """Merge legacy records sharing an email into one account per merge key."""
+    merged: dict[str, OAuthUser] = {}
+    order: list[str] = []
+    for record in legacy:
+        key = _merge_key(record)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = record
+            order.append(key)
+            continue
+        merged[key] = _merged_legacy_record(existing, record)
+    return merged, order
+
+
 class SqlUserStore:
     """Database-backed user accounts.
 
@@ -568,40 +639,39 @@ class SqlUserStore:
             return None
         return self.encryption.encrypt(token, aad=oauth_token_aad(user_id))
 
-    def _row_to_user(self, row: RowMapping) -> OAuthUser:
-        token = ""
+    def _decrypt_row_token(self, row: RowMapping) -> str:
+        """Decrypt the stored GitHub token; an undecryptable token reads as empty."""
         ciphertext = row["github_token_ciphertext"]
-        if ciphertext:
-            try:
-                token = self.encryption.decrypt(ciphertext, aad=oauth_token_aad(row["id"]))
-            except Exception:
-                # A token that can no longer decrypt (e.g. key rotation)
-                # must not break sign-in; the user re-links on next OAuth.
-                token = ""
-        provider = row["provider"] or ""
-        provider_user_id = ""
-        if provider == PROVIDER_GITHUB:
-            provider_user_id = row["github_id"] or ""
-        elif provider == PROVIDER_GOOGLE:
-            provider_user_id = row["google_sub"] or ""
+        if not ciphertext:
+            return ""
+        try:
+            return self.encryption.decrypt(ciphertext, aad=oauth_token_aad(row["id"]))
+        except Exception:
+            # A token that can no longer decrypt (e.g. key rotation)
+            # must not break sign-in; the user re-links on next OAuth.
+            return ""
+
+    def _row_to_user(self, row: RowMapping) -> OAuthUser:
+        provider = _coalesce(row["provider"], "")
         return OAuthUser(
             id=row["id"],
             provider=provider,
-            provider_user_id=provider_user_id,
-            name=row["display_name"] or "",
-            email=row["email"] or "",
-            avatar_url=row["avatar_url"] or "",
-            github_access_token=token,
-            created_at=row["created_at"] or "",
-            updated_at=row["updated_at"] or "",
-            github_id=row["github_id"] or "",
-            github_username=row["github_username"] or "",
-            google_sub=row["google_sub"] or "",
-            plan=row["plan"] or PLAN_FREE,
-            stripe_customer_id=row["stripe_customer_id"] or "",
-            status=row["status"] or STATUS_ACTIVE,
+            provider_user_id=_row_provider_user_id(row, provider),
+            name=_coalesce(row["display_name"], ""),
+            email=_coalesce(row["email"], ""),
+            avatar_url=_coalesce(row["avatar_url"], ""),
+            github_access_token=self._decrypt_row_token(row),
+            created_at=_coalesce(row["created_at"], ""),
+            updated_at=_coalesce(row["updated_at"], ""),
+            github_id=_coalesce(row["github_id"], ""),
+            github_username=_coalesce(row["github_username"], ""),
+            google_sub=_coalesce(row["google_sub"], ""),
+            plan=_coalesce(row["plan"], PLAN_FREE),
+            stripe_customer_id=_coalesce(row["stripe_customer_id"], ""),
+            status=_coalesce(row["status"], STATUS_ACTIVE),
             is_admin=bool(row["is_admin"]),
-            last_login_at=row["last_login_at"] or "",
+            is_staff=bool(row.get("is_staff", False)),
+            last_login_at=_coalesce(row["last_login_at"], ""),
         )
 
     # -- reads --------------------------------------------------------
@@ -732,6 +802,7 @@ class SqlUserStore:
                     "plan": PLAN_FREE,
                     "status": STATUS_ACTIVE,
                     "is_admin": False,
+                    "is_staff": False,
                     "github_token_ciphertext": self._encrypt_token(user_id, github_access_token),
                     "created_at": now,
                     "updated_at": now,
@@ -794,6 +865,17 @@ class SqlUserStore:
                 raise LookupError("User not found")
             return self._get_or_raise(connection, user_id)
 
+    def set_staff(self, user_id: str, is_staff: bool) -> OAuthUser:
+        with self.engine.begin() as connection:
+            updated = connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(is_staff=is_staff, updated_at=_utcnow_iso())
+            )
+            if updated.rowcount != 1:
+                raise LookupError("User not found")
+            return self._get_or_raise(connection, user_id)
+
     def set_plan(self, user_id: str, plan: str) -> OAuthUser:
         with self.engine.begin() as connection:
             updated = connection.execute(
@@ -823,7 +905,46 @@ class SqlUserStore:
             connection.execute(update(users).where(users.c.id == user_id).values(**values))
             return self._get_or_raise(connection, user_id)
 
+    def scrub_underage(self, user_id: str) -> bool:
+        """Delete a just-created under-13 account (age-gate block).
+
+        Removes the entire row — PII, OAuth identities, and tokens. No
+        record of the signup attempt is retained.
+        """
+        with self.engine.begin() as connection:
+            exists = connection.execute(
+                select(users.c.id).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+            if exists is None:
+                return False
+            connection.execute(delete(users).where(users.c.id == user_id))
+            return True
+
+    def delete_user(self, user_id: str) -> bool:
+        """Permanently delete a user record (admin action)."""
+        return self.scrub_underage(user_id)
+
     # -- legacy import ------------------------------------------------
+
+    def _legacy_insert_values(self, record: OAuthUser) -> dict[str, Any]:
+        """Map a merged legacy record to users-table insert values."""
+        return {
+            "id": record.id,
+            "email": _normalize_email(record.email),
+            "display_name": record.name,
+            "avatar_url": record.avatar_url,
+            "provider": record.provider,
+            "plan": record.plan or PLAN_FREE,
+            "stripe_customer_id": record.stripe_customer_id or None,
+            "status": record.status or STATUS_ACTIVE,
+            "is_admin": bool(record.is_admin),
+            "is_staff": bool(getattr(record, "is_staff", False)),
+            "github_token_ciphertext": self._encrypt_token(record.id, record.github_access_token),
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "last_login_at": record.last_login_at or None,
+            **_effective_identity(record),
+        }
 
     def import_legacy_json(self, path: Path) -> int:
         """One-time import of a legacy ``oauth-users.json`` file.
@@ -838,49 +959,96 @@ class SqlUserStore:
         legacy = OAuthUserStore(path=path).load_all()
         if not legacy:
             return 0
-        merged: dict[str, OAuthUser] = {}
-        order: list[str] = []
-        for record in legacy:
-            key = _normalize_email(record.email) or f"{record.provider}:{record.provider_user_id}"
-            existing = merged.get(key)
-            if existing is None:
-                merged[key] = record
-                order.append(key)
-                continue
-            merged[key] = replace(
-                existing,
-                github_id=existing.github_id
-                or record.github_id
-                or (record.provider_user_id if record.provider == PROVIDER_GITHUB else ""),
-                github_username=existing.github_username or record.github_username,
-                google_sub=existing.google_sub
-                or record.google_sub
-                or (record.provider_user_id if record.provider == PROVIDER_GOOGLE else ""),
-                github_access_token=existing.github_access_token or record.github_access_token,
-            )
+        merged, order = _merge_legacy(legacy)
         with self.engine.begin() as connection:
             if self._count(connection) > 0:
                 return 0
             for key in order:
                 record = merged[key]
-                connection.execute(
-                    insert(users).values(
-                        id=record.id,
-                        email=_normalize_email(record.email),
-                        display_name=record.name,
-                        avatar_url=record.avatar_url,
-                        provider=record.provider,
-                        plan=record.plan or PLAN_FREE,
-                        stripe_customer_id=record.stripe_customer_id or None,
-                        status=record.status or STATUS_ACTIVE,
-                        is_admin=bool(record.is_admin),
-                        github_token_ciphertext=self._encrypt_token(
-                            record.id, record.github_access_token
-                        ),
-                        created_at=record.created_at,
-                        updated_at=record.updated_at,
-                        last_login_at=record.last_login_at or None,
-                        **_effective_identity(record),
-                    )
-                )
+                connection.execute(insert(users).values(**self._legacy_insert_values(record)))
         return len(order)
+
+
+class SqlComplianceRecordStore:
+    """SQL implementation of the append-only compliance record store."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(
+        self, *, user_id: str, record_type: str, payload: dict[str, Any] | None = None
+    ) -> ComplianceRecord:
+        from app.persistence.schema import compliance_records
+
+        record = ComplianceRecord(
+            record_id=uuid.uuid4().hex,
+            user_id=user_id,
+            record_type=record_type,
+            payload=dict(payload or {}),
+            created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(compliance_records).values(
+                    record_id=record.record_id,
+                    user_id=record.user_id,
+                    record_type=record.record_type,
+                    payload=record.payload,
+                    created_at=record.created_at,
+                )
+            )
+        return record
+
+    def latest(self, user_id: str, record_type: str) -> ComplianceRecord | None:
+        from app.persistence.schema import compliance_records
+
+        with self.engine.begin() as connection:
+            row = (
+                connection.execute(
+                    select(compliance_records)
+                    .where(
+                        compliance_records.c.user_id == user_id,
+                        compliance_records.c.record_type == record_type,
+                    )
+                    .order_by(compliance_records.c.created_at.desc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return ComplianceRecord(
+            record_id=row["record_id"],
+            user_id=row["user_id"],
+            record_type=row["record_type"],
+            payload=dict(row["payload"] or {}),
+            created_at=row["created_at"],
+        )
+
+    def history(self, user_id: str, record_type: str | None = None) -> list[ComplianceRecord]:
+        from app.persistence.schema import compliance_records
+
+        conditions = [compliance_records.c.user_id == user_id]
+        if record_type is not None:
+            conditions.append(compliance_records.c.record_type == record_type)
+        with self.engine.begin() as connection:
+            rows = (
+                connection.execute(
+                    select(compliance_records)
+                    .where(and_(*conditions))
+                    .order_by(compliance_records.c.created_at.asc())
+                )
+                .mappings()
+                .all()
+            )
+        return [
+            ComplianceRecord(
+                record_id=row["record_id"],
+                user_id=row["user_id"],
+                record_type=row["record_type"],
+                payload=dict(row["payload"] or {}),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]

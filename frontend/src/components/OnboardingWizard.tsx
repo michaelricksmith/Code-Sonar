@@ -13,8 +13,9 @@ import type { RepoOption } from "../api/auth";
 import { createScanJob, pollScanJob } from "../api/scanJobs";
 import type { ScanJobState } from "../api/scanJobs";
 import { isQuotaError } from "../api/errors";
-import { GRADE_TONE, GRADE_WORDS, gradeForScore, timeAgo, verdictForScore } from "../copy";
-import { ScoreDial } from "./ScoreDial";
+import { timeAgo, verdictForScore } from "../copy";
+import { VitalsTrace } from "./VitalsTrace";
+import { ScanTerminal } from "./ScanTerminal";
 
 type Step = "pick" | "scanning" | "revealing";
 
@@ -24,12 +25,6 @@ interface OnboardingWizardProps {
   /** Called with the error when the first scan hits a 402 quota limit. */
   onQuotaExceeded?: (e: unknown) => void;
 }
-
-const HUMAN_STEPS = [
-  "Reading your files…",
-  "Running 8 checks…",
-  "Tallying your score…",
-];
 
 function shortRepoName(fullName: string): string {
   const parts = fullName.split("/");
@@ -47,7 +42,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
   const [pickedRepo, setPickedRepo] = useState<string | null>(null);
   const [jobState, setJobState] = useState<ScanJobState | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [humanStep, setHumanStep] = useState(0);
   const [revealResult, setRevealResult] = useState<ScanResponse | null>(null);
   const pollRef = useRef<{ cancel: () => void } | null>(null);
 
@@ -57,13 +51,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
       .catch((e) => setReposError(e instanceof Error ? e.message : String(e)))
       .finally(() => setReposLoading(false));
   }, []);
-
-  // Rotate the human-readable step captions while the scan runs.
-  useEffect(() => {
-    if (step !== "scanning") return;
-    const timer = setInterval(() => setHumanStep((n) => (n + 1) % HUMAN_STEPS.length), 2600);
-    return () => clearInterval(timer);
-  }, [step]);
 
   useEffect(() => () => pollRef.current?.cancel(), []);
 
@@ -78,7 +65,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
     setStep("scanning");
     setScanError(null);
     setJobState(null);
-    setHumanStep(0);
     try {
       const jobId = await createScanJob(repo);
       const poll = pollScanJob(jobId, (state) => setJobState(state));
@@ -222,21 +208,8 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
             <i className="on" />
           </div>
           <h2>First scan is running…</h2>
-          <div className="sonar-ring-wrap">
-            <div className="sonar-ring" aria-hidden="true">
-              <div className="ring r1" />
-              <div className="ring r2" />
-              <div className="ring r3" />
-              <div className="core" />
-            </div>
-            <div className="scan-step">{jobState?.step || HUMAN_STEPS[humanStep]}</div>
-            <div className="scan-sub">
-              {pickedRepo ? <span className="mono">{pickedRepo}</span> : "Preparing…"} · nothing is changed in your repo
-            </div>
-            <div className="scan-progress" role="progressbar" aria-label="Scan progress">
-              <i style={{ width: `${Math.round((jobState?.progress ?? 0.15) * 100)}%` }} />
-            </div>
-          </div>
+          <ScanTerminal job={jobState} repoLabel={pickedRepo} />
+          <div className="scan-sub">nothing is changed in your repo</div>
         </div>
       )}
 
@@ -246,24 +219,6 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
 }
 
 function Reveal({ result }: { result: ScanResponse }) {
-  const [shown, setShown] = useState(0);
-  const target = result.score;
-
-  useEffect(() => {
-    let raf = 0;
-    const start = performance.now();
-    const duration = 1800;
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 4);
-      setShown(Math.round(target * eased));
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
-
-  const grade = gradeForScore(shown);
   const urgentCount = result.findings.filter((f) => f.severity === "critical").length;
 
   return (
@@ -275,16 +230,12 @@ function Reveal({ result }: { result: ScanResponse }) {
       </div>
       <h2>Your code has a score</h2>
       <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
-        <ScoreDial score={shown} width={220} id="revealGrad" />
-      </div>
-      <div className="reveal-num">{shown}</div>
-      <div style={{ textAlign: "center", marginTop: 10 }}>
-        <span className={`grade-chip tone-${GRADE_TONE[grade]}`}>Grade {grade} · {GRADE_WORDS[grade]}</span>
+        <VitalsTrace score={result.score} findings={result.findings} width={320} />
       </div>
       <div className="welcome-card">
         <b>Your code scored — here&rsquo;s what that means.</b>
         <br />
-        {verdictForScore(target, urgentCount)}
+        {verdictForScore(result.score, urgentCount)}
       </div>
     </div>
   );

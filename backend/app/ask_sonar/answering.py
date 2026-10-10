@@ -59,6 +59,84 @@ def _finding_label(finding: dict[str, Any]) -> str:
     return file_path
 
 
+@dataclass(frozen=True, slots=True)
+class _ScanSummary:
+    """Pre-extracted scan values a deterministic answer is built from."""
+
+    score: Any
+    grade: Any
+    finding_count: int
+    urgent: int
+    warning: int
+    has_top_findings: bool
+    top_label: str
+    top_message: str
+
+
+def _scan_summary(context: dict[str, Any]) -> _ScanSummary:
+    det = context.get("deterministic", {}) or {}
+    severity = det.get("severity_distribution", {}) or {}
+    top = det.get("top_findings", []) or []
+
+    top_label = _finding_label(top[0]) if top else "your top issue"
+    top_message = (top[0].get("message") or "") if top else ""
+    # Keep it to one sentence so the chat stays scannable.
+    if top_message:
+        top_message = top_message.split(".")[0].strip() + "."
+
+    return _ScanSummary(
+        score=det.get("score", "?"),
+        grade=det.get("grade", "?"),
+        finding_count=det.get("finding_count", 0),
+        urgent=severity.get("critical", 0) + severity.get("error", 0),
+        warning=severity.get("warning", 0),
+        has_top_findings=bool(top),
+        top_label=top_label,
+        top_message=top_message,
+    )
+
+
+def _mentions(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(k in text for k in keywords)
+
+
+def _answer_for_question(q: str, summary: _ScanSummary) -> str:
+    if _mentions(q, ("next", "start", "do now", "where do i", "what should")):
+        return (
+            f"Start with your {summary.urgent} urgent issues — they do the most damage "
+            f"to your score of {summary.score}. The top one is {summary.top_label}. "
+            f"{summary.top_message} "
+            f"Tap an issue and hit 'Fix this' for a step-by-step prompt, "
+            f"then re-scan to watch the score move."
+        )
+    if _mentions(q, ("break", "risk", "danger", "safe", "worried")):
+        return (
+            f"Your score is {summary.score} (grade {summary.grade}) "
+            f"with {summary.finding_count} issues. "
+            f"The {summary.urgent} urgent ones are the real break-risk — "
+            f"starting with {summary.top_label}. "
+            f"{summary.top_message} "
+            f"Fix the urgent list first and re-scan; each fix moves the score."
+        )
+    if _mentions(q, ("summar", "overview", "health", "how bad", "status")):
+        return (
+            f"Code health: score {summary.score} (grade {summary.grade}), "
+            f"{summary.finding_count} issues "
+            f"— {summary.urgent} urgent, {summary.warning} high. "
+            f"Biggest single item: {summary.top_label}. {summary.top_message}"
+        )
+    if summary.has_top_findings:
+        return (
+            f"Based on your latest scan (score {summary.score}, grade {summary.grade}): "
+            f"the top issue is {summary.top_label}. {summary.top_message} "
+            f"Open it and tap 'Fix this' for the step-by-step prompt."
+        )
+    return (
+        f"Your latest scan looks clean — score {summary.score} (grade {summary.grade}). "
+        f"Nothing urgent needs your attention right now."
+    )
+
+
 def deterministic_answer(question: str, context: dict[str, Any]) -> GroundedAnswer:
     """Answer from scan data when the LLM provider is unavailable.
 
@@ -66,58 +144,10 @@ def deterministic_answer(question: str, context: dict[str, Any]) -> GroundedAnsw
     grounded answer built from the deterministic scan results, so Ask
     Sonar never feels broken.
     """
-    det = context.get("deterministic", {}) or {}
-    score = det.get("score", "?")
-    grade = det.get("grade", "?")
-    finding_count = det.get("finding_count", 0)
-    severity = det.get("severity_distribution", {}) or {}
-    top = det.get("top_findings", []) or []
-
-    urgent = severity.get("critical", 0) + severity.get("error", 0)
-    top_label = _finding_label(top[0]) if top else "your top issue"
-    top_message = (top[0].get("message") or "") if top else ""
-    # Keep it to one sentence so the chat stays scannable.
-    if top_message:
-        top_message = top_message.split(".")[0].strip() + "."
-
+    summary = _scan_summary(context)
     q = question.lower().strip()
-
-    if any(k in q for k in ("next", "start", "do now", "where do i", "what should")):
-        answer = (
-            f"Start with your {urgent} urgent issues — they do the most damage "
-            f"to your score of {score}. The top one is {top_label}. "
-            f"{top_message} "
-            f"Tap an issue and hit 'Fix this' for a step-by-step prompt, "
-            f"then re-scan to watch the score move."
-        )
-    elif any(k in q for k in ("break", "risk", "danger", "safe", "worried")):
-        answer = (
-            f"Your score is {score} (grade {grade}) with {finding_count} issues. "
-            f"The {urgent} urgent ones are the real break-risk — "
-            f"starting with {top_label}. "
-            f"{top_message} "
-            f"Fix the urgent list first and re-scan; each fix moves the score."
-        )
-    elif any(k in q for k in ("summar", "overview", "health", "how bad", "status")):
-        answer = (
-            f"Code health: score {score} (grade {grade}), {finding_count} issues "
-            f"— {urgent} urgent, {severity.get('warning', 0)} high. "
-            f"Biggest single item: {top_label}. {top_message}"
-        )
-    elif top:
-        answer = (
-            f"Based on your latest scan (score {score}, grade {grade}): "
-            f"the top issue is {top_label}. {top_message} "
-            f"Open it and tap 'Fix this' for the step-by-step prompt."
-        )
-    else:
-        answer = (
-            f"Your latest scan looks clean — score {score} (grade {grade}). "
-            f"Nothing urgent needs your attention right now."
-        )
-
     return GroundedAnswer(
-        answer=answer,
+        answer=_answer_for_question(q, summary),
         used_sources=("deterministic",),
         provider_name="deterministic",
         model_name="scan-data",

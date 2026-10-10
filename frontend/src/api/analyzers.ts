@@ -236,6 +236,21 @@ export async function fetchHistoryCount(): Promise<number> {
   return typeof data.count === "number" ? data.count : 0;
 }
 
+/**
+ * Fetch one scan by id. Returns null when the server has no such scan or
+ * the signed-in user may not access it (e.g. a cached scan from a different
+ * account) — the caller should drop the stale cache instead of rendering a
+ * phantom scan that Ask Sonar and other server-backed features can't use.
+ * Throws on transport/server errors so callers can stay offline-friendly.
+ */
+export async function fetchScan(scanId: string): Promise<ScanResponse | null> {
+  const res = await fetch(`${API_BASE}/history/${encodeURIComponent(scanId)}`);
+  if (res.status === 404) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? `Scan fetch failed (HTTP ${res.status})`);
+  return data as ScanResponse;
+}
+
 export async function runScan(req: ScanRequest): Promise<ScanResponse> {
   const res = await fetch(`${API_BASE}/scan`, {
     method: "POST",

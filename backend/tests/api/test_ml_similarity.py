@@ -83,14 +83,42 @@ def test_similar_scans_returns_404_when_scan_features_missing() -> None:
     assert response.json()["detail"]["code"] == "scan_features_not_found"
 
 
-def test_similar_scans_returns_historical_neighbors_without_self() -> None:
+def test_similar_scans_returns_historical_neighbors_without_self(monkeypatch, tmp_path) -> None:
+    from types import SimpleNamespace
+
+    import app.main as main_module
+    import app.oauth as oauth_module
+    from app.history import InMemoryHistoryStore, build_scan_record
+    from app.scoring.engine import calculate_score
+
     rows = [_row(1, 0.1, 0), _row(2, 0.2, 0), _row(3, 0.8, 1)]
     index = SimilarityIndex()
     index.fit(rows)
     register_similarity_index("debt_risk", index)
     set_feature_provider(lambda scan_id: _features(0.1) if scan_id == "scan-1" else None)
 
-    response = TestClient(app).get("/api/ml/similar-scans/scan-1?limit=2")
+    # Similar cases resolve against real records: only scans owned by the
+    # signed-in user are returned.
+    store = InMemoryHistoryStore()
+    previous = main_module.get_history_store()
+    main_module.set_history_store(store)
+    monkeypatch.setattr(oauth_module, "current_user", lambda r: SimpleNamespace(id="u1"))
+    try:
+        for i in (2, 3):
+            store.append(
+                build_scan_record(
+                    repository_id="repo-x",
+                    repository_path="/tmp/repo-x",
+                    findings=[],
+                    scoring=calculate_score([]),
+                    scan_id=f"scan-{i}",
+                    scanned_at="2026-09-30T00:00:00+00:00",
+                    owner_user_id="u1",
+                )
+            )
+        response = TestClient(app).get("/api/ml/similar-scans/scan-1?limit=2")
+    finally:
+        main_module.set_history_store(previous)
 
     assert response.status_code == 200
     payload = response.json()
@@ -98,3 +126,45 @@ def test_similar_scans_returns_historical_neighbors_without_self() -> None:
     assert payload["deterministic_score_unchanged"] is True
     assert [case["scan_id"] for case in payload["similar_scans"]] == ["scan-2", "scan-3"]
     assert payload["similar_scans"][0]["label_trust_tier"] == "proxy"
+
+
+def test_similar_scans_filters_out_other_users_cases(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import app.main as main_module
+    import app.oauth as oauth_module
+    from app.history import InMemoryHistoryStore, build_scan_record
+    from app.scoring.engine import calculate_score
+
+    rows = [_row(1, 0.1, 0), _row(2, 0.2, 0), _row(3, 0.8, 1)]
+    index = SimilarityIndex()
+    index.fit(rows)
+    register_similarity_index("debt_risk", index)
+    set_feature_provider(lambda scan_id: _features(0.1) if scan_id == "scan-1" else None)
+
+    store = InMemoryHistoryStore()
+    previous = main_module.get_history_store()
+    main_module.set_history_store(store)
+    monkeypatch.setattr(oauth_module, "current_user", lambda r: SimpleNamespace(id="u1"))
+    try:
+        owners = {2: "u1", 3: "u2"}
+        for i, owner in owners.items():
+            store.append(
+                build_scan_record(
+                    repository_id="repo-x",
+                    repository_path="/tmp/repo-x",
+                    findings=[],
+                    scoring=calculate_score([]),
+                    scan_id=f"scan-{i}",
+                    scanned_at="2026-09-30T00:00:00+00:00",
+                    owner_user_id=owner,
+                )
+            )
+        response = TestClient(app).get("/api/ml/similar-scans/scan-1?limit=2")
+    finally:
+        main_module.set_history_store(previous)
+
+    assert response.status_code == 200
+    payload = response.json()
+    # scan-3 belongs to another user: excluded, not leaked via its scan_id.
+    assert [case["scan_id"] for case in payload["similar_scans"]] == ["scan-2"]

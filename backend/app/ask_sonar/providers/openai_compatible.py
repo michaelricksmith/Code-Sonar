@@ -31,7 +31,12 @@ SYSTEM_INSTRUCTION = (
     "in plain language for a non-technical user — avoid jargon and do not show "
     "code unless the user asks for it. Use only the supplied JSON context. "
     "Deterministic Code Sonar facts are authoritative; ML content is advisory "
-    "only. Never invent repository facts. Return JSON only with exactly two "
+    "only. Never invent repository facts. "
+    "When the user asks how fixing something will affect their score, use the "
+    "score_projection numbers (current_score, projected_score, score_gain) — "
+    "talk about the 300-850 score, not debt points. Debt points are an internal "
+    "metric; users think in score. "
+    "Return JSON only with exactly two "
     "keys: answer (string) and used_sources (array of source names). Every "
     "used source must come from allowed_sources."
 )

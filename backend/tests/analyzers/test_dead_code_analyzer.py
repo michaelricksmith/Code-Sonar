@@ -19,12 +19,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.analyzers.dead_code import DeadCodeAnalyzer
-from app.models.finding import FindingCategory
+from app.models.finding import Finding, FindingCategory
 
 
 def _write(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
+
+
+def _assert_return_unreachable_block(finding: Finding) -> None:
+    """Shared assertions for the single unreachable block after ``return``."""
+    assert finding.category == FindingCategory.MAINTAINABILITY
+    assert finding.metadata["rule"] == "unreachable"
+    assert finding.metadata["terminal_kind"] == "return"
+    assert finding.metadata["stmt_count"] == 3
+    assert finding.line_start == 3
+    assert finding.line_end == 5
 
 
 class TestUnreachableCode:
@@ -42,12 +52,7 @@ class TestUnreachableCode:
         assert "dead_code:unreachable" in rules
         for f in findings:
             if f.rule_id == "dead_code:unreachable":
-                assert f.category == FindingCategory.MAINTAINABILITY
-                assert f.metadata["rule"] == "unreachable"
-                assert f.metadata["terminal_kind"] == "return"
-                assert f.metadata["stmt_count"] == 3
-                assert f.line_start == 3
-                assert f.line_end == 5
+                _assert_return_unreachable_block(f)
 
     def test_statements_after_raise_flagged(self, tmp_path):
         _write(

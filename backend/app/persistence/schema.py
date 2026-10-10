@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Float,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -58,6 +59,7 @@ for column in (
     Column("grade", String(8), nullable=False),
     Column("total_debt_points", Integer, nullable=False),
     Column("finding_count", Integer, nullable=False),
+    Column("commit_sha", String(64), nullable=True),
     Column("aggregates", JSON, nullable=False),
 ):
     scans.append_column(column)
@@ -197,6 +199,25 @@ privacy_audit_events = Table(
     ForeignKeyConstraint(["tenant_id"], ["tenants.tenant_id"], ondelete="CASCADE"),
 )
 
+# Compliance records: append-only administrative proof (auto-renewal consent,
+# cancellations, marketing consent, age-gate confirmations, GPC opt-outs).
+# No tenant FK: records are keyed by user id and survive tenant erasure.
+compliance_records = Table(
+    "compliance_records",
+    metadata,
+    Column("record_id", String(128), primary_key=True),
+    Column("user_id", String(128), nullable=False),
+    Column("record_type", String(64), nullable=False),
+    Column("payload", JSON, nullable=False),
+    Column("created_at", String(64), nullable=False),
+)
+Index(
+    "ix_compliance_records_user_type_time",
+    compliance_records.c.user_id,
+    compliance_records.c.record_type,
+    compliance_records.c.created_at,
+)
+
 # Receipts deliberately have no tenant FK or tenant identifier: they survive crypto-erasure
 # as non-content proof that an operator completed a request.
 deletion_receipts = Table(
@@ -208,3 +229,16 @@ deletion_receipts = Table(
     Column("schema_version", String(32), nullable=False),
     Column("crypto_erasure_status", String(32), nullable=False),
 )
+
+
+# Cross-worker rate-limit buckets. Written on every rate-limited request when
+# SQL persistence is configured; the limiter falls back to process-local
+# memory when the database is unavailable, so this table is best-effort.
+rate_limit_hits = Table(
+    "rate_limit_hits",
+    metadata,
+    Column("hit_id", Integer, primary_key=True, autoincrement=True),
+    Column("bucket_key", String(255), nullable=False),
+    Column("hit_at", Float, nullable=False),
+)
+Index("ix_rate_limit_hits_bucket_time", rate_limit_hits.c.bucket_key, rate_limit_hits.c.hit_at)

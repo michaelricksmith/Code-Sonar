@@ -125,6 +125,11 @@ export function AskSonarDrawer({
       if (onQuotaExceeded && isQuotaError(e)) {
         // Quota nudge modal carries the message; keep the drawer quiet.
         onQuotaExceeded(e);
+      } else if (e instanceof Error && /scan not found/i.test(e.message)) {
+        // The displayed scan is no longer accessible server-side (e.g. it
+        // was deleted, or belongs to a different signed-in account).
+        // Point the user at the fix instead of the cryptic backend message.
+        setError("This scan isn't available anymore. Run a fresh scan and ask again.");
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }

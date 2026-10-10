@@ -101,18 +101,38 @@ def test_same_scan_produces_identical_feature_payload() -> None:
     assert first == second
 
 
-def test_feature_values_capture_scan_aggregates() -> None:
+def test_feature_values_capture_counts() -> None:
     vector = extract_scan_features(_record())
 
     assert vector.finding_count == 2.0
     assert vector.total_debt_points == 15.0
+
+
+def test_feature_values_capture_severity_breakdown() -> None:
+    vector = extract_scan_features(_record())
+
     assert vector.severity_warning == 1.0
     assert vector.severity_critical == 1.0
+
+
+def test_feature_values_capture_category_breakdown() -> None:
+    vector = extract_scan_features(_record())
+
     assert vector.category_complexity == 1.0
     assert vector.category_security == 1.0
+
+
+def test_feature_values_capture_source_breakdown() -> None:
+    vector = extract_scan_features(_record())
+
     assert vector.source_findings == 1.0
     assert vector.test_findings == 1.0
     assert vector.fixture_findings == 0.0
+
+
+def test_feature_values_capture_summary_stats() -> None:
+    vector = extract_scan_features(_record())
+
     assert vector.mean_confidence == 0.9
     assert vector.mean_debt_points == 7.5
     assert vector.max_finding_risk == 40.0

@@ -23,40 +23,112 @@ SCAN_ROOT_DIR: Path = Path(
 # outside the allowed scan root".
 REMEDIATION_WORKTREES_DIR: Path = SCAN_ROOT_DIR / "remediation-worktrees"
 
-EXCLUDED_DIRS: frozenset[str] = frozenset({
-    ".git", ".svn", ".hg",
-    "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    "venv", "env", ".venv", "virtualenv",
-    "dist", "build", "target", "out", "htmlcov", "coverage",
-    ".next", ".nuxt", ".output",
-    ".smoke-out", ".code-sonar", ".codesonar",
-})
+EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".svn",
+        ".hg",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "venv",
+        "env",
+        ".venv",
+        "virtualenv",
+        "dist",
+        "build",
+        "target",
+        "out",
+        "htmlcov",
+        "coverage",
+        ".next",
+        ".nuxt",
+        ".output",
+        ".smoke-out",
+        ".code-sonar",
+        ".codesonar",
+    }
+)
 
-GENERATED_FILE_NAMES: frozenset[str] = frozenset({
-    ".coverage",
-    "coverage.xml",
-    "coverage.json",
-    "junit.xml",
-    "test-results.xml",
-})
+GENERATED_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        ".coverage",
+        "coverage.xml",
+        "coverage.json",
+        "junit.xml",
+        "test-results.xml",
+    }
+)
 
-BINARY_EXTENSIONS: frozenset[str] = frozenset({
-    ".exe", ".dll", ".so", ".dylib", ".bin", ".wasm",
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
-    ".mp4", ".mov", ".avi", ".mkv",
-    ".mp3", ".wav", ".flac",
-    ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".lock", ".log", ".tmp", ".swp", ".bak",
-    ".pyc", ".pyo", ".class", ".jar",
-    ".ttf", ".woff", ".woff2", ".eot",
-})
+BINARY_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".bin",
+        ".wasm",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".ico",
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".mp3",
+        ".wav",
+        ".flac",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".7z",
+        ".rar",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".lock",
+        ".log",
+        ".tmp",
+        ".swp",
+        ".bak",
+        ".pyc",
+        ".pyo",
+        ".class",
+        ".jar",
+        ".ttf",
+        ".woff",
+        ".woff2",
+        ".eot",
+    }
+)
 
-LOCKFILE_NAMES: frozenset[str] = frozenset({
-    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
-    "bun.lockb", "poetry.lock", "Pipfile.lock", "composer.lock", "Cargo.lock",
-    "Gemfile.lock", "pdm.lock", "uv.lock",
-})
+LOCKFILE_NAMES: frozenset[str] = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lockb",
+        "poetry.lock",
+        "Pipfile.lock",
+        "composer.lock",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "pdm.lock",
+        "uv.lock",
+    }
+)
 
 
 class RepositoryValidationError(ValueError):
@@ -78,14 +150,10 @@ def validate_repo_path(
     try:
         resolved = p.resolve(strict=True)
     except (FileNotFoundError, RuntimeError) as exc:
-        raise RepositoryValidationError(
-            "invalid repository path (not found): " + text
-        ) from exc
+        raise RepositoryValidationError("invalid repository path (not found): " + text) from exc
 
     if not resolved.is_dir():
-        raise RepositoryValidationError(
-            "invalid repository path (not a directory): " + text
-        )
+        raise RepositoryValidationError("invalid repository path (not a directory): " + text)
 
     # Containment is the safe default. The escape hatch is intentionally named
     # and limited to explicit local development use.
@@ -95,9 +163,7 @@ def validate_repo_path(
         else enforce_root
     )
     if enforce:
-        configured_root = Path(
-            os.environ.get("CODESONAR_SCAN_ROOT", str(SCAN_ROOT_DIR))
-        )
+        configured_root = Path(os.environ.get("CODESONAR_SCAN_ROOT", str(SCAN_ROOT_DIR)))
         root = (scan_root or configured_root).expanduser().resolve()
         try:
             resolved.relative_to(root)

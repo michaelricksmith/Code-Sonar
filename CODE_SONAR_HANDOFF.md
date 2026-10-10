@@ -2,6 +2,55 @@
 
 **Created, built, and owned by Michael Smith (GitHub: `michaelricksmith`). Copyright © 2026 Michael Smith. All rights reserved.**
 
+## 2026-09-28 — Email transport hardened (unmerged)
+
+Branch `feature/email-transport`: provider-agnostic `EmailTransport`
+(`log` default, `smtp`, `resend` = Resend SMTP profile at
+`smtp.resend.com:587`, user `resend`, `RESEND_API_KEY` as password);
+new `EMAIL_*` env names (legacy `SONAR_*` aliases kept); `Message-ID` +
+`Date` on every message; one-click unsubscribe headers fixed
+(double-angle-bracket bug); bounded SMTP retries with backoff; send
+logging is routing metadata only. Fixed the `$$7` amount bug —
+receipts render `$7/month`. New `EMAIL-SETUP.md` documents the
+founder's Resend + Render env steps (waiting on `codevitals.tech`).
+17 new tests; full backend suite 719 passed/1 skipped, ruff + strict
+mypy clean. **Still unverified:** real send with a configured provider;
+sandbox end-to-end purchase → webhook → receipt.**
+
+## 2026-09-28 — Pre-public compliance (merged, deployed)
+
+Branch `feature/prelaunch-compliance` → PR #85 (CI fully green: backend
+tests+lint, frontend build+typecheck, self-scan smoke) → squash-merged
+as `be2ea75`. Render deploy `dep-dastk2jncjis73esvtg0` live;
+production `/health` 200, Alembic `20260927_0005` applied at startup
+(runtime fail-closed pin), new frontend bundle (`index-CEY5vQAB.js`)
+serving with compliance code.
+
+Branch `feature/prelaunch-compliance` implements the launch compliance
+surface on top of #77 billing. Backend: append-only `compliance_records`
+table (Alembic `20260927_0005`, revision pin bumped; JSON fallback when
+SQL is off), compliance API (`/api/compliance/status|age-gate|
+age-gate/block|marketing-consent|gpc|unsubscribe/{token}|
+reminders/annual`), checkout gated on `autorenew_consent: true` with a
+timestamped consent record, in-app cancel/resume + subscription state,
+post-purchase receipt and cancellation-confirmation transactional
+emails (`SONAR_EMAIL_TRANSPORT` log/smtp/resend; RFC 8058 one-click
+unsubscribe), neutral age gate (13+/18+; under-13 signups deleted, no
+attempt record), marketing opt-in unchecked by default, GPC honored,
+annual reminders via `scripts/annual_reminders.py --list/--send`.
+Frontend: consent checkbox + disclosure on the pricing page, subscription
+panel with two-step in-app cancel/resume, age gate on first sign-in,
+draft legal pages at `#/legal/terms|privacy|accessibility` (Terms and
+Privacy now carry the full founder drafts in-app, still pending
+legal review), footer Terms/Privacy/Accessibility links, a11y pass
+(skip link, landmarks, focus-visible). 25 new compliance tests; ruff +
+strict mypy clean; full backend suite green except the 4 known Ask
+Sonar failures on main. Also carries the one-line `answering.py`
+`str(finding["file_path"])` mypy fix (PR #84's fix, not in this
+branch's base). **Still unverified:** sandbox end-to-end purchase →
+webhook → receipt; real email provider not configured (log transport
+default); legal pages are drafts awaiting Michael's review.
+
 ## 2026-09-26 — Stripe billing is live (test mode)
 
 Billing backend (#77) plus two deploy fixes (#78, #79) are merged and

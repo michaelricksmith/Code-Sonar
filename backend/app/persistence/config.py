@@ -67,41 +67,54 @@ def persistence_config_from_env() -> PersistenceConfig:
     return PersistenceConfig(raw_url, root)
 
 
-def validate_data_root(root: Path, *, create: bool = True, shared: bool = False) -> Path:
-    """Reject link-based roots and restrict newly-created POSIX permissions."""
+def _reject_link_root(root: Path) -> None:
     if root.exists() and _is_link_or_reparse(root):
         raise RuntimeError("CODESONAR_DATA_ROOT must not be a symlink or reparse point")
+
+
+def _harden_posix_data_root(resolved: Path, shared: bool) -> None:
+    mode = stat.S_IMODE(resolved.stat().st_mode)
+    if not mode & 0o077:
+        return
+    # Try to fix permissions first; only raise if chmod fails or
+    # if shared mode requires explicit operator action.
+    try:
+        resolved.chmod(0o700)
+        mode = stat.S_IMODE(resolved.stat().st_mode)
+    except OSError:
+        pass
+    if mode & 0o077 and shared:
+        raise RuntimeError("CODESONAR_DATA_ROOT permissions must be 0700 or stricter")
+    if mode & 0o077:
+        resolved.chmod(0o700)
+
+
+def _check_windows_data_root(resolved: Path) -> None:
+    completed = subprocess.run(
+        ["icacls", str(resolved)], capture_output=True, text=True, check=False, timeout=10
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("Unable to verify CODESONAR_DATA_ROOT Windows ACL")
+    broad_principals = ("everyone:", "builtin\\users:", "authenticated users:")
+    insecure = any(
+        any(principal in line.lower() for principal in broad_principals)
+        and any(marker in line.lower() for marker in ("(f)", "(m)", "(w)"))
+        for line in completed.stdout.splitlines()
+    )
+    if insecure:
+        raise RuntimeError("CODESONAR_DATA_ROOT grants broad Windows write access")
+
+
+def validate_data_root(root: Path, *, create: bool = True, shared: bool = False) -> Path:
+    """Reject link-based roots and restrict newly-created POSIX permissions."""
+    _reject_link_root(root)
     if create:
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
     resolved = root.resolve(strict=True)
     if os.name != "nt":
-        mode = stat.S_IMODE(resolved.stat().st_mode)
-        if mode & 0o077:
-            # Try to fix permissions first; only raise if chmod fails or
-            # if shared mode requires explicit operator action.
-            try:
-                resolved.chmod(0o700)
-                mode = stat.S_IMODE(resolved.stat().st_mode)
-            except OSError:
-                pass
-            if mode & 0o077 and shared:
-                raise RuntimeError("CODESONAR_DATA_ROOT permissions must be 0700 or stricter")
-            if mode & 0o077:
-                resolved.chmod(0o700)
+        _harden_posix_data_root(resolved, shared)
     elif shared:
-        completed = subprocess.run(
-            ["icacls", str(resolved)], capture_output=True, text=True, check=False, timeout=10
-        )
-        if completed.returncode != 0:
-            raise RuntimeError("Unable to verify CODESONAR_DATA_ROOT Windows ACL")
-        broad_principals = ("everyone:", "builtin\\users:", "authenticated users:")
-        insecure = any(
-            any(principal in line.lower() for principal in broad_principals)
-            and any(marker in line.lower() for marker in ("(f)", "(m)", "(w)"))
-            for line in completed.stdout.splitlines()
-        )
-        if insecure:
-            raise RuntimeError("CODESONAR_DATA_ROOT grants broad Windows write access")
+        _check_windows_data_root(resolved)
     return resolved
 
 

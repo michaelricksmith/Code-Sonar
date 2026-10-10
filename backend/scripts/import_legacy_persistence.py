@@ -36,7 +36,7 @@ def _rows(path: Path) -> list[dict[str, Any]]:
     return [dict(item) for item in payload]
 
 
-def main() -> int:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tenant", required=True, help="Operator-selected destination tenant")
     parser.add_argument(
@@ -52,100 +52,158 @@ def main() -> int:
         ),
     )
     parser.add_argument("--source", required=True, type=Path)
-    args = parser.parse_args()
-    source = args.source.resolve(strict=True)
+    return parser.parse_args()
+
+
+def _load_rows(source_path: Path) -> tuple[Path, str, list[dict[str, Any]]]:
+    source = source_path.resolve(strict=True)
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    rows = _rows(source)
+    return source, digest, _rows(source)
+
+
+def _already_imported(connection: Any, tenant: str, digest: str, row_count: int) -> bool:
+    prior = connection.execute(
+        select(migration_ledger.c.record_count).where(
+            migration_ledger.c.tenant_id == tenant,
+            migration_ledger.c.source_sha256 == digest,
+        )
+    ).scalar_one_or_none()
+    if prior is None:
+        return False
+    if prior != row_count:
+        raise RuntimeError("Legacy import ledger count mismatch")
+    print(json.dumps({"status": "already_imported", "count": prior, "sha256": digest}))
+    return True
+
+
+def _import_history_rows(connection: Any, persistence: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        row["tenant_id"] = tenant
+        persistence.history._append(connection, ScanRecord.from_dict(row))
+
+
+def _import_project_rows(connection: Any, persistence: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        row["tenant_id"] = tenant
+        persistence.projects._upsert(connection, ProjectRecord(**row))
+
+
+def _import_github_installations(connection: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    connection.execute(
+        insert(github_installations),
+        [
+            {
+                **row,
+                "tenant_id": tenant,
+                "installation_id": str(row["installation_id"]),
+            }
+            for row in rows
+        ],
+    )
+
+
+def _import_webhook_deliveries(connection: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    connection.execute(
+        insert(webhook_deliveries),
+        [
+            {
+                "tenant_id": tenant,
+                "delivery_id": row["delivery_id"],
+                "payload": {**row, "tenant_id": tenant},
+            }
+            for row in rows
+        ],
+    )
+
+
+def _import_webhook_jobs(connection: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    connection.execute(
+        insert(webhook_jobs),
+        [
+            {
+                "tenant_id": tenant,
+                "job_id": row["job_id"],
+                "delivery_id": row["delivery_id"],
+                "project_id": row["project_id"],
+                "payload": {**row, "tenant_id": tenant},
+                "state": row["state"],
+            }
+            for row in rows
+        ],
+    )
+
+
+def _import_remediation_outcomes(connection: Any, tenant: str, rows: list[dict[str, Any]]) -> None:
+    connection.execute(
+        insert(remediation_outcomes),
+        [
+            {
+                "tenant_id": tenant,
+                "outcome_id": row["outcome_id"],
+                "repository_id": row["repository_id"],
+                "before_scan_id": row["before_scan_id"],
+                "after_scan_id": row["after_scan_id"],
+                "payload": row,
+            }
+            for row in rows
+        ],
+    )
+
+
+def _import_kind(connection: Any, persistence: Any, tenant: str, kind: str, rows: list[dict[str, Any]]) -> None:
+    if kind == "history":
+        _import_history_rows(connection, persistence, tenant, rows)
+    elif kind == "projects":
+        _import_project_rows(connection, persistence, tenant, rows)
+    elif kind == "github-installations":
+        _import_github_installations(connection, tenant, rows)
+    elif kind == "webhook-deliveries":
+        _import_webhook_deliveries(connection, tenant, rows)
+    elif kind == "webhook-jobs":
+        _import_webhook_jobs(connection, tenant, rows)
+    else:
+        _import_remediation_outcomes(connection, tenant, rows)
+
+
+def _record_ledger_entry(connection: Any, tenant: str, source: Path, digest: str, row_count: int) -> None:
+    connection.execute(
+        insert(migration_ledger).values(
+            import_id=uuid.uuid4().hex,
+            tenant_id=tenant,
+            source_path=str(source),
+            source_sha256=digest,
+            record_count=row_count,
+            imported_at=datetime.now(timezone.utc).isoformat(),
+        )
+    )
+
+
+def _import_rows(
+    connection: Any,
+    persistence: Any,
+    tenant: str,
+    kind: str,
+    source: Path,
+    digest: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    if _already_imported(connection, tenant, digest, len(rows)):
+        return
+    _tenant(connection, tenant)
+    _import_kind(connection, persistence, tenant, kind, rows)
+    _record_ledger_entry(connection, tenant, source, digest, len(rows))
+
+
+def main() -> int:
+    args = _parse_args()
+    source, digest, rows = _load_rows(args.source)
     persistence = configure_persistence_from_env()
     if persistence is None:
         raise RuntimeError("Legacy import requires configured SQL persistence")
     tenant_token = bind_tenant(args.tenant)
     try:
         with persistence.engine.begin() as connection:
-            prior = connection.execute(
-                select(migration_ledger.c.record_count).where(
-                    migration_ledger.c.tenant_id == args.tenant,
-                    migration_ledger.c.source_sha256 == digest,
-                )
-            ).scalar_one_or_none()
-            if prior is not None:
-                if prior != len(rows):
-                    raise RuntimeError("Legacy import ledger count mismatch")
-                print(json.dumps({"status": "already_imported", "count": prior, "sha256": digest}))
-                return 0
-            _tenant(connection, args.tenant)
-            if args.kind == "history":
-                for row in rows:
-                    row["tenant_id"] = args.tenant
-                    persistence.history._append(connection, ScanRecord.from_dict(row))
-            elif args.kind == "projects":
-                for row in rows:
-                    row["tenant_id"] = args.tenant
-                    persistence.projects._upsert(connection, ProjectRecord(**row))
-            elif args.kind == "github-installations":
-                connection.execute(
-                    insert(github_installations),
-                    [
-                        {
-                            **row,
-                            "tenant_id": args.tenant,
-                            "installation_id": str(row["installation_id"]),
-                        }
-                        for row in rows
-                    ],
-                )
-            elif args.kind == "webhook-deliveries":
-                connection.execute(
-                    insert(webhook_deliveries),
-                    [
-                        {
-                            "tenant_id": args.tenant,
-                            "delivery_id": row["delivery_id"],
-                            "payload": {**row, "tenant_id": args.tenant},
-                        }
-                        for row in rows
-                    ],
-                )
-            elif args.kind == "webhook-jobs":
-                connection.execute(
-                    insert(webhook_jobs),
-                    [
-                        {
-                            "tenant_id": args.tenant,
-                            "job_id": row["job_id"],
-                            "delivery_id": row["delivery_id"],
-                            "project_id": row["project_id"],
-                            "payload": {**row, "tenant_id": args.tenant},
-                            "state": row["state"],
-                        }
-                        for row in rows
-                    ],
-                )
-            else:
-                connection.execute(
-                    insert(remediation_outcomes),
-                    [
-                        {
-                            "tenant_id": args.tenant,
-                            "outcome_id": row["outcome_id"],
-                            "repository_id": row["repository_id"],
-                            "before_scan_id": row["before_scan_id"],
-                            "after_scan_id": row["after_scan_id"],
-                            "payload": row,
-                        }
-                        for row in rows
-                    ],
-                )
-            connection.execute(
-                insert(migration_ledger).values(
-                    import_id=uuid.uuid4().hex,
-                    tenant_id=args.tenant,
-                    source_path=str(source),
-                    source_sha256=digest,
-                    record_count=len(rows),
-                    imported_at=datetime.now(timezone.utc).isoformat(),
-                )
-            )
+            _import_rows(connection, persistence, args.tenant, args.kind, source, digest, rows)
     finally:
         reset_tenant(tenant_token)
     print(json.dumps({"status": "imported", "count": len(rows), "sha256": digest}))

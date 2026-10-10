@@ -29,6 +29,72 @@ def _write(path: Path, body: str) -> None:
     path.write_text(textwrap.dedent(body), encoding="utf-8")
 
 
+def _write_function_with_branches(path: Path, branches: int) -> None:
+    """Write a module holding one function with `branches` `if` decisions."""
+    lines = ["def f(x):", "    y = 0"]
+    for i in range(branches):
+        lines.append(f"    if x == {i}: y = {i}")
+    lines.append("    return y")
+    _write(path, "\n".join(lines) + "\n")
+
+
+def _analyze_with_branches(tmp_path: Path, branches: int, threshold: int = 10):
+    """Write a branched function to m.py and analyze the directory."""
+    _write_function_with_branches(tmp_path / "m.py", branches)
+    return CyclomaticComplexityAnalyzer(threshold=threshold).analyze(tmp_path)
+
+
+def _assert_over_threshold_finding_identity(f) -> None:
+    assert f.category == FindingCategory.COMPLEXITY
+    assert f.severity in (
+        FindingSeverity.WARNING,
+        FindingSeverity.ERROR,
+        FindingSeverity.CRITICAL,
+    )
+    assert f.analyzer == "cyclomatic_complexity"
+    assert f.rule_id == "cyclomatic_complexity:over-threshold"
+    assert f.symbol == "f"
+    assert f.file_path == "m.py"
+
+
+def _assert_over_threshold_finding_payload(f) -> None:
+    assert f.metadata["complexity"] > DEFAULT_COMPLEXITY_THRESHOLD
+    assert f.metadata["threshold"] == DEFAULT_COMPLEXITY_THRESHOLD
+    assert f.suggestion
+    assert f.debt_points > 0
+    assert f.evidence
+
+
+def _alpha_findings(findings):
+    return [f for f in findings if f.symbol == "alpha"]
+
+
+def _sorted_finding_ids(findings):
+    return sorted(f.id for f in findings)
+
+
+def _strip_detected_at(findings):
+    return [
+        {k: v for k, v in f.model_dump().items() if k != "detected_at"}
+        for f in findings
+    ]
+
+
+def _write_alpha_zeta_pair(tmp_path: Path) -> None:
+    """Write a.py (alpha before zeta) and b.py (zeta before alpha)."""
+    body_a = ["def alpha(x):", "    y = 0"]
+    for i in range(13):
+        body_a.append(f"    if x == {i}: y = {i}")
+    body_a += ["    return y", "", "def zeta(x):", "    return x + 1"]
+    _write(tmp_path / "a.py", "\n".join(body_a) + "\n")
+
+    body_b = ["def zeta(x):", "    return x + 1", "", "def alpha(x):", "    y = 0"]
+    for i in range(13):
+        body_b.append(f"    if x == {i}: y = {i}")
+    body_b += ["    return y"]
+    _write(tmp_path / "b.py", "\n".join(body_b) + "\n")
+
+
 class TestCyclomaticComplexityAnalyzer:
 
     def test_simple_function_no_finding(self, tmp_path):
@@ -74,31 +140,10 @@ class TestCyclomaticComplexityAnalyzer:
 
     def test_function_slightly_above_threshold_warning(self, tmp_path):
         # 12 decisions → CC ≈ 13 ≥ 11 (threshold+1) → WARNING.
-        body_lines = ["def f(x):", "    y = 0"]
-        for i in range(12):
-            body_lines.append(f"    if x == {i}: y = {i}")
-        body_lines.append("    return y")
-        _write(tmp_path / "m.py", "\n".join(body_lines) + "\n")
-
-        analyzer = CyclomaticComplexityAnalyzer(threshold=10)
-        findings = analyzer.analyze(tmp_path)
+        findings = _analyze_with_branches(tmp_path, 12)
         assert len(findings) == 1
-        f = findings[0]
-        assert f.category == FindingCategory.COMPLEXITY
-        assert f.severity in (
-            FindingSeverity.WARNING,
-            FindingSeverity.ERROR,
-            FindingSeverity.CRITICAL,
-        )
-        assert f.analyzer == "cyclomatic_complexity"
-        assert f.rule_id == "cyclomatic_complexity:over-threshold"
-        assert f.symbol == "f"
-        assert f.metadata["complexity"] > DEFAULT_COMPLEXITY_THRESHOLD
-        assert f.metadata["threshold"] == DEFAULT_COMPLEXITY_THRESHOLD
-        assert f.suggestion
-        assert f.debt_points > 0
-        assert f.evidence
-        assert f.file_path == "m.py"
+        _assert_over_threshold_finding_identity(findings[0])
+        _assert_over_threshold_finding_payload(findings[0])
 
     def test_highly_complex_function_error(self, tmp_path):
         # 24 decisions → CC ≈ 25 ≥ 2*10 → ERROR.
@@ -252,51 +297,27 @@ class TestCyclomaticComplexityAnalyzer:
         # pair (alpha before zeta vs zeta before alpha). The analyzer must
         # produce stable finding IDs per file-path + symbol regardless of
         # how functions are ordered within each file.
-        body_a = [
-            "def alpha(x):",
-            "    y = 0",
-        ]
-        for i in range(13):
-            body_a.append(f"    if x == {i}: y = {i}")
-        body_a += ["    return y", "", "def zeta(x):", "    return x + 1"]
-        _write(tmp_path / "a.py", "\n".join(body_a) + "\n")
-
-        body_b = [
-            "def zeta(x):",
-            "    return x + 1",
-            "",
-            "def alpha(x):",
-            "    y = 0",
-        ]
-        for i in range(13):
-            body_b.append(f"    if x == {i}: y = {i}")
-        body_b += ["    return y"]
-        _write(tmp_path / "b.py", "\n".join(body_b) + "\n")
+        _write_alpha_zeta_pair(tmp_path)
 
         analyzer = CyclomaticComplexityAnalyzer(threshold=10)
         first = analyzer.analyze(tmp_path)
         second = analyzer.analyze(tmp_path)
 
         # Exactly two alpha findings (one per file); zeta is below threshold.
-        alpha_first = [f for f in first if f.symbol == "alpha"]
-        alpha_second = [f for f in second if f.symbol == "alpha"]
+        alpha_first = _alpha_findings(first)
+        alpha_second = _alpha_findings(second)
         assert len(alpha_first) == 2
         assert len(alpha_second) == 2
 
         # Source order across files does not change finding IDs. Each
         # per-file finding ID is derived from (rel_path, symbol, cc,
         # threshold), so both runs must match exactly.
-        ids_first = sorted(f.id for f in first)
-        ids_second = sorted(f.id for f in second)
+        ids_first = _sorted_finding_ids(first)
+        ids_second = _sorted_finding_ids(second)
         assert ids_first == ids_second
 
         # Determinism: identical payloads between two runs (modulo ts).
-        def _strip_ts(fs):
-            return [
-                {k: v for k, v in f.model_dump().items() if k != "detected_at"}
-                for f in fs
-            ]
-        assert _strip_ts(first) == _strip_ts(second)
+        assert _strip_detected_at(first) == _strip_detected_at(second)
 
     def test_invalid_threshold_rejected(self):
         with pytest.raises(ValueError):

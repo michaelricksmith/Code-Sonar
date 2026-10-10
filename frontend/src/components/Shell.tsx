@@ -8,8 +8,9 @@ import type { ReactNode } from "react";
 import type { User } from "../api/auth";
 import { isPaidPlan } from "../api/billing";
 import type { BillingStatus } from "../api/billing";
+import { SiteFooter } from "./SiteFooter";
 
-export type ShellView = "overview" | "issues" | "fixes" | "pricing";
+export type ShellView = "overview" | "issues" | "fixes" | "pricing" | "admin";
 
 export interface PromptActivity {
   inProgress: number;
@@ -136,22 +137,29 @@ export function Shell({
           {billing && (
             <>
               <div className="side-label">Plan</div>
-              <div className="side-detail" aria-label="Plan usage">
-                <div className="side-detail-row">
+              <div className="side-detail" aria-label="Plan usage">                <div className="side-detail-row">
                   <span className={`plan-badge plan-${billing.plan}`}>
-                    {billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
+                    {user.is_staff ? "Staff" : billing.plan === "free" ? "Free" : billing.plan === "hobby" ? "Hobby" : "Plus"}
                   </span>
-                  <a className="side-link" href="#/pricing" title="See plans">
-                    {paid ? "Plans" : "Upgrade"}
-                  </a>
+                  {!user.is_staff && (
+                    <a className="side-link" href="#/pricing" title="See plans">
+                      {paid ? "Plans" : "Upgrade"}
+                    </a>
+                  )}
                 </div>
                 <div className="side-detail-row">
                   <span>◈</span>
-                  <span>Scans {billing.usage.scans_used}/{billing.limits.scans_per_month}</span>
+                  <span>
+                    Scans {billing.usage.scans_used}
+                    {user.is_staff ? " · unlimited" : `/${billing.limits.scans_per_month}`}
+                  </span>
                 </div>
                 <div className="side-detail-row">
                   <span>✦</span>
-                  <span>Ask Sonar {billing.usage.ask_sonar_used}/{billing.limits.ask_sonar_per_month}</span>
+                  <span>
+                    Ask Sonar {billing.usage.ask_sonar_used}
+                    {user.is_staff ? " · unlimited" : `/${billing.limits.ask_sonar_per_month}`}
+                  </span>
                 </div>
                 {paid && onManageBilling && (
                   <div className="side-detail-row">
@@ -164,22 +172,39 @@ export function Shell({
               </div>
             </>
           )}
+          {user.is_admin && (
+            <>
+              <div className="side-label">Admin</div>
+              <button className={`side-item ${view === "admin" ? "active" : ""}`} onClick={() => onNavigate("admin")}>
+                ⚙ Console
+              </button>
+            </>
+          )}
         </div>
 
         <div className="side-foot">
           <div className="user-chip" style={{ padding: "0 0 10px" }}>
             {user.avatar_url ? <img src={user.avatar_url} alt="" /> : <span className="brand-mark" style={{ width: 32, height: 32 }} />}
             <span className="who">
-              <b title={user.name}>{user.name}</b>
+              <span className="who-name">
+                <b title={user.name}>{user.name}</b>
+                {user.is_admin && (
+                  <span className="mini-badge is-admin" title="Admin access">admin</span>
+                )}
+                {user.is_staff && (
+                  <span className="mini-badge is-staff" title="Unlimited testing quota">staff</span>
+                )}
+              </span>
               <span title={user.email}>{user.email}</span>
             </span>
             <button className="signout" onClick={onSignOut} title="Sign out">Sign out</button>
           </div>
           <div><span className="dot" />Sonar is watching · {repoLabel ? "repo connected" : "no repo yet"}</div>
+          <SiteFooter variant="compact" />
         </div>
       </aside>
 
-      <section className="main">{children}</section>
+      <main className="main" id="main-content" tabIndex={-1}>{children}</main>
     </div>
   );
 }

@@ -208,6 +208,102 @@ async def log_prompt_copied(request: PromptCopiedRequest) -> dict[str, Any]:
     return {"ok": True}
 
 
+def _copied_events() -> list[dict[str, Any]]:
+    """All recorded ``copied`` prompt events."""
+    return [e for e in _read_events() if e.get("event") == "copied"]
+
+
+def _latest_copies(
+    events: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Most recent copy per ``(rule_id, file_path)`` pair."""
+    latest_copy: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in events:
+        rule_id = str(event.get("rule_id", ""))
+        file_path = str(event.get("file_path", ""))
+        if not rule_id or not file_path:
+            continue
+        key = (rule_id, file_path)
+        if key not in latest_copy or str(event.get("at", "")) > str(
+            latest_copy[key].get("at", "")
+        ):
+            latest_copy[key] = event
+    return latest_copy
+
+
+def _resolve_latest_record(store: Any, repository: str, repository_id: str) -> Any:
+    """Newest scan record, with a slug-match fallback."""
+    latest_record = store.latest(repository_id)
+    if latest_record is None:
+        # Fall back to a slug match in case the scan was recorded under a
+        # different identity scheme (e.g. local-path scans).
+        wanted = repository.strip().lower()
+        candidates = [
+            r
+            for r in store.load_all()
+            if str(getattr(r, "repository_slug", "") or "").lower() == wanted
+        ]
+        if candidates:
+            latest_record = max(candidates, key=lambda r: str(r.scanned_at))
+    return latest_record
+
+
+def _latest_scan_index(latest_record: Any) -> tuple[str, set[tuple[str, str]]]:
+    """Scanned-at timestamp plus the ``(rule_id, file_path)`` finding keys."""
+    if latest_record is None:
+        return "", set()
+    latest_findings: set[tuple[str, str]] = set()
+    for snapshot in latest_record.findings or []:
+        latest_findings.add(
+            (str(snapshot.rule_id or ""), str(snapshot.file_path or ""))
+        )
+    return str(latest_record.scanned_at or ""), latest_findings
+
+
+def _copy_status(
+    copied_at: str,
+    latest_record: Any,
+    latest_scanned_at: str,
+    key: tuple[str, str],
+    latest_findings: set[tuple[str, str]],
+) -> str:
+    """Reconcile one copied prompt against the latest scan."""
+    if not latest_record or latest_scanned_at <= copied_at:
+        return "in_progress"
+    if key in latest_findings:
+        return "still_open"
+    return "resolved"
+
+
+def _status_items(
+    latest_copy: dict[tuple[str, str], dict[str, Any]],
+    latest_record: Any,
+    latest_scanned_at: str,
+    latest_findings: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Status rows for each tracked copy, newest copy first."""
+    items: list[dict[str, Any]] = []
+    for (rule_id, file_path), event in sorted(
+        latest_copy.items(), key=lambda kv: str(kv[1].get("at", "")), reverse=True
+    ):
+        copied_at = str(event.get("at", ""))
+        status = _copy_status(
+            copied_at, latest_record, latest_scanned_at, (rule_id, file_path),
+            latest_findings,
+        )
+        items.append(
+            {
+                "finding_id": event.get("finding_id"),
+                "rule_id": rule_id,
+                "file_path": file_path,
+                "line_start": event.get("line_start"),
+                "status": status,
+                "copied_at": copied_at,
+            }
+        )
+    return items
+
+
 @router.get("/prompt-status")
 async def prompt_status(
     repository: str = Query(min_length=1),
@@ -224,64 +320,12 @@ async def prompt_status(
     from app.history.repository_identity import compute_repository_id_for_slug
     from app.main import get_history_store
 
-    events = [e for e in _read_events() if e.get("event") == "copied"]
-
-    # One entry per (rule_id, file_path): keep the most recent copy.
-    latest_copy: dict[tuple[str, str], dict[str, Any]] = {}
-    for event in events:
-        rule_id = str(event.get("rule_id", ""))
-        file_path = str(event.get("file_path", ""))
-        if not rule_id or not file_path:
-            continue
-        key = (rule_id, file_path)
-        if key not in latest_copy or str(event.get("at", "")) > str(
-            latest_copy[key].get("at", "")
-        ):
-            latest_copy[key] = event
+    latest_copy = _latest_copies(_copied_events())
 
     store = get_history_store()
     repository_id = compute_repository_id_for_slug(repository)
-    latest_record = store.latest(repository_id)
-    if latest_record is None:
-        # Fall back to a slug match in case the scan was recorded under a
-        # different identity scheme (e.g. local-path scans).
-        wanted = repository.strip().lower()
-        candidates = [
-            r
-            for r in store.load_all()
-            if str(getattr(r, "repository_slug", "") or "").lower() == wanted
-        ]
-        if candidates:
-            latest_record = max(candidates, key=lambda r: str(r.scanned_at))
+    latest_record = _resolve_latest_record(store, repository, repository_id)
+    latest_scanned_at, latest_findings = _latest_scan_index(latest_record)
 
-    latest_findings: set[tuple[str, str]] = set()
-    latest_scanned_at = ""
-    if latest_record is not None:
-        latest_scanned_at = str(latest_record.scanned_at or "")
-        for snapshot in latest_record.findings or []:
-            latest_findings.add(
-                (str(snapshot.rule_id or ""), str(snapshot.file_path or ""))
-            )
-
-    items: list[dict[str, Any]] = []
-    for (rule_id, file_path), event in sorted(
-        latest_copy.items(), key=lambda kv: str(kv[1].get("at", "")), reverse=True
-    ):
-        copied_at = str(event.get("at", ""))
-        if not latest_record or latest_scanned_at <= copied_at:
-            status = "in_progress"
-        elif (rule_id, file_path) in latest_findings:
-            status = "still_open"
-        else:
-            status = "resolved"
-        items.append(
-            {
-                "finding_id": event.get("finding_id"),
-                "rule_id": rule_id,
-                "file_path": file_path,
-                "line_start": event.get("line_start"),
-                "status": status,
-                "copied_at": copied_at,
-            }
-        )
+    items = _status_items(latest_copy, latest_record, latest_scanned_at, latest_findings)
     return {"repository": repository, "items": items}

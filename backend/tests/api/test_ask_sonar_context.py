@@ -119,32 +119,51 @@ def test_context_returns_404_for_unknown_scan(client: TestClient) -> None:
     assert detail["scan_id"] == "missing"
 
 
-def test_context_returns_authoritative_scan_facts_without_ml(client: TestClient) -> None:
+def _context_payload(client: TestClient) -> dict[str, Any]:
     record = _record()
     set_scan_provider(lambda scan_id: record if scan_id == "scan-1" else None)
 
     response = client.get("/api/ask-sonar/context/scan-1")
 
     assert response.status_code == 200
-    data = response.json()
+    return response.json()
+
+
+def test_context_returns_authoritative_scan_facts_without_ml(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["context_schema_version"] == "1.0"
+    assert data["deterministic"]["score"] == 720
+    assert data["deterministic"]["grade"] == "B"
+
+
+def test_context_marks_deterministic_source_as_authoritative(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["deterministic_score_unchanged"] is True
     assert data["source_policy"]["deterministic_is_authoritative"] is True
     assert data["allowed_sources"] == ["deterministic"]
-    assert data["deterministic"]["score"] == 720
-    assert data["deterministic"]["grade"] == "B"
+
+
+def test_context_reports_ml_and_similarity_as_unavailable(client: TestClient) -> None:
+    data = _context_payload(client)
+
     assert data["ml_prediction"]["status"] == "unavailable"
     assert data["historical_similarity"]["status"] == "unavailable"
 
 
-def test_ask_returns_503_without_approved_provider(client: TestClient) -> None:
+def test_ask_falls_back_to_deterministic_without_approved_provider(client: TestClient) -> None:
+    set_scan_provider(lambda scan_id: _record() if scan_id == "scan-1" else None)
     response = client.post(
         "/api/ask-sonar/ask",
         json={"scan_id": "scan-1", "question": "Why is my score a B?"},
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "ask_sonar_provider_unavailable"
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer_source"] == "deterministic"
+    assert data["answer"]["provider_name"] == "deterministic"
+    assert "720" in data["answer"]["answer"]
 
 
 def test_ask_uses_only_grounded_context_and_preserves_score(client: TestClient) -> None:
@@ -167,7 +186,7 @@ def test_ask_uses_only_grounded_context_and_preserves_score(client: TestClient) 
     assert data["grounding"]["allowed_sources"] == ["deterministic"]
 
 
-def test_ask_rejects_provider_citation_to_unavailable_source(client: TestClient) -> None:
+def test_ask_falls_back_to_deterministic_on_grounding_violation(client: TestClient) -> None:
     record = _record()
     set_scan_provider(lambda scan_id: record if scan_id == "scan-1" else None)
     set_answer_provider(HallucinatedSourceProvider())
@@ -177,7 +196,8 @@ def test_ask_rejects_provider_citation_to_unavailable_source(client: TestClient)
         json={"scan_id": "scan-1", "question": "What does ML say?"},
     )
 
-    assert response.status_code == 502
-    detail = response.json()["detail"]
-    assert detail["code"] == "ask_sonar_grounding_violation"
-    assert "ml_prediction" in detail["message"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer_source"] == "deterministic"
+    assert "ml_prediction" not in data["answer"]["answer"].lower()
+    assert data["answer"]["used_sources"] == ["deterministic"]

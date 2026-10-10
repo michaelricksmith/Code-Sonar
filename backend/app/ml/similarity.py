@@ -67,6 +67,56 @@ class SimilarityIndex:
         self._scaler = scaler
         self._neighbors = neighbors
 
+    def _require_fitted(self) -> None:
+        if self._scaler is None or self._neighbors is None or not self._rows:
+            raise RuntimeError("Similarity index must be fitted before query")
+
+    def _neighbor_distances(
+        self,
+        features: ScanFeatureVector,
+        limit: int,
+        exclude_scan_id: str | None,
+    ) -> tuple[Any, Any]:
+        requested = min(len(self._rows), limit + (1 if exclude_scan_id else 0))
+        scaler = self._scaler
+        neighbors = self._neighbors
+        assert scaler is not None and neighbors is not None, (
+            "Similarity index must be fitted before query"
+        )
+        vector = scaler.transform([list(features.ordered_values())])
+        distances, indices = neighbors.kneighbors(vector, n_neighbors=requested)
+        return distances[0], indices[0]
+
+    @staticmethod
+    def _build_case(row: DatasetRow, distance: float) -> SimilarCase:
+        label = row.label
+        return SimilarCase(
+            scan_id=row.scan_id,
+            row_id=row.row_id,
+            repository_group=row.repository_group,
+            lineage_id=row.lineage_id,
+            distance=float(distance),
+            label_value=None if label is None else label.value,
+            label_trust_tier=None if label is None else label.trust_tier.value,
+        )
+
+    def _collect_cases(
+        self,
+        distances: Any,
+        indices: Any,
+        limit: int,
+        exclude_scan_id: str | None,
+    ) -> list[SimilarCase]:
+        cases: list[SimilarCase] = []
+        for distance, index in zip(distances, indices, strict=True):
+            row = self._rows[int(index)]
+            if exclude_scan_id is not None and row.scan_id == exclude_scan_id:
+                continue
+            cases.append(self._build_case(row, distance))
+            if len(cases) >= limit:
+                break
+        return cases
+
     def query(
         self,
         features: ScanFeatureVector,
@@ -75,36 +125,12 @@ class SimilarityIndex:
         exclude_scan_id: str | None = None,
     ) -> tuple[SimilarCase, ...]:
         """Return nearest historical cases in deterministic distance order."""
-        if self._scaler is None or self._neighbors is None or not self._rows:
-            raise RuntimeError("Similarity index must be fitted before query")
+        self._require_fitted()
         if limit < 1:
             raise ValueError("limit must be at least 1")
 
-        requested = min(len(self._rows), limit + (1 if exclude_scan_id else 0))
-        vector = self._scaler.transform([list(features.ordered_values())])
-        distances, indices = self._neighbors.kneighbors(vector, n_neighbors=requested)
-
-        cases: list[SimilarCase] = []
-        for distance, index in zip(distances[0], indices[0], strict=True):
-            row = self._rows[int(index)]
-            if exclude_scan_id is not None and row.scan_id == exclude_scan_id:
-                continue
-            label = row.label
-            cases.append(
-                SimilarCase(
-                    scan_id=row.scan_id,
-                    row_id=row.row_id,
-                    repository_group=row.repository_group,
-                    lineage_id=row.lineage_id,
-                    distance=float(distance),
-                    label_value=None if label is None else label.value,
-                    label_trust_tier=(
-                        None if label is None else label.trust_tier.value
-                    ),
-                )
-            )
-            if len(cases) >= limit:
-                break
+        distances, indices = self._neighbor_distances(features, limit, exclude_scan_id)
+        cases = self._collect_cases(distances, indices, limit, exclude_scan_id)
 
         return tuple(
             sorted(cases, key=lambda case: (case.distance, case.scan_id, case.row_id))

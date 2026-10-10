@@ -559,6 +559,12 @@ variables — no secrets are ever committed to the repo:
 | `CODESONAR_SCAN_ROOT` | Allowed scan root (defaults to `<tmp>/code-sonar-scans`) |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe API key + webhook signing secret (absent = billing disabled, free limits) |
 | `STRIPE_PRICE_HOBBY` / `STRIPE_PRICE_PLUS` | Stripe Price IDs for the $7/mo hobby and $14/mo plus tiers |
+| `EMAIL_PROVIDER` | `log` (default: renders to outbox, sends nothing), `smtp`, or `resend` (legacy alias: `SONAR_EMAIL_TRANSPORT`) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | SMTP provider for transactional email (legacy: `SONAR_SMTP_HOST` / `PORT` / `USER` / `PASSWORD`) |
+| `RESEND_API_KEY` | Resend API key; with `EMAIL_PROVIDER=resend` it is used as the SMTP password for `smtp.resend.com:587` |
+| `EMAIL_FROM` | Transactional from-address (default `Code Sonar <noreply@code-sonar.example>`; legacy `SONAR_EMAIL_FROM`) |
+| `EMAIL_MARKETING_FROM` | Marketing from-address (default: same as transactional; legacy `SONAR_EMAIL_MARKETING_FROM`) |
+| `EMAIL_FROM_NAME` | Display name prepended to a bare `EMAIL_FROM` address |
 
 ### Billing (Stripe, test mode)
 
@@ -577,6 +583,32 @@ products in the Stripe Dashboard (test mode first), set the four
 `STRIPE_*` vars, and point a webhook at
 `<SONAR_PUBLIC_URL>/api/billing/webhook` for `checkout.session.completed`,
 `customer.subscription.updated`, and `customer.subscription.deleted`.
+
+Checkout requires explicit auto-renewal consent (`autorenew_consent: true`;
+the pricing page shows the recurring-price disclosure next to an
+unchecked checkbox, and the consent — tier, amount, terms version
+`2026-09-27` — is recorded before the Stripe session is created).
+Paid users can cancel in-app (`POST /api/billing/cancel`, scheduled at
+the end of the current billing period, access continues until then)
+and resume (`POST /api/billing/resume`); `GET /api/billing/subscription`
+reports plan + Stripe status. Checkout completion sends a post-purchase
+receipt and cancellation triggers a confirmation email (`EMAIL_PROVIDER`:
+`log` default, `smtp`, or `resend` via SMTP). The transport is
+provider-agnostic: every outbound message gets `Message-ID` and `Date`
+headers, transient SMTP failures get bounded retries with backoff, and
+sends are logged as routing metadata only (no bodies). Amounts are
+normalized so receipts render `$7`, never `$$7`. Setup: see
+`EMAIL-SETUP.md` (Resend SMTP, founder's Render env vars).
+Auto-renewal consents, cancellations, marketing consents, age-gate
+confirmations, and GPC opt-outs are stored in the append-only
+`compliance_records` table (Alembic `20260927_0005`) with a JSON-file
+fallback; see `/api/compliance/*` (`status`, `age-gate`,
+`marketing-consent`, `gpc`, one-click `unsubscribe/{token}`).
+Annual renewal reminders go out via `scripts/annual_reminders.py`
+(`--list` / `--send`; run monthly). Terms, Privacy Policy, and
+Accessibility Statement ship at `#/legal/terms`, `#/legal/privacy`,
+`#/legal/accessibility` — Terms and Privacy now carry the full founder
+drafts in-app, all marked **DRAFT, pending legal review**.
 
 To enable sign-in, register a **GitHub OAuth App** and a **Google OAuth
 client**, then set each provider's authorized redirect URI to

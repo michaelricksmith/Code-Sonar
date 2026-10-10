@@ -31,9 +31,9 @@ export function ScoreDial({ score, width = 240, animate = true, id = "scoreGrad"
     <svg className="dial" width={width} height={width * 0.625} viewBox="0 0 240 150" role="img" aria-label={`Score ${s} out of 850`}>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#DC2626" />
-          <stop offset="50%" stopColor="#D97706" />
-          <stop offset="100%" stopColor="#16A34A" />
+          <stop offset="0%" stopColor="#525252" />
+          <stop offset="50%" stopColor="#a3a3a3" />
+          <stop offset="100%" stopColor="#ffffff" />
         </linearGradient>
       </defs>
       <path d="M 20 135 A 100 100 0 0 1 220 135" fill="none" className="dial-track" strokeWidth="20" strokeLinecap="round" />
@@ -47,7 +47,7 @@ export function ScoreDial({ score, width = 240, animate = true, id = "scoreGrad"
         strokeDashoffset={offset}
         style={animate ? { transition: "stroke-dashoffset 1s ease" } : undefined}
       />
-      <circle cx={cx} cy={cy} r="7" fill="#141A23" />
+      <circle cx={cx} cy={cy} r="7" fill="#ffffff" style={{ filter: "drop-shadow(0 0 6px rgba(255,255,255,0.9))" }} />
     </svg>
   );
 }

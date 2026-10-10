@@ -26,7 +26,7 @@ from app.github_app import (
     set_webhook_scan_handler,
 )
 from app.history import InMemoryHistoryStore, ScanRecord
-from app.main import app, get_history_store, scan_project, set_history_store
+from app.main import app, get_history_store, scan_project_webhook, set_history_store
 from app.projects import ProjectRecord, ProjectStore, get_project_store, set_project_store
 from app.security.tenant import bind_tenant, current_tenant_id, reset_tenant
 
@@ -74,9 +74,7 @@ def test_history_and_ask_sonar_hide_other_tenant_scan(tenant_client: TestClient)
     try:
         own = tenant_client.get("/api/history/scan-a", headers=_headers("token-a"))
         denied = tenant_client.get("/api/history/scan-a", headers=_headers("token-b"))
-        ask_denied = tenant_client.get(
-            "/api/ask-sonar/context/scan-a", headers=_headers("token-b")
-        )
+        ask_denied = tenant_client.get("/api/ask-sonar/context/scan-a", headers=_headers("token-b"))
         plan_denied = tenant_client.get(
             "/api/ask-sonar/remediation-plan/scan-a/finding-a",
             headers=_headers("token-b"),
@@ -114,32 +112,44 @@ def test_projects_and_installations_are_tenant_scoped(
                 local_checkout_path=str(tmp_path),
             )
         )
-        installations.upsert(
-            GitHubInstallation(1, "acme", "Organization", "now", "now")
-        )
+        installations.upsert(GitHubInstallation(1, "acme", "Organization", "now", "now"))
     finally:
         reset_tenant(token)
     set_project_store(projects)
     set_installation_store(installations)
     try:
-        assert tenant_client.get(
-            "/api/projects/project-a", headers=_headers("token-a")
-        ).status_code == 200
-        assert tenant_client.get(
-            "/api/projects/project-a", headers=_headers("token-b")
-        ).status_code == 404
-        assert tenant_client.get(
-            "/api/projects/project-a/dashboard", headers=_headers("token-b")
-        ).status_code == 404
-        assert tenant_client.get(
-            "/api/github-app/installations", headers=_headers("token-a")
-        ).json()["count"] == 1
-        assert tenant_client.get(
-            "/api/github-app/installations", headers=_headers("token-b")
-        ).json()["count"] == 0
-        assert tenant_client.post(
-            "/api/github-app/installations/1/activate", headers=_headers("token-b")
-        ).status_code == 404
+        assert (
+            tenant_client.get("/api/projects/project-a", headers=_headers("token-a")).status_code
+            == 200
+        )
+        assert (
+            tenant_client.get("/api/projects/project-a", headers=_headers("token-b")).status_code
+            == 404
+        )
+        assert (
+            tenant_client.get(
+                "/api/projects/project-a/dashboard", headers=_headers("token-b")
+            ).status_code
+            == 404
+        )
+        assert (
+            tenant_client.get("/api/github-app/installations", headers=_headers("token-a")).json()[
+                "count"
+            ]
+            == 1
+        )
+        assert (
+            tenant_client.get("/api/github-app/installations", headers=_headers("token-b")).json()[
+                "count"
+            ]
+            == 0
+        )
+        assert (
+            tenant_client.post(
+                "/api/github-app/installations/1/activate", headers=_headers("token-b")
+            ).status_code
+            == 404
+        )
     finally:
         set_project_store(previous_projects)
         set_installation_store(previous_installations)
@@ -234,16 +244,19 @@ def test_verified_webhook_resolves_tenant_from_stored_installation_only(
         assert response.json()["project_id"] == "project-b"
         assert calls == [("tenant-b", "project-b")]
         job_id = response.json()["job_id"]
-        assert tenant_client.get(
-            f"/api/github-app/webhook-jobs/{job_id}", headers=_headers("token-a")
-        ).status_code == 404
+        assert (
+            tenant_client.get(
+                f"/api/github-app/webhook-jobs/{job_id}", headers=_headers("token-a")
+            ).status_code
+            == 404
+        )
         own_job = tenant_client.get(
             f"/api/github-app/webhook-jobs/{job_id}", headers=_headers("token-b")
         )
         assert own_job.status_code == 200
         assert "tenant_id" not in own_job.json()["job"]
     finally:
-        set_webhook_scan_handler(scan_project)
+        set_webhook_scan_handler(scan_project_webhook)
         set_project_store(previous_projects)
         set_installation_store(previous_installations)
         set_webhook_audit_store(previous_audit)

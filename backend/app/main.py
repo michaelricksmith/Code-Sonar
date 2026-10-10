@@ -3,15 +3,17 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.admin.api import router as admin_router
 from app.ask_sonar.api import router as ask_sonar_router
 from app.billing.api import router as billing_router
+from app.compliance.api import router as compliance_router
 from app.drift import compute_drift
 from app.github_app import router as github_app_router
 from app.github_app import set_webhook_scan_handler
@@ -36,6 +38,7 @@ from app.remediation.prompts import router as remediation_prompts_router
 from app.scan_jobs import router as scan_job_router
 from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
+from app.security.ownership import assert_scan_access, visible_scans
 from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
 from app.services.repository import (
     get_analyzer_metadata,
@@ -47,6 +50,17 @@ app = FastAPI(
     title="Code Sonar API",
     description="Credit report for your codebase",
     version="0.1.0-beta.1",
+    # The interactive docs expose the full API schema map. Keep them for local
+    # dev, disable on production (SONAR_ENV=production on Render).
+    docs_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/docs",
+    redoc_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/redoc",
+    openapi_url=None
+    if os.environ.get("SONAR_ENV", "development").lower() == "production"
+    else "/openapi.json",
 )
 
 app.add_middleware(ApiBoundaryMiddleware)
@@ -62,8 +76,10 @@ async def validate_security_configuration() -> None:
 
 
 app.include_router(ml_router)
+app.include_router(admin_router)
 app.include_router(ask_sonar_router)
 app.include_router(billing_router)
+app.include_router(compliance_router)
 app.include_router(oauth_router)
 app.include_router(scan_job_router)
 app.include_router(remediation_router)
@@ -179,6 +195,7 @@ def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
 def _record_public_dict(record: ScanRecord) -> dict[str, Any]:
     data = _record_to_dict(record)
     data.pop("repository_path", None)
+    data.pop("owner_user_id", None)
     return data
 
 
@@ -300,7 +317,19 @@ async def scan(request: ScanRequest) -> ScanResponse:
 
 
 @app.post("/api/projects/{project_id}/scan", response_model=ScanResponse)
-async def scan_project(project_id: str) -> ScanResponse:
+async def scan_project(request: Request, project_id: str) -> ScanResponse:
+    """Run a scan for a connected project, attributed to the signed-in user."""
+    from app.scan_jobs import _quota_user_id
+
+    return await _run_project_scan(project_id, owner_user_id=_quota_user_id(request))
+
+
+async def scan_project_webhook(project_id: str) -> ScanResponse:
+    """Webhook-triggered project scan: no signed-in user, so ownerless."""
+    return await _run_project_scan(project_id, owner_user_id=None)
+
+
+async def _run_project_scan(project_id: str, owner_user_id: str | None) -> ScanResponse:
     project = get_project_store().get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -337,6 +366,7 @@ async def scan_project(project_id: str) -> ScanResponse:
         findings=findings,
         scoring=scoring_result,
         scanned_at=scanned_at,
+        owner_user_id=owner_user_id,
     )
     from app.persistence.runtime import record_project_scan_atomically
 
@@ -357,17 +387,17 @@ async def scan_project(project_id: str) -> ScanResponse:
     )
 
 
-set_webhook_scan_handler(scan_project)
+set_webhook_scan_handler(scan_project_webhook)
 
 
 @app.get("/api/projects/{project_id}/dashboard")
-async def project_dashboard(project_id: str) -> dict[str, Any]:
+async def project_dashboard(request: Request, project_id: str) -> dict[str, Any]:
     project = get_project_store().get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
     repository_id = compute_repository_id(Path(project.local_checkout_path))
-    records = get_history_store().load_all(repository_id)
+    records = visible_scans(get_history_store().load_all(repository_id), request)
     latest = records[-1] if records else None
     return {
         "project": project.to_public_dict(),
@@ -380,12 +410,12 @@ async def project_dashboard(project_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/projects/{project_id}/drift")
-async def project_drift(project_id: str) -> dict[str, Any]:
+async def project_drift(request: Request, project_id: str) -> dict[str, Any]:
     project = get_project_store().get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     repository_id = compute_repository_id(Path(project.local_checkout_path))
-    records = get_history_store().load_all(repository_id)
+    records = visible_scans(get_history_store().load_all(repository_id), request)
     if len(records) < 2:
         raise HTTPException(
             status_code=400,
@@ -419,10 +449,11 @@ async def hotspots(
 
 @app.get("/api/history/list")
 async def list_history(
+    request: Request,
     repository_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> dict[str, Any]:
-    records = get_history_store().load_all(repository_id)
+    records = visible_scans(get_history_store().load_all(repository_id), request)
     if limit and len(records) > limit:
         records = records[-limit:]
     return {"count": len(records), "scans": [_record_public_summary(r) for r in records]}
@@ -430,80 +461,139 @@ async def list_history(
 
 @app.get("/api/history/latest")
 async def history_latest(
+    request: Request,
     repo_path: str = Query(description="Repository path used to identify the scan history"),
 ) -> dict[str, Any]:
     try:
         repo_path_obj = validate_repo_path(repo_path)
     except RepositoryValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    record = get_history_store().latest(compute_repository_id(repo_path_obj))
-    if record is None:
+    records = visible_scans(
+        get_history_store().load_all(compute_repository_id(repo_path_obj)), request
+    )
+    if not records:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
-    return _record_public_dict(record)
+    return _record_public_dict(records[-1])
+
+
+@app.post("/api/history/{scan_id}/claim")
+async def claim_history_scan(request: Request, scan_id: str) -> dict[str, Any]:
+    """Attribute an ownerless scan to the signed-in user.
+
+    Presenting the unguessable scan id proves the caller ran (or otherwise
+    legitimately holds) the scan. Claiming an already-owned scan is rejected
+    with 409; unknown scan ids 404.
+    """
+    from app.oauth import current_user
+
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in to claim a scan")
+    record = get_history_store().get(scan_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    owner = getattr(record, "owner_user_id", None)
+    if owner == user.id:
+        return {"scan_id": scan_id, "owner_user_id": user.id, "claimed": False}
+    if owner is not None:
+        raise HTTPException(status_code=409, detail="Scan is already owned by another user")
+    if not get_history_store().update_owner(scan_id, user.id):
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {"scan_id": scan_id, "owner_user_id": user.id, "claimed": True}
 
 
 @app.get("/api/history/{scan_id}")
-async def history_get(scan_id: str) -> dict[str, Any]:
+async def history_get(request: Request, scan_id: str) -> dict[str, Any]:
     record = get_history_store().get(scan_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"No scan with scan_id={scan_id!r}")
+    # Same cross-user protection as Ask Sonar: owned scans are owner-visible.
+    assert_scan_access(record, request)
     return _record_public_dict(record)
+
+
+def _resolve_drift_repository_id(repo_path: str) -> str:
+    """Map the drift query's repo_path to its history-store repository id."""
+    try:
+        repo_path_obj = validate_repo_path(repo_path)
+    except RepositoryValidationError:
+        # The hosted UI passes the "owner/name" repo slug rather than a
+        # local path; resolve it to the same slug-based identity that
+        # hosted scan jobs persist under.
+        return compute_repository_id_for_slug(repo_path)
+    return compute_repository_id(repo_path_obj)
+
+
+def _find_drift_record(records: list[ScanRecord], scan_id: str) -> ScanRecord:
+    """Return the first record with scan_id, 404 when no record matches."""
+    record = next((r for r in records if r.scan_id == scan_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No scan with scan_id={scan_id!r}")
+    return record
+
+
+def _default_drift_pair(records: list[ScanRecord]) -> tuple[ScanRecord, ScanRecord]:
+    """Baseline/current pair when no explicit scan ids are given."""
+    if len(records) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least two scans to compute drift; found only one",
+        )
+    return records[-2], records[-1]
+
+
+def _resolve_drift_baseline(
+    records: list[ScanRecord],
+    current: ScanRecord,
+    from_scan_id: str | None,
+) -> ScanRecord:
+    """Pick the baseline scan: explicit id, else the latest scan before current."""
+    if from_scan_id is not None:
+        return _find_drift_record(records, from_scan_id)
+    earlier = [r for r in records if r.scan_id != current.scan_id]
+    if not earlier:
+        raise HTTPException(
+            status_code=400,
+            detail="Need at least two scans to compute drift",
+        )
+    return earlier[-1]
+
+
+def _select_drift_pair(
+    records: list[ScanRecord],
+    from_scan_id: str | None,
+    to_scan_id: str | None,
+) -> tuple[ScanRecord, ScanRecord]:
+    """Resolve the (baseline, current) scan pair for a drift comparison."""
+    if to_scan_id is None:
+        return _default_drift_pair(records)
+    current = _find_drift_record(records, to_scan_id)
+    return _resolve_drift_baseline(records, current, from_scan_id), current
 
 
 @app.get("/api/drift")
 async def drift(
+    request: Request,
     repo_path: str = Query(description="Repository path whose history to compare"),
     from_scan_id: str | None = Query(default=None),
     to_scan_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    try:
-        repo_path_obj = validate_repo_path(repo_path)
-    except RepositoryValidationError:
-        repo_path_obj = None
-
-    store = get_history_store()
-    if repo_path_obj is not None:
-        repository_id = compute_repository_id(repo_path_obj)
-    else:
-        # The hosted UI passes the "owner/name" repo slug rather than a
-        # local path; resolve it to the same slug-based identity that
-        # hosted scan jobs persist under.
-        repository_id = compute_repository_id_for_slug(repo_path)
-    records = store.load_all(repository_id)
+    repository_id = _resolve_drift_repository_id(repo_path)
+    records = get_history_store().load_all(repository_id)
     if not records:
         raise HTTPException(status_code=404, detail="No historical scan for that repository")
-
-    if to_scan_id is None:
-        if len(records) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="Need at least two scans to compute drift; found only one",
-            )
-        current = records[-1]
-        baseline = records[-2]
+    if to_scan_id is None and from_scan_id is None:
+        # Default pair: only scans the caller may enumerate.
+        records = visible_scans(records, request)
+        if not records:
+            raise HTTPException(status_code=404, detail="No historical scan for that repository")
+        baseline, current = _select_drift_pair(records, None, None)
     else:
-        current = cast(ScanRecord, next((r for r in records if r.scan_id == to_scan_id), None))
-        if current is None:
-            raise HTTPException(status_code=404, detail=f"No scan with scan_id={to_scan_id!r}")
-        if from_scan_id is None:
-            earlier = [r for r in records if r.scan_id != current.scan_id]
-            if not earlier:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Need at least two scans to compute drift",
-                )
-            baseline = earlier[-1]
-        else:
-            baseline = cast(
-                ScanRecord,
-                next((r for r in records if r.scan_id == from_scan_id), None),
-            )
-            if baseline is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No scan with scan_id={from_scan_id!r}",
-                )
-
+        # Explicit scan ids are a bearer capability: resolve from the full
+        # history, then enforce per-record access.
+        baseline, current = _select_drift_pair(records, from_scan_id, to_scan_id)
+        assert_scan_access(baseline, request)
+        assert_scan_access(current, request)
     return compute_drift(baseline, current).to_dict()
 
 

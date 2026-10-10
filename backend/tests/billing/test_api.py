@@ -135,6 +135,20 @@ def _scan_record() -> ScanRecord:
     )
 
 
+def _create_checkout_session(
+    client: TestClient, headers: dict[str, str], tier: str = "hobby"
+) -> tuple[Any, MagicMock]:
+    """POST /api/billing/checkout with stripe.checkout.Session.create stubbed."""
+    fake_session = MagicMock(url="https://checkout.stripe.test/s/abc")
+    with patch("stripe.checkout.Session.create", return_value=fake_session) as mock_create:
+        response = client.post(
+            "/api/billing/checkout",
+            json={"tier": tier, "autorenew_consent": True},
+            headers=headers,
+        )
+    return response, mock_create
+
+
 class TestCheckout:
     def test_requires_sign_in(self, client: TestClient, billing_env: None) -> None:
         response = client.post("/api/billing/checkout", json={"tier": "hobby"})
@@ -169,12 +183,19 @@ class TestCheckout:
         billing_env: None,
         auth_headers: tuple[dict[str, str], OAuthUser],
     ) -> None:
-        headers, user = auth_headers
-        fake_session = MagicMock(url="https://checkout.stripe.test/s/abc")
-        with patch("stripe.checkout.Session.create", return_value=fake_session) as mock_create:
-            response = client.post("/api/billing/checkout", json={"tier": "hobby"}, headers=headers)
+        headers, _user = auth_headers
+        response, _mock_create = _create_checkout_session(client, headers)
         assert response.status_code == 200
         assert response.json() == {"checkout_url": "https://checkout.stripe.test/s/abc"}
+
+    def test_creates_session_with_expected_stripe_params(
+        self,
+        client: TestClient,
+        billing_env: None,
+        auth_headers: tuple[dict[str, str], OAuthUser],
+    ) -> None:
+        headers, user = auth_headers
+        _response, mock_create = _create_checkout_session(client, headers)
         _, kwargs = mock_create.call_args
         assert kwargs["mode"] == "subscription"
         assert kwargs["client_reference_id"] == user.id

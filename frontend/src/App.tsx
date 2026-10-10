@@ -17,29 +17,38 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { DriftResult, Finding, ScanResponse } from "./api/analyzers";
-import { fetchDrift, fetchHistoryCount } from "./api/analyzers";
+import { fetchDrift, fetchHistoryCount, fetchScan } from "./api/analyzers";
+import { assertBillingUrl, stripSensitiveKeys } from "./utils/security";
 import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
 import { fetchAiProviders } from "./api/askSonar";
 import type { AiProvider } from "./api/askSonar";
 import { PENDING_CHECKOUT_TIER_KEY, fetchBillingStatus, isCheckoutTier, openPortal } from "./api/billing";
 import type { BillingStatus } from "./api/billing";
+import { fetchComplianceStatus, reportGpc } from "./api/compliance";
+import type { ComplianceStatus } from "./api/compliance";
 import { isQuotaError } from "./api/errors";
 import type { ApiError, QuotaErrorBody } from "./api/errors";
 import { createScanJob, pollScanJob } from "./api/scanJobs";
+import type { ScanJobState } from "./api/scanJobs";
 import { fetchFixLog } from "./api/outcomes";
 import { fetchPromptStatus } from "./api/prompts";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
+import { AgeGate } from "./components/AgeGate";
 import { Dashboard } from "./components/Dashboard";
 import { FixesView } from "./components/FixesView";
 import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
 import { LandingPage } from "./components/LandingPage";
+import { LegalPage } from "./components/LegalPage";
+import type { LegalPageId } from "./components/LegalPage";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PricingView } from "./components/PricingView";
 import { UpgradeNudge } from "./components/UpgradeNudge";
 import { Shell, SonarFab } from "./components/Shell";
 import type { ShellView } from "./components/Shell";
+import { ScanTerminal } from "./components/ScanTerminal";
+import { AdminConsole } from "./components/AdminConsole";
 import { timeAgo } from "./copy";
 
 type Route =
@@ -48,7 +57,9 @@ type Route =
   | { name: "issues" }
   | { name: "issue"; id: string }
   | { name: "fixes" }
-  | { name: "pricing" };
+  | { name: "pricing" }
+  | { name: "admin" }
+  | { name: "legal"; page: LegalPageId };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -59,9 +70,13 @@ function parseRoute(): Route {
   }
   if (hash === "" || hash === "/") return { name: "landing" };
   if (hash === "/pricing") return { name: "pricing" };
+  if (hash === "/legal/terms") return { name: "legal", page: "terms" };
+  if (hash === "/legal/privacy") return { name: "legal", page: "privacy" };
+  if (hash === "/legal/accessibility") return { name: "legal", page: "accessibility" };
   if (hash === "/app") return { name: "app" };
   if (hash === "/app/issues") return { name: "issues" };
   if (hash === "/app/fixes") return { name: "fixes" };
+  if (hash === "/app/admin") return { name: "admin" };
   const match = hash.match(/^\/app\/issues\/(.+)$/);
   if (match) return { name: "issue", id: decodeURIComponent(match[1]) };
   return { name: "landing" };
@@ -101,6 +116,7 @@ export default function App() {
     newCount: number;
   } | null>(null);
   const [rescanning, setRescanning] = useState(false);
+  const [rescanJob, setRescanJob] = useState<ScanJobState | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [sonarOpen, setSonarOpen] = useState(false);
   const [sonarQuestion, setSonarQuestion] = useState<string | null>(null);
@@ -131,6 +147,9 @@ export default function App() {
     used: number;
   } | null>(null);
   const [portalError, setPortalError] = useState<string | null>(null);
+  /** Pre-launch compliance: age gate, marketing opt-in, GPC. */
+  const [compliance, setCompliance] = useState<ComplianceStatus | null>(null);
+  const [complianceChecked, setComplianceChecked] = useState(false);
 
   // Auth check on boot.
   useEffect(() => {
@@ -139,11 +158,34 @@ export default function App() {
         setUser(me);
         if (me) {
           const saved = loadSavedScan();
-          if (saved) {
-            // Self-heal a stale cache: if the server has no scan history
-            // (e.g. after a server-side data reset), drop the cached scan
-            // instead of rendering phantom results. If the check itself
-            // fails, keep the cache (offline-friendly).
+          if (saved?.result?.scan_id) {
+            // Verify the specific cached scan is still accessible to this
+            // user before rendering it. The old check (any history at all)
+            // could show a phantom scan — e.g. cached from a different
+            // account, or deleted server-side — that Ask Sonar and other
+            // server-backed features then fail to load ("Scan not found").
+            // A fresh server copy also beats a stale cache. Network errors
+            // keep the cache (offline-friendly).
+            fetchScan(saved.result.scan_id)
+              .then((fresh) => {
+                if (fresh) {
+                  setResult(fresh);
+                  setRepoLabel(saved.repoLabel);
+                } else {
+                  try {
+                    window.localStorage.removeItem(LAST_SCAN_KEY);
+                  } catch {
+                    // best-effort
+                  }
+                }
+              })
+              .catch(() => {
+                setResult(saved.result);
+                setRepoLabel(saved.repoLabel);
+              });
+          } else if (saved) {
+            // Legacy cache without a scan id: fall back to the old
+            // any-history check.
             fetchHistoryCount()
               .then((count) => {
                 if (count > 0) {
@@ -255,12 +297,50 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Global Privacy Control: honor it once on mount, signed in or not.
+  // Fire-and-forget — a failed report must never break the page.
+  useEffect(() => {
+    if ((navigator as unknown as { globalPrivacyControl?: boolean }).globalPrivacyControl === true) {
+      void reportGpc().catch(() => {
+        // best-effort
+      });
+    }
+  }, []);
+
+  // Compliance status for signed-in users: drives the age gate.
+  useEffect(() => {
+    if (!user) {
+      setCompliance(null);
+      setComplianceChecked(false);
+      return;
+    }
+    let cancelled = false;
+    fetchComplianceStatus()
+      .then((status) => {
+        if (!cancelled) setCompliance(status);
+      })
+      .catch(() => {
+        // Compliance is informational; without it we don't block the app —
+        // but we also must not skip the gate, so leave compliance null and
+        // mark the check done: the gate only shows on a known incomplete state.
+        if (!cancelled) setCompliance(null);
+      })
+      .finally(() => {
+        if (!cancelled) setComplianceChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   // Route guards.
   useEffect(() => {
     if (!authChecked) return;
-    // Pricing is public: signed-out visitors can read the tiers.
-    if (!user && route.name !== "landing" && route.name !== "pricing") navigate("/");
+    // Pricing and the legal pages are public: signed-out visitors can read them.
+    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal") navigate("/");
     if (user && route.name === "landing") navigate("/app");
+    // The admin console is only for admins; everyone else goes back to the app.
+    if (user && route.name === "admin" && !user.is_admin) navigate("/app");
   }, [authChecked, user, route.name]);
 
   // Resume a pricing upgrade interrupted by sign-in. A signed-out visitor
@@ -283,7 +363,17 @@ export default function App() {
     setResult(next);
     setRepoLabel(label);
     try {
-      window.localStorage.setItem(LAST_SCAN_KEY, JSON.stringify({ result: next, repoLabel: label }));
+      // Sanitize before persisting: localStorage is readable by any script
+      // on the origin, so finding metadata goes through the sensitive-key
+      // blocklist (the backend already redacts secret evidence server-side).
+      const sanitized: ScanResponse = {
+        ...next,
+        findings: (next.findings ?? []).map((f) => ({
+          ...f,
+          metadata: stripSensitiveKeys(f.metadata),
+        })),
+      };
+      window.localStorage.setItem(LAST_SCAN_KEY, JSON.stringify({ result: sanitized, repoLabel: label }));
     } catch {
       // Storage is best-effort; the in-memory state is authoritative.
     }
@@ -330,7 +420,7 @@ export default function App() {
   const handleManageBilling = useCallback(async () => {
     setPortalError(null);
     try {
-      window.location.href = await openPortal();
+      window.location.href = assertBillingUrl(await openPortal());
     } catch (e) {
       setPortalError(e instanceof Error ? e.message : String(e));
     }
@@ -344,6 +434,7 @@ export default function App() {
   const handleRescan = useCallback(async () => {
     if (!repoLabel || rescanning) return;
     setRescanning(true);
+    setRescanJob(null);
     setScanNotice(null);
     // Capture the previous scan before it is replaced, so we can show a
     // local score-delta + fixed/new breakdown even when the backend has no
@@ -351,7 +442,7 @@ export default function App() {
     const previous = result;
     try {
       const jobId = await createScanJob(repoLabel);
-      const { done } = pollScanJob(jobId, () => undefined);
+      const { done } = pollScanJob(jobId, (state) => setRescanJob(state));
       const final = await done;
       if (final.status === "error") throw new Error(final.error ?? "Re-scan failed.");
       if (!final.result) throw new Error("Re-scan finished without a result.");
@@ -442,16 +533,82 @@ export default function App() {
   }
 
   if (!user) {
-    // Pricing is public: signed-out visitors can read the tiers and are
-    // pointed at sign-in when they try to upgrade.
-    if (route.name === "pricing") {
+    // Pricing and the legal pages are public: signed-out visitors can read
+    // the tiers and the draft legal documents.
+    if (route.name === "legal") {
       return (
-        <div className="main">
-          <PricingView user={null} billing={null} billingLoading={false} />
-        </div>
+        <>
+          <a className="skip-link" href="#main-content">Skip to content</a>
+          <main className="main" id="main-content" tabIndex={-1}>
+            <LegalPage page={route.page} />
+          </main>
+        </>
       );
     }
-    return <LandingPage />;
+    if (route.name === "pricing") {
+      return (
+        <>
+          <a className="skip-link" href="#main-content">Skip to content</a>
+          <div className="main" id="main-content" tabIndex={-1}>
+            <PricingView user={null} billing={null} billingLoading={false} />
+          </div>
+        </>
+      );
+    }
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <LandingPage />
+      </>
+    );
+  }
+
+  // The legal pages stay public for signed-in users too — reading them
+  // never requires (or interrupts) a session.
+  if (route.name === "legal") {
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <main className="main" id="main-content" tabIndex={-1}>
+          <LegalPage page={route.page} />
+        </main>
+      </>
+    );
+  }
+
+  // Wait for the compliance check before rendering the app, so the age
+  // gate never flashes the dashboard underneath it.
+  if (!complianceChecked) {
+    return (
+      <div className="loading-screen">
+        <div className="loading-inner">
+          <div className="spinner" />
+          Waking up Sonar…
+        </div>
+      </div>
+    );
+  }
+
+  if (compliance && !compliance.age_gate_completed) {
+    return (
+      <>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <main className="main" id="main-content" tabIndex={-1}>
+          <AgeGate
+            onComplete={() => {
+              // Re-read compliance status so the gate clears on its own.
+              void fetchComplianceStatus()
+                .then(setCompliance)
+                .catch(() => {
+                  // The gate itself succeeded; don't trap the user if the
+                  // status read hiccups — fail open to the app.
+                  setCompliance({ age_gate_completed: true, marketing_opt_in: false, gpc_honored: false });
+                });
+            }}
+          />
+        </main>
+      </>
+    );
   }
 
   const shellView: ShellView =
@@ -459,14 +616,20 @@ export default function App() {
       ? "issues"
       : route.name === "fixes"
         ? "fixes"
-        : route.name === "pricing"
-          ? "pricing"
-          : "overview";
+        : route.name === "admin"
+          ? "admin"
+          : route.name === "pricing"
+            ? "pricing"
+            : "overview";
+  // Scan-related banners and the onboarding wizard live on the scan
+  // routes only; the pricing page and admin console render on their own.
+  const showScanChrome = route.name !== "pricing" && route.name !== "admin";
   const activeFinding =
     route.name === "issue" ? result?.findings.find((f) => f.id === route.id) ?? null : null;
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <Shell
         user={user}
         repoLabel={repoLabel}
@@ -475,7 +638,17 @@ export default function App() {
         issueCount={result?.finding_count ?? null}
         fixCount={fixCount}
         promptActivity={promptActivity}
-        onNavigate={(view) => navigate(view === "issues" ? "/app/issues" : view === "fixes" ? "/app/fixes" : "/app")}
+        onNavigate={(view) =>
+          navigate(
+            view === "issues"
+              ? "/app/issues"
+              : view === "fixes"
+                ? "/app/fixes"
+                : view === "admin"
+                  ? "/app/admin"
+                  : "/app"
+          )
+        }
         onSignOut={() => void handleSignOut()}
         onOpenSonar={() => openSonar()}
         onRescan={() => void handleRescan()}
@@ -517,7 +690,9 @@ export default function App() {
           <PricingView user={user} billing={billing} billingLoading={billingLoading} />
         )}
 
-        {route.name !== "pricing" && scanNotice && (
+        {route.name === "admin" && user.is_admin && <AdminConsole currentUserId={user.id} />}
+
+        {showScanChrome && scanNotice && (
           <div className="page" style={{ marginBottom: 4 }}>
             <div className={`notice ${scanNotice.startsWith("Re-scanned") ? "warning" : "danger"}`} style={{ marginBottom: 18 }}>
               {scanNotice}
@@ -525,7 +700,7 @@ export default function App() {
           </div>
         )}
 
-        {route.name !== "pricing" && !result && (
+        {showScanChrome && !result && (
           <OnboardingWizard
             userName={user.name}
             onComplete={handleOnboardingComplete}
@@ -583,9 +758,13 @@ export default function App() {
           </div>
         )}
 
-        {route.name !== "pricing" && rescanning && (
+        {showScanChrome && rescanning && (
           <div className="page">
-            <div className="notice warning"><b>Re-scan running…</b>Sonar is reading your repo again. This page will update when it lands.</div>
+            <div className="wizard-card">
+              <h2>Re-scan running…</h2>
+              <ScanTerminal job={rescanJob} repoLabel={repoLabel} />
+              <div className="scan-sub">nothing is changed in your repo</div>
+            </div>
           </div>
         )}
       </Shell>

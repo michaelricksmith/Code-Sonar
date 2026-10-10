@@ -1,5 +1,7 @@
 """Tests for GitHub repository discovery and managed project connection."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
@@ -46,6 +48,19 @@ class FakeGitHubIntegration:
         return self.checkout
 
 
+@contextmanager
+def _github_test_client(tmp_path: Path) -> Iterator[TestClient]:
+    previous_integration = get_github_integration()
+    previous_store = get_project_store()
+    set_github_integration(FakeGitHubIntegration(tmp_path / "managed" / "123"))  # type: ignore[arg-type]
+    set_project_store(ProjectStore(tmp_path / "projects.json"))
+    try:
+        yield TestClient(app)
+    finally:
+        set_github_integration(previous_integration)
+        set_project_store(previous_store)
+
+
 def test_github_app_discovery_uses_installation_repositories_endpoint() -> None:
     seen: list[httpx.Request] = []
 
@@ -76,14 +91,8 @@ def test_github_app_discovery_uses_installation_repositories_endpoint() -> None:
     assert seen[0].headers["authorization"] == "Bearer secret"
 
 
-def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> None:
-    previous_integration = get_github_integration()
-    previous_store = get_project_store()
-    integration = FakeGitHubIntegration(tmp_path / "managed" / "123")
-    set_github_integration(integration)  # type: ignore[arg-type]
-    set_project_store(ProjectStore(tmp_path / "projects.json"))
-    client = TestClient(app)
-    try:
+def test_connection_status_never_exposes_token_or_checkout_path(tmp_path: Path) -> None:
+    with _github_test_client(tmp_path) as client:
         status = client.get("/api/projects/connect/github/status")
         assert status.status_code == 200
         assert status.json() == {
@@ -95,6 +104,9 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
             "managed_checkout": True,
         }
 
+
+def test_connection_repositories_never_exposes_token_or_checkout_path(tmp_path: Path) -> None:
+    with _github_test_client(tmp_path) as client:
         repositories = client.get("/api/projects/connect/github/repositories")
         assert repositories.status_code == 200
         repository_payload = repositories.json()
@@ -104,6 +116,9 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
         assert "secret" not in str(repository_payload)
         assert str(tmp_path) not in str(repository_payload)
 
+
+def test_managed_connect_registers_project(tmp_path: Path) -> None:
+    with _github_test_client(tmp_path) as client:
         connected = client.post(
             "/api/projects/connect/github/managed",
             json={"repository_full_name": "octo/example"},
@@ -114,11 +129,18 @@ def test_connection_api_never_exposes_token_or_checkout_path(tmp_path: Path) -> 
         assert payload["project"]["provider_repository_id"] == 123
         assert payload["project"]["provider_installation_id"] == 456
         assert payload["managed_checkout"] is True
+
+
+def test_managed_connect_never_exposes_token_or_checkout_path(tmp_path: Path) -> None:
+    with _github_test_client(tmp_path) as client:
+        connected = client.post(
+            "/api/projects/connect/github/managed",
+            json={"repository_full_name": "octo/example"},
+        )
+        assert connected.status_code == 200
+        payload = connected.json()
         assert payload["token_persisted"] is False
         assert payload["token_exposed"] is False
         assert payload["local_checkout_path_exposed"] is False
         assert str(tmp_path) not in str(payload)
         assert "secret" not in str(payload)
-    finally:
-        set_github_integration(previous_integration)
-        set_project_store(previous_store)

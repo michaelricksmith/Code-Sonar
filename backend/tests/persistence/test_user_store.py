@@ -50,7 +50,7 @@ def _github_upsert(store: SqlUserStore, **kwargs: object) -> OAuthUser:
 
 
 class TestUpsert:
-    def test_create_github_user(self, store: SqlUserStore) -> None:
+    def test_create_github_user_defaults(self, store: SqlUserStore) -> None:
         user = _github_upsert(store)
         assert user.id
         assert user.provider == "github"
@@ -61,6 +61,11 @@ class TestUpsert:
         assert user.plan == "free"
         assert user.status == "active"
         assert user.is_admin is False
+
+    def test_create_github_user_persists_timestamps_and_token(
+        self, store: SqlUserStore
+    ) -> None:
+        user = _github_upsert(store)
         assert user.last_login_at
         assert user.created_at
         assert user.updated_at

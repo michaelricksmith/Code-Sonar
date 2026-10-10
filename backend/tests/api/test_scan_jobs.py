@@ -30,6 +30,11 @@ def fake_clone(monkeypatch: pytest.MonkeyPatch):
     def _clone(clone_url: str, branch: str | None, dest: Path) -> None:
         seen["clone_url"] = clone_url
         seen["branch"] = branch
+        # The real clone layer reads the OAuth token out-of-band through
+        # git_auth.clone_token(), never from the URL.
+        from app.security.git_auth import get_clone_token
+
+        seen["clone_token"] = get_clone_token()
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "main.py").write_text(
             '"""Fixture repo."""\n\n\n# TODO: clean this up\n'
@@ -84,27 +89,37 @@ def _wait_for(client: TestClient, job_id: str, timeout: float = 60.0) -> dict[st
     raise TimeoutError(f"scan job {job_id} did not finish in {timeout}s")
 
 
+def _run_completed_scan(
+    client: TestClient, session_cookie: str, repo: str = "octo/hello"
+) -> tuple[str, dict[str, Any]]:
+    """Post a scan job as the signed-in GitHub user and wait for it to finish."""
+    created = client.post(
+        "/api/scan-job",
+        json={"repo": repo, "branch": "main"},
+        headers={"Cookie": session_cookie},
+    )
+    job_id = created.json()["job_id"]
+    return job_id, _wait_for(client, job_id)
+
+
 class TestScanJobLifecycle:
     def test_create_returns_job_id(self, client, fake_clone):
         response = client.post("/api/scan-job", json={"repo": "octo/hello"})
         assert response.status_code == 200
         assert "job_id" in response.json()
 
-    def test_full_lifecycle_runs_real_pipeline(
+    def test_full_lifecycle_reaches_done(
         self, client, fake_clone, signed_in_github_user
     ):
-        created = client.post(
-            "/api/scan-job",
-            json={"repo": "octo/hello", "branch": "main"},
-            headers={"Cookie": signed_in_github_user["cookie"]},
-        )
-        job_id = created.json()["job_id"]
-
-        data = _wait_for(client, job_id)
+        _, data = _run_completed_scan(client, signed_in_github_user["cookie"])
         assert data["status"] == "done"
         assert data["step"] == "Done — your score is ready."
         assert data["progress"] == 1.0
 
+    def test_full_lifecycle_produces_scored_result(
+        self, client, fake_clone, signed_in_github_user
+    ):
+        _, data = _run_completed_scan(client, signed_in_github_user["cookie"])
         result = data["result"]
         assert result["score"] > 0
         assert result["grade"] in ("A", "B", "C", "D", "F")
@@ -113,8 +128,14 @@ class TestScanJobLifecycle:
         # Persisted through the existing history mechanism.
         assert get_history_store().get(result["scan_id"]) is not None
 
-        # The OAuth token was used server-side for the clone but never leaks.
-        assert "secret-token-xyz" in fake_clone["clone_url"]
+    def test_full_lifecycle_never_leaks_oauth_token(
+        self, client, fake_clone, signed_in_github_user
+    ):
+        job_id, data = _run_completed_scan(client, signed_in_github_user["cookie"])
+        # The OAuth token must never appear in the clone URL (it would be
+        # visible in process listings); it reaches the clone layer out-of-band.
+        assert "secret-token-xyz" not in fake_clone["clone_url"]
+        assert fake_clone["clone_token"] == "secret-token-xyz"
         assert "secret-token-xyz" not in str(data)
         status_now = client.get(f"/api/scan-job/{job_id}").json()
         assert "secret-token-xyz" not in str(status_now)

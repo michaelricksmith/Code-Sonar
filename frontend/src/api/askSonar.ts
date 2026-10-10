@@ -159,7 +159,8 @@ export async function askSonar(
 ): Promise<GroundedAnswerResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.provider) headers["X-AI-Provider"] = opts.provider;
-  if (opts.apiKey) headers["X-AI-API-Key"] = opts.apiKey;
+  // The BYOK key travels in the POST body, not a header: custom headers are
+  // more likely to be captured in server/proxy access logs.
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
     credentials: "same-origin",
@@ -170,6 +171,7 @@ export async function askSonar(
       task: "debt_risk",
       top_findings_limit: input.topFindingsLimit ?? 10,
       similar_limit: input.similarLimit ?? 3,
+      ...(opts.apiKey ? { ai_api_key: opts.apiKey } : {}),
     }),
   });
   if (!res.ok) throw await decodeError(res, "Ask Sonar could not answer");

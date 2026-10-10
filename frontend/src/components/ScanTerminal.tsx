@@ -41,11 +41,16 @@ export function ScanTerminal({ job, repoLabel }: ScanTerminalProps) {
     if (!job) return;
     if (job.status === "error") {
       const errText = `error: ${job.error || "something went wrong."}`;
+      const recovery =
+        "Scan didn’t finish — no score was issued. Click to try again. This keeps the result honest.";
       lastStepRef.current = errText;
       setLines((prev) => {
         const next = prev.map((l) => ({ ...l, done: true }));
         if (next[next.length - 1]?.text !== errText) {
           next.push({ text: errText, done: true });
+        }
+        if (next[next.length - 1]?.text !== recovery) {
+          next.push({ text: recovery, done: true });
         }
         return next;
       });

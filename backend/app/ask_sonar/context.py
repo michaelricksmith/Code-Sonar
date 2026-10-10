@@ -45,7 +45,7 @@ def _score_projection(record: ScanRecord, limit: int) -> dict[str, Any]:
         ),
     )
     top_ids = {f.id for f in ordered[:limit]}
-    remaining = [f for f in record.findings if f.id not in top_ids]
+    remaining = [f.to_finding() for f in record.findings if f.id not in top_ids]
     try:
         projected = calculate_score(remaining)
         projected_score = projected.score

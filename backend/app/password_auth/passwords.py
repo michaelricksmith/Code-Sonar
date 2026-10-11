@@ -1,15 +1,16 @@
-"""Password hashing (scrypt) and HaveIBeenPwned breach checking.
+"""Password hashing (PBKDF2) and HaveIBeenPwned breach checking.
 
 Copyright © 2026 Michael Smith. All rights reserved.
 
-Passwords are hashed with scrypt (N=2^15, r=8, p=1, 32-byte output) —
-memory-hard, NIST-approved, stdlib-only. The breach check uses the
-HaveIBeenPwned k-anonymity API: only the first 5 hex chars of the
-SHA-1 ever leave the server.
+Passwords are hashed with PBKDF2-HMAC-SHA256 (600,000 iterations, 32-byte
+output) — OWASP-recommended, stdlib-only, no memory-hard KDF issues.
+The breach check uses the HaveIBeenPwned k-anonymity API: only the
+first 5 hex chars of the SHA-1 ever leave the server.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -17,10 +18,8 @@ from dataclasses import dataclass
 
 import httpx
 
-_SCRYPT_N = 2**14
-_SCRYPT_R = 8
-_SCRYPT_P = 1
-_SCRYPT_LEN = 32
+_PBKDF2_ITERATIONS = 600_000
+_PBKDF2_LEN = 32
 
 _HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/"
 _HIBP_TIMEOUT = 10.0
@@ -45,41 +44,27 @@ def validate_password(password: str) -> PasswordPolicyViolation | None:
 
 
 def hash_password(password: str) -> str:
-    """scrypt hash in a PHC-style string: $scrypt$n=16384,r=8,p=1$<salt>$<hash>."""
+    """PBKDF2-HMAC-SHA256 hash: $pbkdf2$<iterations>$<salt>$<hash>."""
     salt = secrets.token_bytes(16)
-    dk = hashlib.scrypt(
-        password.encode("utf-8"),
-        salt=salt,
-        n=_SCRYPT_N,
-        r=_SCRYPT_R,
-        p=_SCRYPT_P,
-        dklen=_SCRYPT_LEN,
+    dk = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS, _PBKDF2_LEN
     )
-    import base64
-
     salt_b64 = base64.b64encode(salt).decode("ascii")
     hash_b64 = base64.b64encode(dk).decode("ascii")
-    return f"$scrypt$n={_SCRYPT_N},r={_SCRYPT_R},p={_SCRYPT_P}${salt_b64}${hash_b64}"
+    return f"$pbkdf2${_PBKDF2_ITERATIONS}${salt_b64}${hash_b64}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     """Constant-time verification. Unknown formats verify as False."""
     try:
-        import base64
-
         parts = password_hash.split("$")
-        if len(parts) != 5 or parts[1] != "scrypt":
+        if len(parts) != 5 or parts[1] != "pbkdf2":
             return False
-        params = dict(kv.split("=") for kv in parts[2].split(","))
+        iterations = int(parts[2])
         salt = base64.b64decode(parts[3])
         expected = base64.b64decode(parts[4])
-        dk = hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=salt,
-            n=int(params["n"]),
-            r=int(params["r"]),
-            p=int(params["p"]),
-            dklen=len(expected),
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations, len(expected)
         )
         return hmac.compare_digest(dk, expected)
     except Exception:

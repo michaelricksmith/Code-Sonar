@@ -29,7 +29,7 @@ class TestPasswordHashing:
 
     def test_hash_format(self):
         h = hash_password("password123")
-        assert h.startswith("$scrypt$n=16384,r=8,p=1$")
+        assert h.startswith("$pbkdf2$600000$")
 
     def test_unique_salts(self):
         assert hash_password("same") != hash_password("same")

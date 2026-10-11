@@ -1094,7 +1094,6 @@ class SqlUserStore:
                     display_name=name,
                     avatar_url="",
                     provider="email",
-                    provider_user_id="",
                     plan=PLAN_FREE,
                     status=STATUS_ACTIVE,
                     is_admin=False,

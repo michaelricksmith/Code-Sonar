@@ -1,3 +1,17 @@
+## Unreleased — Durable fix tracking (fix_attempts table)
+
+- **New `fix_attempts` Postgres table** (migration 20261011_0009): every
+  copied fix prompt is recorded with the user's identity, replacing the
+  ephemeral `prompt-events.jsonl` file that Render wiped on every deploy.
+- **Verified fixes are now persisted**: when a rescan newer than the copy
+  no longer contains the finding, the attempt is marked verified with the
+  score delta. Best-effort hook on every scan completion; never breaks scans.
+- **New `GET /api/fix-tracking/stats`**: per-user totals, verified this
+  week, best week, in-progress count, and per-repo breakdown. Raw material
+  for streaks, the weekly digest, and win-back prompts.
+- **`prompt-copied` / `prompt-status` now require sign-in** and are scoped
+  to the current user.
+
 ## Unreleased — Score trend API + score-over-time chart
 
 - **New `GET /api/history/trend?repo_path=` endpoint**: returns per-scan

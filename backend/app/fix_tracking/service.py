@@ -116,8 +116,75 @@ def user_fix_stats(user_id: str) -> dict[str, Any]:
             else None
         ),
         "in_progress": len(in_progress),
+        "streak": user_fix_streak(user_id),
         "per_repo": [
             {"repository_id": repo_id, **counts}
             for repo_id, counts in sorted(per_repo.items())
         ],
+    }
+
+
+def _week_monday(iso_ts: str) -> datetime | None:
+    """Monday 00:00 UTC of the week containing the timestamp."""
+    try:
+        dt = datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    monday = dt - timedelta(days=dt.weekday())
+    return monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def user_fix_streak(user_id: str) -> dict[str, Any]:
+    """Consecutive weeks with at least one verified fix.
+
+    Weeks are ISO weeks (Monday start). The streak counts back from the
+    current week; a week with no verified fix yet does not break the
+    streak when it is still in progress.
+    """
+    store = get_fix_attempt_store()
+    try:
+        verified = store.list_by_user(user_id, verified_only=True)
+    except Exception:
+        return {"current_streak_weeks": 0, "longest_streak_weeks": 0}
+
+    weeks: set[str] = set()
+    for attempt in verified:
+        monday = _week_monday(attempt.verified_at or "")
+        if monday:
+            weeks.add(monday.date().isoformat())
+    if not weeks:
+        return {"current_streak_weeks": 0, "longest_streak_weeks": 0}
+
+    today = datetime.now(timezone.utc)
+    this_monday = today - timedelta(days=today.weekday())
+    this_monday = this_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Current streak: walk back from this week (or last week when this
+    # week has no fix yet — the streak is still alive).
+    cursor = this_monday
+    if cursor.date().isoformat() not in weeks:
+        cursor = cursor - timedelta(weeks=1)
+    current = 0
+    while cursor.date().isoformat() in weeks:
+        current += 1
+        cursor = cursor - timedelta(weeks=1)
+
+    # Longest streak: longest run of consecutive Mondays in the set.
+    ordered = sorted(weeks)
+    longest = 1
+    run = 1
+    for prev, curr in zip(ordered, ordered[1:]):
+        prev_d = datetime.fromisoformat(prev).date()
+        curr_d = datetime.fromisoformat(curr).date()
+        if (curr_d - prev_d).days == 7:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+
+    return {
+        "current_streak_weeks": current,
+        "longest_streak_weeks": longest,
     }

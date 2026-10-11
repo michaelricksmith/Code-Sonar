@@ -14,6 +14,7 @@ from app.admin.api import router as admin_router
 from app.ask_sonar.api import router as ask_sonar_router
 from app.billing.api import router as billing_router
 from app.compliance.api import router as compliance_router
+from app.digest.api import router as digest_router
 from app.drift import compute_drift
 from app.fix_tracking.api import router as fix_tracking_router
 from app.github_app import router as github_app_router
@@ -36,6 +37,7 @@ from app.projects import router as projects_router
 from app.readiness_api import router as readiness_router
 from app.remediation.api import router as remediation_router
 from app.remediation.prompts import router as remediation_prompts_router
+from app.retention.api import router as retention_router
 from app.scan_jobs import router as scan_job_router
 from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
@@ -86,6 +88,8 @@ app.include_router(scan_job_router)
 app.include_router(remediation_router)
 app.include_router(remediation_prompts_router)
 app.include_router(fix_tracking_router)
+app.include_router(digest_router)
+app.include_router(retention_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)
 app.include_router(privacy_router)

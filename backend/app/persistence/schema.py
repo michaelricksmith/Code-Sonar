@@ -265,3 +265,9 @@ rate_limit_hits = Table(
     Column("hit_at", Float, nullable=False),
 )
 Index("ix_rate_limit_hits_bucket_time", rate_limit_hits.c.bucket_key, rate_limit_hits.c.hit_at)
+
+email_preferences = _tenant_table("email_preferences", "user_id")
+email_preferences.append_column(
+    Column("digest_enabled", Boolean(), nullable=False, server_default="1")
+)
+email_preferences.append_column(Column("unsubscribed_at", String(64)))

@@ -7,6 +7,7 @@
 
 import { useMemo } from "react";
 
+import { ProgressStrip } from "./ProgressStrip";
 import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity } from "../api/analyzers";
 import {
   AREA_NOTE,
@@ -171,6 +172,7 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
       </div>
 
       <h1 className="page-title">Code health overview</h1>
+      <ProgressStrip />
       <p className="page-sub">
         Scanned {timeAgo(result.scanned_at)} · {fileCount} {fileCount === 1 ? "file" : "files"} with {copy.findings} · 8 {copy.analyzers} ran · nothing was changed in your repo
       </p>

@@ -33,6 +33,7 @@ from app.models.user import (
 from app.oauth import OAuthUser, OAuthUserStore
 from app.persistence.crypto import EncryptionProvider, checkout_path_aad, oauth_token_aad
 from app.persistence.schema import (
+    email_preferences,
     findings,
     fix_attempts,
     github_installations,
@@ -1152,3 +1153,46 @@ class SqlComplianceRecordStore:
             )
             for row in rows
         ]
+
+
+class SqlEmailPreferenceStore:
+    """Per-user digest email preferences backed by ``email_preferences``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def is_digest_enabled(self, user_id: str) -> bool:
+        """True unless the user explicitly unsubscribed. Default opted in."""
+        query = select(email_preferences.c.digest_enabled).where(
+            email_preferences.c.tenant_id == current_tenant_id(),
+            email_preferences.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            value = connection.execute(query).scalar_one_or_none()
+        return bool(value) if value is not None else True
+
+    def set_digest_enabled(self, user_id: str, enabled: bool) -> None:
+        tenant_id = current_tenant_id()
+        unsubscribed_at = None if enabled else _utcnow_iso()
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            result = connection.execute(
+                update(email_preferences)
+                .where(
+                    email_preferences.c.tenant_id == tenant_id,
+                    email_preferences.c.user_id == user_id,
+                )
+                .values(
+                    digest_enabled=enabled,
+                    unsubscribed_at=unsubscribed_at,
+                )
+            )
+            if result.rowcount == 0:
+                connection.execute(
+                    insert(email_preferences).values(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        digest_enabled=enabled,
+                        unsubscribed_at=unsubscribed_at,
+                    )
+                )

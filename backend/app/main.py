@@ -31,6 +31,7 @@ from app.history import (
 from app.hotspots import compute_hotspots
 from app.ml.api import router as ml_router
 from app.oauth import router as oauth_router
+from app.password_auth.api import router as password_auth_router
 from app.persistence.privacy_api import router as privacy_router
 from app.projects import get_project_store
 from app.projects import router as projects_router
@@ -96,6 +97,7 @@ app.include_router(retention_router)
 app.include_router(twofa_router)
 app.include_router(sessions_router)
 app.include_router(security_events_router)
+app.include_router(password_auth_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)
 app.include_router(privacy_router)

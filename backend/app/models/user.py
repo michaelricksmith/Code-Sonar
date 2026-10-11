@@ -56,6 +56,12 @@ users = Table(
     Column("is_staff", Boolean, nullable=False, default=False),
     # OAuth tokens are encrypted at rest; see app.persistence.crypto.
     Column("github_token_ciphertext", Text),
+    # Email/password authentication (migration 20261011_0014).
+    Column("password_hash", Text),
+    Column("email_verified", Boolean, nullable=False, server_default="0"),
+    Column("email_verify_token_hash", String(64)),
+    Column("password_reset_token_hash", String(64)),
+    Column("password_reset_expires_at", String(64)),
     # ISO-8601 timestamps, matching the rest of the persistence schema.
     Column("created_at", String(64), nullable=False),
     Column("updated_at", String(64), nullable=False),

@@ -273,6 +273,25 @@ class UserStore(Protocol):
         """
         ...
 
+    # -- email/password auth (SqlUserStore only; JSON store lacks these) --
+
+    def get_by_email(self, email: str) -> OAuthUser | None: ...
+    def create_email_user(
+        self, email: str, name: str, password_hash: str
+    ) -> OAuthUser: ...
+    def get_password_hash(self, user_id: str) -> str | None: ...
+    def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
+    def is_email_verified(self, user_id: str) -> bool: ...
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None: ...
+    def set_email_verify_token(
+        self, user_id: str, token_hash: str | None
+    ) -> None: ...
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None: ...
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None: ...
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None: ...
+
     def delete_user(self, user_id: str) -> bool:
         """Permanently delete a user record (admin action)."""
         ...
@@ -490,6 +509,53 @@ class OAuthUserStore:
                 return False
             self._save(kept)
             return True
+
+    # -- email/password auth: not supported by the JSON store ---------
+
+    def _email_unsupported(self) -> None:
+        raise RuntimeError("Email/password auth requires the SQL user store.")
+
+    def get_by_email(self, email: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
+
+    def create_email_user(
+        self, email: str, name: str, password_hash: str
+    ) -> OAuthUser:
+        self._email_unsupported()
+        raise RuntimeError("unreachable")
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        self._email_unsupported()
+        return None
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        self._email_unsupported()
+
+    def is_email_verified(self, user_id: str) -> bool:
+        self._email_unsupported()
+        return False
+
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None:
+        self._email_unsupported()
+
+    def set_email_verify_token(
+        self, user_id: str, token_hash: str | None
+    ) -> None:
+        self._email_unsupported()
+
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
+
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None:
+        self._email_unsupported()
+
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
 
 
 _user_store: UserStore = OAuthUserStore()

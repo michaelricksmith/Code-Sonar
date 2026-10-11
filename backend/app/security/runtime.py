@@ -28,6 +28,13 @@ PUBLIC_AUTH_PATHS = frozenset(
         # link itself is the credential (opened from email clients with
         # no session cookie).
         "/api/digest/unsubscribe",
+        # Email/password auth: signup, login, and reset are public by
+        # definition (the user has no session yet).
+        "/api/auth/signup",
+        "/api/auth/login",
+        "/api/auth/verify-email",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
     }
 )
 DEFAULT_CORS_ORIGINS = (

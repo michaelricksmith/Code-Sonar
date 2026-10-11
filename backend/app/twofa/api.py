@@ -26,6 +26,9 @@ _PENDING_COOKIE = "sonar_2fa_pending"
 
 class CodeRequest(BaseModel):
     code: str = Field(min_length=1, max_length=16)
+    # For email/password logins the pending token arrives in the body
+    # (no cookie yet); OAuth logins carry it as a cookie.
+    pending_token: str | None = Field(default=None, max_length=1024)
 
 
 def _session_secret() -> str:
@@ -167,7 +170,8 @@ async def twofa_verify_login(request: Request, body: CodeRequest) -> Response:
     from app.oauth import _set_session_cookie, get_oauth_user_store
     from app.twofa.store import get_two_factor_store, verify_login_code
 
-    user_id = verify_pending_token(request.cookies.get(_PENDING_COOKIE))
+    pending = body.pending_token or request.cookies.get(_PENDING_COOKIE)
+    user_id = verify_pending_token(pending)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Login session expired")
     user = get_oauth_user_store().get(user_id)

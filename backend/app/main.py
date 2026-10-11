@@ -476,6 +476,39 @@ async def history_latest(
     return _record_public_dict(records[-1])
 
 
+@app.get("/api/history/trend")
+async def history_trend(
+    request: Request,
+    repo_path: str = Query(description="Repository path or owner/name slug identifying the repo"),
+    limit: int = Query(default=30, ge=1, le=500),
+) -> dict[str, Any]:
+    """Compact per-repo score history for the score-over-time trend.
+
+    Returns one point per scan (chronological): scanned_at, score, grade,
+    finding_count. ``delta`` is the latest score minus the previous scan's
+    score, or null when fewer than two scans exist.
+    """
+    repository_id = _resolve_drift_repository_id(repo_path)
+    records = visible_scans(get_history_store().load_all(repository_id), request)
+    if not records:
+        raise HTTPException(status_code=404, detail="No historical scan for that repository")
+    tail = records[-limit:]
+    delta: int | None = None
+    if len(tail) >= 2:
+        delta = tail[-1].score - tail[-2].score
+    points = [
+        {
+            "scan_id": record.scan_id,
+            "scanned_at": record.scanned_at,
+            "score": record.score,
+            "grade": record.grade,
+            "finding_count": record.finding_count,
+        }
+        for record in tail
+    ]
+    return {"count": len(points), "delta": delta, "points": points}
+
+
 @app.post("/api/history/{scan_id}/claim")
 async def claim_history_scan(request: Request, scan_id: str) -> dict[str, Any]:
     """Attribute an ownerless scan to the signed-in user.

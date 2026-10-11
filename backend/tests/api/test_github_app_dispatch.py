@@ -460,3 +460,130 @@ def test_module_setters_round_trip(
     assert get_installation_store() is installations
     assert get_webhook_audit_store() is audit
     assert get_webhook_job_store() is jobs
+
+# ---------------------------------------------------------------------------
+# Push-scan debounce (Phase 2)
+# ---------------------------------------------------------------------------
+
+def _mk_scan_record(repo_id: str, scanned_at: str):
+    from app.history import SCHEMA_VERSION
+    from app.history.scan_record import ScanRecord
+
+    return ScanRecord.from_dict(
+        {
+            "scan_id": "scan-" + scanned_at,
+            "tenant_id": "tenant-a",
+            "repository_id": repo_id,
+            "repository_path": "/tmp/checkout",
+            "scanned_at": scanned_at,
+            "schema_version": SCHEMA_VERSION,
+            "score": 700,
+            "grade": "B",
+            "total_debt_points": 10,
+            "finding_count": 0,
+            "category_scores": {},
+            "severity_distribution": {},
+            "findings_by_category": {},
+            "findings_source_breakdown": {},
+            "findings": [],
+        }
+    )
+
+
+@pytest.fixture()
+def history_sandbox(sandbox: SimpleNamespace):
+    """Add an isolated in-memory history store to the webhook sandbox."""
+    from app.history.history_store import InMemoryHistoryStore
+    from app.main import get_history_store, set_history_store
+
+    previous = get_history_store()
+    store = InMemoryHistoryStore()
+    set_history_store(store)
+    try:
+        yield store
+    finally:
+        set_history_store(previous)
+
+
+def _repo_id_for_p1() -> str:
+    from app.history.repository_identity import compute_repository_id
+
+    return compute_repository_id(Path("/tmp/checkout"))
+
+
+def test_push_scan_debounced_when_recent_scan(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    from datetime import datetime, timezone
+
+    from app.github_app import _push_scan_debounced
+
+    _seed_projects(sandbox)
+    now = datetime.now(timezone.utc).isoformat()
+    history_sandbox.append(_mk_scan_record(_repo_id_for_p1(), now))
+    assert _push_scan_debounced("p1") is True
+
+
+def test_push_scan_not_debounced_when_scan_is_old(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    from app.github_app import _push_scan_debounced
+
+    _seed_projects(sandbox)
+    history_sandbox.append(
+        _mk_scan_record(_repo_id_for_p1(), "2020-01-01T00:00:00+00:00")
+    )
+    assert _push_scan_debounced("p1") is False
+
+
+def test_push_scan_not_debounced_without_scan(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    from app.github_app import _push_scan_debounced
+
+    _seed_projects(sandbox)
+    assert _push_scan_debounced("p1") is False
+
+
+def test_push_scan_not_debounced_without_project(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    from app.github_app import _push_scan_debounced
+
+    assert _push_scan_debounced("no-such-project") is False
+
+
+def test_dispatch_webhook_scan_debounced_skips_job(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    from datetime import datetime, timezone
+
+    _seed_projects(sandbox)
+    now = datetime.now(timezone.utc).isoformat()
+    history_sandbox.append(_mk_scan_record(_repo_id_for_p1(), now))
+    context = _mk_context(
+        event="push", delivery="d-debounced", project_id="p1", installation_id=7
+    )
+    sandbox.audit.append(_build_webhook_audit(context))
+    job_id = _dispatch_webhook_scan(context, True, 7, "tenant-a", BackgroundTasks())
+    assert job_id is None
+    stored = sandbox.audit.list()[0]
+    assert stored.outcome == "debounced"
+    assert stored.scan_triggered is False
+
+
+def test_dispatch_webhook_scan_triggered_when_not_debounced(
+    history_sandbox, sandbox: SimpleNamespace
+) -> None:
+    _seed_projects(sandbox)
+    history_sandbox.append(
+        _mk_scan_record(_repo_id_for_p1(), "2020-01-01T00:00:00+00:00")
+    )
+    context = _mk_context(
+        event="push", delivery="d-fresh", project_id="p1", installation_id=7
+    )
+    sandbox.audit.append(_build_webhook_audit(context))
+    job_id = _dispatch_webhook_scan(context, True, 7, "tenant-a", BackgroundTasks())
+    assert job_id is not None
+    stored = sandbox.audit.list()[0]
+    assert stored.outcome == "scan_queued"

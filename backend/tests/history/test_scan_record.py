@@ -473,3 +473,47 @@ class TestBuildScanRecord:
         assert record.findings == []
         assert record.finding_count == 0
         assert record.total_debt_points == 0
+
+
+class TestDriftSummary:
+    def test_drift_summary_defaults_to_none(self):
+        record = build_scan_record(
+            repository_id="r1",
+            repository_path="/repos/demo",
+            findings=[],
+            scoring=_mk_scoring(),
+        )
+        assert record.drift_summary is None
+        assert record.to_dict()["drift_summary"] is None
+
+    def test_drift_summary_round_trip(self):
+        summary = {
+            "score_delta": 20,
+            "new_count": 1,
+            "resolved_count": 2,
+            "persistent_count": 3,
+        }
+        record = build_scan_record(
+            repository_id="r1",
+            repository_path="/repos/demo",
+            findings=[],
+            scoring=_mk_scoring(),
+            drift_summary=summary,
+        )
+        assert record.to_dict()["drift_summary"] == summary
+        restored = ScanRecord.from_dict(record.to_dict())
+        assert restored.drift_summary == summary
+        # Mutating the restored copy must not affect the original.
+        restored.drift_summary["new_count"] = 99
+        assert record.drift_summary["new_count"] == 1
+
+    def test_from_dict_without_drift_summary_stays_none(self):
+        record = build_scan_record(
+            repository_id="r1",
+            repository_path="/repos/demo",
+            findings=[],
+            scoring=_mk_scoring(),
+        )
+        data = record.to_dict()
+        del data["drift_summary"]
+        assert ScanRecord.from_dict(data).drift_summary is None

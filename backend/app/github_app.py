@@ -868,6 +868,36 @@ def _webhook_scan_trigger(context: _WebhookContext, payload: Any) -> bool:
     return False
 
 
+# Push-triggered rescans are free (they never consume the user's monthly
+# scan quota — the user didn't ask for them, and charging for them would
+# punish active repos). Abuse is contained by this debounce instead:
+# at most one push scan per repo per window.
+_PUSH_SCAN_DEBOUNCE_MINUTES = 15
+
+
+def _push_scan_debounced(project_id: str) -> bool:
+    """True when this project's repo was scanned inside the debounce window."""
+    try:
+        from app.history.repository_identity import compute_repository_id
+        from app.main import get_history_store
+
+        project = get_project_store().get(project_id)
+        if project is None or not project.local_checkout_path:
+            return False
+        repository_id = compute_repository_id(Path(project.local_checkout_path))
+        latest = get_history_store().latest(repository_id)
+        if latest is None or not latest.scanned_at:
+            return False
+        scanned_at = datetime.fromisoformat(latest.scanned_at)
+        if scanned_at.tzinfo is None:
+            scanned_at = scanned_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - scanned_at < timedelta(
+            minutes=_PUSH_SCAN_DEBOUNCE_MINUTES
+        )
+    except Exception:
+        return False
+
+
 def _dispatch_webhook_scan(
     context: _WebhookContext,
     trigger: bool,
@@ -876,7 +906,12 @@ def _dispatch_webhook_scan(
     background_tasks: BackgroundTasks,
 ) -> str | None:
     job_id: str | None = None
-    if trigger and context.project_id is not None:
+    debounced = (
+        trigger
+        and context.project_id is not None
+        and _push_scan_debounced(context.project_id)
+    )
+    if trigger and not debounced and context.project_id is not None:
         job = get_webhook_job_store().enqueue(
             delivery_id=context.delivery,
             project_id=context.project_id,
@@ -892,7 +927,9 @@ def _dispatch_webhook_scan(
         background_tasks.add_task(_run_project_scan_job, job_id, webhook_tenant)
     else:
         outcome = (
-            "unknown_installation"
+            "debounced"
+            if debounced
+            else "unknown_installation"
             if raw_installation_id is not None and webhook_tenant is None
             else "installation_updated"
             if context.event == "installation"

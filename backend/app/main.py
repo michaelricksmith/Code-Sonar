@@ -191,6 +191,7 @@ def _record_to_dict(record: ScanRecord) -> dict[str, Any]:
         "findings_by_category": record.findings_by_category,
         "findings_source_breakdown": record.findings_source_breakdown,
         "findings": [f.to_dict() for f in record.findings],
+        "drift_summary": record.drift_summary,
     }
 
 
@@ -217,6 +218,7 @@ def _record_summary(record: ScanRecord) -> dict[str, Any]:
         "severity_distribution": record.severity_distribution,
         "findings_by_category": record.findings_by_category,
         "findings_source_breakdown": record.findings_source_breakdown,
+        "drift_summary": record.drift_summary,
     }
 
 
@@ -234,6 +236,7 @@ def _build_scan_response(
     scanned_at: str,
     scan_id: str | None,
     analyzer_execution: list[dict[str, Any]],
+    drift_summary: dict[str, Any] | None = None,
 ) -> ScanResponse:
     hotspot_result = compute_hotspots(findings, top_n=10)
     return ScanResponse(
@@ -261,6 +264,7 @@ def _build_scan_response(
             "grade": scoring_result.grade,
             "by_severity": scoring_result.severity_distribution,
             "by_category": scoring_result.findings_by_category,
+            "drift": drift_summary,
         },
         top_hotspots=[h.to_dict() for h in hotspot_result.hotspots],
     )
@@ -332,7 +336,14 @@ async def scan_project(request: Request, project_id: str) -> ScanResponse:
 
 
 async def scan_project_webhook(project_id: str) -> ScanResponse:
-    """Webhook-triggered project scan: no signed-in user, so ownerless."""
+    """Webhook-triggered project scan: no signed-in user, so ownerless.
+
+    Quota policy (Phase 2): push-triggered rescans never consume the
+    user's monthly scan quota. They are system-initiated — the user did
+    not ask for them — and charging for them would punish active repos
+    (a free-tier user gets 5 scans/month). Abuse is contained by the
+    push-scan debounce in app.github_app, not by quota.
+    """
     return await _run_project_scan(project_id, owner_user_id=None)
 
 
@@ -367,14 +378,26 @@ async def _run_project_scan(project_id: str, owner_user_id: str | None) -> ScanR
         raise HTTPException(status_code=500, detail="Project scan failed") from exc
 
     scanned_at = datetime.now(timezone.utc).isoformat()
+    repository_id = compute_repository_id(repo_path)
+    # Previous scan for the drift comparison: the newest record already stored.
+    previous_record = get_history_store().latest(repository_id)
     record = build_scan_record(
-        repository_id=compute_repository_id(repo_path),
+        repository_id=repository_id,
         repository_path=display_name(repo_path),
         findings=findings,
         scoring=scoring_result,
         scanned_at=scanned_at,
         owner_user_id=owner_user_id,
     )
+    # Attach the new/resolved/persistent diff so push-triggered rescans carry
+    # their own change summary for retention nudges. Best-effort: a drift
+    # failure must never break the scan.
+    try:
+        if previous_record is not None and previous_record.scan_id != record.scan_id:
+            drift = compute_drift(previous_record, record)
+            record.drift_summary = drift.summary.to_dict()
+    except Exception:
+        record.drift_summary = None
     from app.persistence.runtime import record_project_scan_atomically
 
     record_project_scan_atomically(
@@ -394,6 +417,7 @@ async def _run_project_scan(project_id: str, owner_user_id: str | None) -> ScanR
         scanned_at=scanned_at,
         scan_id=record.scan_id,
         analyzer_execution=[item.__dict__ for item in execution.analyzers],
+        drift_summary=record.drift_summary,
     )
 
 

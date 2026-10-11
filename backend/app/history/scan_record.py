@@ -182,6 +182,7 @@ class ScanRecord:
         "findings_by_category",
         "findings_source_breakdown",
         "findings",
+        "drift_summary",
     )
 
     def __init__(
@@ -206,6 +207,7 @@ class ScanRecord:
         scoring_version: str = "legacy-unversioned",
         tenant_id: str = LOCAL_TENANT_ID,
         owner_user_id: str | None = None,
+        drift_summary: dict[str, Any] | None = None,
     ) -> None:
         self.scan_id = scan_id
         self.tenant_id = tenant_id
@@ -227,6 +229,7 @@ class ScanRecord:
         self.findings_by_category = dict(findings_by_category)
         self.findings_source_breakdown = dict(findings_source_breakdown)
         self.findings = list(findings)
+        self.drift_summary = dict(drift_summary) if drift_summary else None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -250,6 +253,7 @@ class ScanRecord:
             "findings_by_category": dict(self.findings_by_category),
             "findings_source_breakdown": dict(self.findings_source_breakdown),
             "findings": [f.to_dict() for f in self.findings],
+            "drift_summary": dict(self.drift_summary) if self.drift_summary else None,
         }
 
     @classmethod
@@ -279,6 +283,8 @@ class ScanRecord:
         record.findings_by_category = dict(data.get("findings_by_category") or {})
         record.findings_source_breakdown = dict(data.get("findings_source_breakdown") or {})
         record.findings = [FindingSnapshot.from_dict(f) for f in data.get("findings") or []]
+        # Records persisted before drift tracking remain readable.
+        record.drift_summary = dict(data["drift_summary"]) if data.get("drift_summary") else None
         return record
 
 
@@ -294,6 +300,7 @@ def build_scan_record(
     branch: str | None = None,
     commit_sha: str | None = None,
     owner_user_id: str | None = None,
+    drift_summary: dict[str, Any] | None = None,
 ) -> ScanRecord:
     """Build a ``ScanRecord`` from a finished scan.
 
@@ -326,4 +333,5 @@ def build_scan_record(
         findings_by_category=dict(scoring.findings_by_category),
         findings_source_breakdown=dict(scoring.findings_source_breakdown),
         findings=[FindingSnapshot(f) for f in findings],
+        drift_summary=drift_summary,
     )

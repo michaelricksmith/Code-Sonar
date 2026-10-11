@@ -1,3 +1,14 @@
+## Unreleased — Score trend API + score-over-time chart
+
+- **New `GET /api/history/trend?repo_path=` endpoint**: returns per-scan
+  points (`scanned_at`, `score`, `grade`, `finding_count`) in chronological
+  order plus the latest score delta. Powers retention Phase 1.
+- **Dashboard "Your score over time" panel now charts the full scan history**
+  as a sparkline with delta text ("▲ +20 since last scan · 5 scans tracked"),
+  replacing the previous 2-point drift view.
+- **mypy fix**: `_score_projection` now converts `FindingSnapshot` to
+  `Finding` before calling the deterministic scorer (strict mypy green).
+
 ## Unreleased — Admin console: plan grants, quota reset, user deletion
 
 - **Admins can now grant billing plans directly** (`POST /api/admin/users/{id}/plan`):

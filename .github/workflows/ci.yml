@@ -82,7 +82,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: npm audit (fail on high/critical)
-        run: npm audit --audit-level=high --json > /tmp/audit.json || (cat /tmp/audit.json; exit 1)
+        run: npm audit --audit-level=high
         working-directory: frontend
 
       - name: Type check (tsc)

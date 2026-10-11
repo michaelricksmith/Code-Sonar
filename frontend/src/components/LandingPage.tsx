@@ -78,7 +78,7 @@ export function LandingPage() {
             <a href="#/pricing">Pricing</a>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <a className="btn btn-ghost btn-sm" href={GITHUB_LOGIN_URL}>Sign in</a>
+            <a className="btn btn-ghost btn-sm" href="#/login">Sign in</a>
             <a className="btn btn-primary btn-sm" href={GITHUB_LOGIN_URL}>Get my score</a>
           </div>
         </div>

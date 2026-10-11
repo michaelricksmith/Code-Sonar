@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { ProgressStrip } from "./ProgressStrip";
 import { TwoFASettings } from "./TwoFASettings";
 import { SessionsSettings } from "./SessionsSettings";
+import { ChangePassword } from "./ChangePassword";
 import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity } from "../api/analyzers";
 import {
   AREA_NOTE,
@@ -322,6 +323,7 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
 
       <TwoFASettings />
       <SessionsSettings />
+      <ChangePassword />
     </div>
   );
 }

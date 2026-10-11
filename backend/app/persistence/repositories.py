@@ -1076,6 +1076,129 @@ class SqlUserStore:
                 connection.execute(insert(users).values(**self._legacy_insert_values(record)))
         return len(order)
 
+    def create_email_user(
+        self, email: str, name: str, password_hash: str
+    ) -> OAuthUser:
+        """Create a user with email/password credentials (provider='email')."""
+        from app.models.user import PLAN_FREE, STATUS_ACTIVE
+
+        email_norm = _normalize_email(email)
+        user_id = "user_" + uuid.uuid4().hex[:24]
+        now = _utcnow_iso()
+        with self.engine.begin() as connection:
+            _tenant(connection, current_tenant_id())
+            connection.execute(
+                insert(users).values(
+                    id=user_id,
+                    email=email_norm,
+                    display_name=name,
+                    avatar_url="",
+                    provider="email",
+                    provider_user_id="",
+                    plan=PLAN_FREE,
+                    status=STATUS_ACTIVE,
+                    is_admin=False,
+                    is_staff=False,
+                    password_hash=password_hash,
+                    email_verified=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            return self._get_or_raise(connection, user_id)
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        with self.engine.connect() as connection:
+            return connection.execute(
+                select(users.c.password_hash).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(password_hash=password_hash, updated_at=_utcnow_iso())
+            )
+
+    def is_email_verified(self, user_id: str) -> bool:
+        with self.engine.connect() as connection:
+            value = connection.execute(
+                select(users.c.email_verified).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+        return bool(value)
+
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(
+                    email_verified=verified,
+                    email_verify_token_hash=None,
+                    updated_at=_utcnow_iso(),
+                )
+            )
+
+    def set_email_verify_token(self, user_id: str, token_hash: str | None) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(email_verify_token_hash=token_hash, updated_at=_utcnow_iso())
+            )
+
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(users).where(users.c.email_verify_token_hash == token_hash)
+                )
+                .mappings()
+                .first()
+            )
+        return self._row_to_user(row) if row else None
+
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(
+                    password_reset_token_hash=token_hash,
+                    password_reset_expires_at=expires_at,
+                    updated_at=_utcnow_iso(),
+                )
+            )
+
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(users).where(users.c.password_reset_token_hash == token_hash)
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        # Check expiry.
+        from datetime import datetime, timezone
+
+        expires_at = row["password_reset_expires_at"]
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at)
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > expiry:
+                    return None
+            except ValueError:
+                return None
+        return self._row_to_user(row)
+
 
 class SqlComplianceRecordStore:
     """SQL implementation of the append-only compliance record store."""
@@ -1429,6 +1552,8 @@ class SqlSecurityEventStore:
                 row[0] for row in connection.execute(query).all() if row[0]
             }
 
+
+    # -- email/password auth ------------------------------------------
 
 class SqlSessionStore:
     """Server-side sessions backed by ``user_sessions``."""

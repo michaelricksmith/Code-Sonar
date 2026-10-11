@@ -149,7 +149,7 @@ def _resolve_encryption_provider() -> EncryptionProvider:
 # can never desync again. (The pin is hardcoded rather than derived from the
 # script directory because the app runs pip-installed on Render, where the
 # migration scripts are not next to the installed package.)
-REQUIRED_ALEMBIC_REVISION = "20261011_0013"
+REQUIRED_ALEMBIC_REVISION = "20261011_0014"
 
 
 def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:

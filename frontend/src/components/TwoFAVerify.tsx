@@ -10,13 +10,17 @@ export function TwoFAVerify() {
     setError(null);
     setBusy(true);
     try {
+      // Password logins stash the pending token in sessionStorage
+      // (no cookie yet); OAuth logins carry it as a cookie.
+      const pendingToken = sessionStorage.getItem("sonar_pending_2fa");
       const resp = await fetch("/api/2fa/verify-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, pending_token: pendingToken }),
       });
       if (resp.status === 204) {
+        sessionStorage.removeItem("sonar_pending_2fa");
         window.location.href = "/app";
         return;
       }

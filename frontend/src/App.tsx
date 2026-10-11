@@ -37,6 +37,12 @@ import { AskSonarDrawer } from "./components/AskSonarDrawer";
 import { AgeGate } from "./components/AgeGate";
 import { Dashboard } from "./components/Dashboard";
 import { TwoFAVerify } from "./components/TwoFAVerify";
+import {
+  ForgotPasswordPage,
+  LoginPage,
+  ResetPasswordPage,
+  SignupPage,
+} from "./components/AuthPages";
 import { FixesView } from "./components/FixesView";
 import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
@@ -61,7 +67,11 @@ type Route =
   | { name: "pricing" }
   | { name: "admin" }
   | { name: "legal"; page: LegalPageId }
-  | { name: "twofa" };
+  | { name: "twofa" }
+  | { name: "login" }
+  | { name: "signup" }
+  | { name: "forgot-password" }
+  | { name: "reset-password" };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -73,8 +83,14 @@ function parseRoute(): Route {
   if (window.location.pathname === "/2fa/verify") {
     return { name: "twofa" };
   }
+  if (window.location.pathname === "/reset-password") {
+    return { name: "reset-password" };
+  }
   if (hash === "" || hash === "/") return { name: "landing" };
   if (hash === "/pricing") return { name: "pricing" };
+  if (hash === "/login") return { name: "login" };
+  if (hash === "/signup") return { name: "signup" };
+  if (hash === "/forgot-password") return { name: "forgot-password" };
   if (hash === "/legal/terms") return { name: "legal", page: "terms" };
   if (hash === "/legal/privacy") return { name: "legal", page: "privacy" };
   if (hash === "/legal/accessibility") return { name: "legal", page: "accessibility" };
@@ -346,7 +362,7 @@ export default function App() {
     // Pricing and the legal pages are public: signed-out visitors can read them.
     // The 2FA verify page is public too: it completes a login that has no
     // session cookie yet.
-    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal" && route.name !== "twofa") navigate("/");
+    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal" && route.name !== "twofa" && route.name !== "login" && route.name !== "signup" && route.name !== "forgot-password" && route.name !== "reset-password") navigate("/");
     if (user && route.name === "landing") navigate("/app");
     // The admin console is only for admins; everyone else goes back to the app.
     if (user && route.name === "admin" && !user.is_admin) navigate("/app");
@@ -707,6 +723,10 @@ export default function App() {
         )}
 
         {route.name === "twofa" && <TwoFAVerify />}
+        {route.name === "login" && <LoginPage />}
+        {route.name === "signup" && <SignupPage />}
+        {route.name === "forgot-password" && <ForgotPasswordPage />}
+        {route.name === "reset-password" && <ResetPasswordPage />}
 
         {route.name === "admin" && user.is_admin && <AdminConsole currentUserId={user.id} />}
 

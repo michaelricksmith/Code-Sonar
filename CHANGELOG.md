@@ -1,3 +1,20 @@
+## Unreleased — Phases 3+4: weekly digest infra, streaks, churn nudges
+
+- **Weekly digest (Phase 3)**: `email_preferences` table (opted in by
+  default, one-tap HMAC-signed unsubscribe that bypasses the API auth
+  boundary). Digest content service with score trend, fixes verified
+  this week, open issues, and one clear CTA. Resend client behind
+  `RESEND_API_KEY` + `DIGEST_FROM_ADDRESS`; the sender refuses to run
+  unconfigured. Endpoints: `/api/digest/preview` (dry-run),
+  `/api/digest/status`, `/api/digest/preferences`, `/api/digest/unsubscribe`.
+- **Streaks + win-back (Phase 4)**: verified-fix weekly streaks (current
+  and longest) in fix-tracking stats. Churn signals from stored state
+  (`scanned_once_no_fix`, `fix_no_rescan`, `dormant`), tailored nudges
+  tied to actual repo state via `/api/retention/nudge`. Dashboard
+  `ProgressStrip` shows fix stats, streak, and the nudge banner.
+- Live sending is not yet enabled: it needs the Resend API key and a
+  verified sending domain set as Render env vars.
+
 ## Unreleased — Phase 2: push-triggered rescan with drift + debounce
 
 - **Scan records now carry a `drift_summary`**: new / resolved / persistent

@@ -444,3 +444,10 @@ class TestRetentionApi:
         body = _client().get("/api/retention/nudge").json()
         assert body["nudge"]["signal"] == "dormant"
         assert "octo/repo-1" in body["nudge"]["text"]
+
+
+class TestUnsubscribePublicPath:
+    def test_unsubscribe_bypasses_api_auth_boundary(self):
+        from app.security.runtime import PUBLIC_AUTH_PATHS
+
+        assert "/api/digest/unsubscribe" in PUBLIC_AUTH_PATHS

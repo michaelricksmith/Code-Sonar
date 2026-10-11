@@ -24,6 +24,10 @@ PUBLIC_AUTH_PATHS = frozenset(
         "/api/auth/google/login",
         "/api/auth/github/callback",
         "/api/auth/google/callback",
+        # One-tap digest unsubscribe: the token is HMAC-signed, so the
+        # link itself is the credential (opened from email clients with
+        # no session cookie).
+        "/api/digest/unsubscribe",
     }
 )
 DEFAULT_CORS_ORIGINS = (

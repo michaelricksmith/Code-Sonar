@@ -14,19 +14,18 @@ from app.main import app
 from app.security_events.events import (
     LOGIN_SUCCESS,
     NEW_DEVICE_LOGIN,
+    InMemorySecurityEventStore,
     get_security_event_store,
     log_event,
     log_login_success,
     set_security_event_store,
 )
-from app.security_events.events import InMemorySecurityEventStore
 from app.sessions.sessions import (
     InMemorySessionStore,
     decode_access_token,
     get_session_store,
     hash_refresh_token,
     new_access_token,
-    new_refresh_token,
     set_session_store,
 )
 

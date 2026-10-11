@@ -21,8 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from app.fix_tracking.models import FixAttempt
+from app.fix_tracking.runtime import get_fix_attempt_store
 
 router = APIRouter(prefix="/api/remediation", tags=["remediation"])
 
@@ -192,43 +195,30 @@ async def generate_fix_prompt(request: FixPromptRequest) -> dict[str, Any]:
 
 
 @router.post("/prompt-copied")
-async def log_prompt_copied(request: PromptCopiedRequest) -> dict[str, Any]:
-    """Record that the user copied a fix prompt (a "fix in progress")."""
-    _append_event(
-        {
-            "event": "copied",
-            "repository": request.repository,
-            "scan_id": request.scan_id,
-            "finding_id": request.finding_id,
-            "rule_id": request.rule_id,
-            "file_path": request.file_path,
-            "line_start": request.line_start,
-        }
+async def log_prompt_copied(
+    http_request: Request, request: PromptCopiedRequest
+) -> dict[str, Any]:
+    """Record that the user copied a fix prompt (a "fix in progress").
+
+    Persisted durably with the user's identity so verified fixes can be
+    attributed per user for reports, streaks, and the weekly digest.
+    """
+    from app.history.repository_identity import compute_repository_id_for_slug
+    from app.oauth import current_user
+
+    user = current_user(http_request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in to track fix prompts")
+    attempt = FixAttempt.new(
+        user_id=user.id,
+        repository_id=compute_repository_id_for_slug(request.repository),
+        finding_id=request.finding_id,
+        rule_id=request.rule_id,
+        file_path=request.file_path,
+        scan_id=request.scan_id,
     )
-    return {"ok": True}
-
-
-def _copied_events() -> list[dict[str, Any]]:
-    """All recorded ``copied`` prompt events."""
-    return [e for e in _read_events() if e.get("event") == "copied"]
-
-
-def _latest_copies(
-    events: list[dict[str, Any]],
-) -> dict[tuple[str, str], dict[str, Any]]:
-    """Most recent copy per ``(rule_id, file_path)`` pair."""
-    latest_copy: dict[tuple[str, str], dict[str, Any]] = {}
-    for event in events:
-        rule_id = str(event.get("rule_id", ""))
-        file_path = str(event.get("file_path", ""))
-        if not rule_id or not file_path:
-            continue
-        key = (rule_id, file_path)
-        if key not in latest_copy or str(event.get("at", "")) > str(
-            latest_copy[key].get("at", "")
-        ):
-            latest_copy[key] = event
-    return latest_copy
+    get_fix_attempt_store().append(attempt)
+    return {"ok": True, "attempt_id": attempt.attempt_id}
 
 
 def _resolve_latest_record(store: Any, repository: str, repository_id: str) -> Any:
@@ -260,53 +250,9 @@ def _latest_scan_index(latest_record: Any) -> tuple[str, set[tuple[str, str]]]:
     return str(latest_record.scanned_at or ""), latest_findings
 
 
-def _copy_status(
-    copied_at: str,
-    latest_record: Any,
-    latest_scanned_at: str,
-    key: tuple[str, str],
-    latest_findings: set[tuple[str, str]],
-) -> str:
-    """Reconcile one copied prompt against the latest scan."""
-    if not latest_record or latest_scanned_at <= copied_at:
-        return "in_progress"
-    if key in latest_findings:
-        return "still_open"
-    return "resolved"
-
-
-def _status_items(
-    latest_copy: dict[tuple[str, str], dict[str, Any]],
-    latest_record: Any,
-    latest_scanned_at: str,
-    latest_findings: set[tuple[str, str]],
-) -> list[dict[str, Any]]:
-    """Status rows for each tracked copy, newest copy first."""
-    items: list[dict[str, Any]] = []
-    for (rule_id, file_path), event in sorted(
-        latest_copy.items(), key=lambda kv: str(kv[1].get("at", "")), reverse=True
-    ):
-        copied_at = str(event.get("at", ""))
-        status = _copy_status(
-            copied_at, latest_record, latest_scanned_at, (rule_id, file_path),
-            latest_findings,
-        )
-        items.append(
-            {
-                "finding_id": event.get("finding_id"),
-                "rule_id": rule_id,
-                "file_path": file_path,
-                "line_start": event.get("line_start"),
-                "status": status,
-                "copied_at": copied_at,
-            }
-        )
-    return items
-
-
 @router.get("/prompt-status")
 async def prompt_status(
-    repository: str = Query(min_length=1),
+    http_request: Request, repository: str = Query(min_length=1)
 ) -> dict[str, Any]:
     """Reconcile copied prompts against the latest scan for a repository.
 
@@ -319,13 +265,47 @@ async def prompt_status(
     """
     from app.history.repository_identity import compute_repository_id_for_slug
     from app.main import get_history_store
+    from app.oauth import current_user
 
-    latest_copy = _latest_copies(_copied_events())
+    user = current_user(http_request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Sign in to view prompt status")
+
+    repository_id = compute_repository_id_for_slug(repository)
+    attempts = [
+        a
+        for a in get_fix_attempt_store().list_by_user(user.id)
+        if a.repository_id == repository_id
+    ]
+    latest_copy: dict[tuple[str, str], FixAttempt] = {}
+    for attempt in attempts:
+        key = attempt.finding_key
+        if key not in latest_copy or attempt.copied_at > latest_copy[key].copied_at:
+            latest_copy[key] = attempt
 
     store = get_history_store()
-    repository_id = compute_repository_id_for_slug(repository)
     latest_record = _resolve_latest_record(store, repository, repository_id)
     latest_scanned_at, latest_findings = _latest_scan_index(latest_record)
 
-    items = _status_items(latest_copy, latest_record, latest_scanned_at, latest_findings)
+    items: list[dict[str, Any]] = []
+    for (rule_id, file_path), attempt in sorted(
+        latest_copy.items(), key=lambda kv: kv[1].copied_at, reverse=True
+    ):
+        if attempt.verified:
+            status = "resolved"
+        elif not latest_record or latest_scanned_at <= attempt.copied_at:
+            status = "in_progress"
+        elif (rule_id, file_path) in latest_findings:
+            status = "still_open"
+        else:
+            status = "resolved"
+        items.append(
+            {
+                "finding_id": attempt.finding_id,
+                "rule_id": rule_id,
+                "file_path": file_path,
+                "status": status,
+                "copied_at": attempt.copied_at,
+            }
+        )
     return {"repository": repository, "items": items}

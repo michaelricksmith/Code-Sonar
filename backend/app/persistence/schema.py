@@ -132,6 +132,29 @@ for scan_column in ("before_scan_id", "after_scan_id"):
         )
     )
 
+fix_attempts = _tenant_table("fix_attempts", "attempt_id")
+fix_attempts.append_column(Column("user_id", String(128), nullable=False))
+fix_attempts.append_column(Column("repository_id", String(128), nullable=False))
+fix_attempts.append_column(Column("scan_id", String(128)))
+fix_attempts.append_column(Column("finding_id", String(255), nullable=False))
+fix_attempts.append_column(Column("rule_id", String(255), nullable=False))
+fix_attempts.append_column(Column("file_path", Text, nullable=False))
+fix_attempts.append_column(Column("copied_at", String(64), nullable=False))
+fix_attempts.append_column(Column("verified_at", String(64)))
+fix_attempts.append_column(Column("verified_scan_id", String(128)))
+fix_attempts.append_column(Column("score_delta", Integer))
+Index(
+    "ix_fix_attempts_user_verified",
+    fix_attempts.c.tenant_id,
+    fix_attempts.c.user_id,
+    fix_attempts.c.verified_at,
+)
+Index(
+    "ix_fix_attempts_repo",
+    fix_attempts.c.tenant_id,
+    fix_attempts.c.repository_id,
+)
+
 migration_ledger = Table(
     "migration_ledger",
     metadata,

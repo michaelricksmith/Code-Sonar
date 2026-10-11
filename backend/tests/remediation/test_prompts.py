@@ -34,15 +34,11 @@ from app.remediation.prompts import (
     FixPromptRequest,
     PromptCopiedRequest,
     _append_event,
-    _copied_events,
-    _copy_status,
     _data_root,
-    _latest_copies,
     _latest_scan_index,
     _prompt_events_path,
     _read_events,
     _resolve_latest_record,
-    _status_items,
     _utc_now_iso,
     build_fix_prompt,
     generate_fix_prompt,
@@ -188,14 +184,6 @@ def test_read_events_skips_blank_and_malformed_lines(isolated_prompt_store: Path
     assert events[0]["finding_id"] == "f-2"
 
 
-def test_copied_events_filters_to_copies(isolated_prompt_store: Path):
-    _append_event({"event": "generated", "finding_id": "f-1"})
-    _append_event({"event": "copied", "finding_id": "f-1"})
-    copied = _copied_events()
-    assert len(copied) == 1
-    assert copied[0]["event"] == "copied"
-
-
 # ---------------------------------------------------------------------------
 # Reconciliation helpers
 # ---------------------------------------------------------------------------
@@ -209,83 +197,6 @@ def _copied(rule_id: str, file_path: str, at: str, finding_id: str = "f-1"):
         "finding_id": finding_id,
         "at": at,
     }
-
-
-def test_latest_copies_keeps_newest_per_key():
-    events = [
-        _copied("r1", "a.py", "2026-10-01T00:00:00+00:00", finding_id="f-old"),
-        _copied("r1", "a.py", "2026-10-05T00:00:00+00:00", finding_id="f-new"),
-        _copied("r2", "b.py", "2026-10-02T00:00:00+00:00"),
-    ]
-    latest = _latest_copies(events)
-    assert set(latest) == {("r1", "a.py"), ("r2", "b.py")}
-    assert latest[("r1", "a.py")]["finding_id"] == "f-new"
-
-
-def test_latest_copies_skips_events_missing_key_parts():
-    events = [
-        {"event": "copied", "rule_id": "", "file_path": "a.py", "at": "2026-10-01T00:00:00+00:00"},
-        {"event": "copied", "rule_id": "r1", "file_path": "", "at": "2026-10-01T00:00:00+00:00"},
-    ]
-    assert _latest_copies(events) == {}
-
-
-def test_copy_status_in_progress_without_record():
-    result = _copy_status("2026-10-05T00:00:00+00:00", None, "", ("r1", "a.py"), set())
-    assert result == "in_progress"
-
-
-def test_copy_status_in_progress_when_scan_not_newer():
-    record = SimpleNamespace()
-    assert (
-        _copy_status(
-            "2026-10-06T00:00:00+00:00",
-            record,
-            "2026-10-05T00:00:00+00:00",
-            ("r1", "a.py"),
-            set(),
-        )
-        == "in_progress"
-    )
-
-
-def test_copy_status_still_open():
-    record = SimpleNamespace()
-    assert (
-        _copy_status(
-            "2026-10-05T00:00:00+00:00",
-            record,
-            "2026-10-06T00:00:00+00:00",
-            ("r1", "a.py"),
-            {("r1", "a.py")},
-        )
-        == "still_open"
-    )
-
-
-def test_copy_status_resolved():
-    record = SimpleNamespace()
-    assert (
-        _copy_status(
-            "2026-10-05T00:00:00+00:00",
-            record,
-            "2026-10-06T00:00:00+00:00",
-            ("r1", "a.py"),
-            set(),
-        )
-        == "resolved"
-    )
-
-
-def test_status_items_sorted_newest_first():
-    latest_copy = {
-        ("r1", "a.py"): _copied("r1", "a.py", "2026-10-01T00:00:00+00:00"),
-        ("r2", "b.py"): _copied("r2", "b.py", "2026-10-05T00:00:00+00:00"),
-    }
-    items = _status_items(latest_copy, None, "", set())
-    assert [i["rule_id"] for i in items] == ["r2", "r1"]
-    assert items[0]["status"] == "in_progress"
-    assert items[0]["copied_at"] == "2026-10-05T00:00:00+00:00"
 
 
 def test_latest_scan_index_none_record():
@@ -352,52 +263,100 @@ async def test_generate_fix_prompt_endpoint_records_event(isolated_prompt_store:
     assert events[0]["scan_id"] == "s-1"
 
 
-async def test_log_prompt_copied_endpoint_records_event(isolated_prompt_store: Path):
+async def test_log_prompt_copied_endpoint_records_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import app.oauth as oauth_module
+    from app.fix_tracking import runtime as fix_runtime
+    from app.fix_tracking.store import InMemoryFixAttemptStore
+
+    store = InMemoryFixAttemptStore()
+    original = fix_runtime.get_fix_attempt_store()
+    fix_runtime.set_fix_attempt_store(store)
+    monkeypatch.setattr(
+        oauth_module, "current_user", lambda r: SimpleNamespace(id="user-9")
+    )
+    try:
+        request = PromptCopiedRequest(
+            repository="michaelricksmith/Code-Sonar",
+            scan_id="s-1",
+            finding_id="f-1",
+            rule_id="testing_debt:untested-module",
+            file_path="backend/app/remediation/prompts.py",
+            line_start=1,
+        )
+        result = await log_prompt_copied(SimpleNamespace(), request)
+        assert result["ok"] is True
+        assert result["attempt_id"]
+        (attempt,) = store.list_by_user("user-9")
+        assert attempt.finding_id == "f-1"
+        assert attempt.rule_id == "testing_debt:untested-module"
+        assert attempt.scan_id == "s-1"
+    finally:
+        fix_runtime.set_fix_attempt_store(original)
+
+
+async def test_log_prompt_copied_requires_sign_in(monkeypatch: pytest.MonkeyPatch):
+    import app.oauth as oauth_module
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(oauth_module, "current_user", lambda r: None)
     request = PromptCopiedRequest(
         repository="michaelricksmith/Code-Sonar",
-        scan_id="s-1",
         finding_id="f-1",
         rule_id="testing_debt:untested-module",
         file_path="backend/app/remediation/prompts.py",
-        line_start=1,
     )
-    result = await log_prompt_copied(request)
-    assert result == {"ok": True}
-    events = _copied_events()
-    assert len(events) == 1
-    assert events[0]["finding_id"] == "f-1"
-    assert events[0]["rule_id"] == "testing_debt:untested-module"
+    with pytest.raises(HTTPException) as exc_info:
+        await log_prompt_copied(SimpleNamespace(), request)
+    assert exc_info.value.status_code == 401
 
 
 async def test_prompt_status_endpoint_reconciles_against_stubbed_store(
-    isolated_prompt_store: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ):
     import app.history.repository_identity as identity_mod
     import app.main
+    import app.oauth as oauth_module
+    from app.fix_tracking import runtime as fix_runtime
+    from app.fix_tracking.models import FixAttempt
+    from app.fix_tracking.store import InMemoryFixAttemptStore
 
     # A copied prompt from before the latest scan; the finding is gone there.
-    _append_event(
-        {
-            "event": "copied",
-            "at": "2026-10-01T00:00:00+00:00",
-            "repository": "michaelricksmith/Code-Sonar",
-            "finding_id": "f-9",
-            "rule_id": "testing_debt:untested-module",
-            "file_path": "backend/app/remediation/prompts.py",
-            "line_start": 1,
-        }
+    store = InMemoryFixAttemptStore()
+    store.append(
+        FixAttempt(
+            attempt_id="attempt-9",
+            user_id="user-9",
+            repository_id="repo-id-1",
+            finding_id="f-9",
+            rule_id="testing_debt:untested-module",
+            file_path="backend/app/remediation/prompts.py",
+            copied_at="2026-10-01T00:00:00+00:00",
+            scan_id="s-old",
+        )
     )
-    record = SimpleNamespace(
-        scanned_at="2026-10-06T00:00:00+00:00",
-        findings=[],
+    original = fix_runtime.get_fix_attempt_store()
+    fix_runtime.set_fix_attempt_store(store)
+    monkeypatch.setattr(
+        oauth_module, "current_user", lambda r: SimpleNamespace(id="user-9")
     )
-    monkeypatch.setattr(identity_mod, "compute_repository_id_for_slug", lambda slug: "repo-id-1")
-    monkeypatch.setattr(app.main, "get_history_store", lambda: _fake_store(latest=record))
+    try:
+        record = SimpleNamespace(
+            scanned_at="2026-10-06T00:00:00+00:00",
+            findings=[],
+        )
+        monkeypatch.setattr(identity_mod, "compute_repository_id_for_slug", lambda slug: "repo-id-1")
+        monkeypatch.setattr(app.main, "get_history_store", lambda: _fake_store(latest=record))
 
-    result = await prompt_status(repository="michaelricksmith/Code-Sonar")
-    assert result["repository"] == "michaelricksmith/Code-Sonar"
-    assert len(result["items"]) == 1
-    item = result["items"][0]
-    assert item["finding_id"] == "f-9"
-    assert item["status"] == "resolved"
-    assert item["copied_at"] == "2026-10-01T00:00:00+00:00"
+        result = await prompt_status(
+            SimpleNamespace(), repository="michaelricksmith/Code-Sonar"
+        )
+        assert result["repository"] == "michaelricksmith/Code-Sonar"
+        assert len(result["items"]) == 1
+        item = result["items"][0]
+        assert item["finding_id"] == "f-9"
+        assert item["status"] == "resolved"
+        assert item["copied_at"] == "2026-10-01T00:00:00+00:00"
+    finally:
+        fix_runtime.set_fix_attempt_store(original)

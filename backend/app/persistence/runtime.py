@@ -30,6 +30,7 @@ from app.persistence.crypto import (
 from app.persistence.privacy import CryptoErasureHook, SqlPrivacyRepository
 from app.persistence.repositories import (
     SqlComplianceRecordStore,
+    SqlFixAttemptStore,
     SqlGitHubInstallationStore,
     SqlHistoryStore,
     SqlOutcomeStore,
@@ -40,6 +41,7 @@ from app.persistence.repositories import (
 )
 from app.persistence.schema import (  # noqa: F401 - registers table on metadata
     compliance_records,
+    fix_attempts,
     metadata,
     projects,
 )
@@ -64,6 +66,7 @@ class PersistenceUnitOfWork:
         self.webhook_audit = SqlWebhookAuditStore(self.engine)
         self.webhook_jobs = SqlWebhookScanJobStore(self.engine)
         self.outcomes = SqlOutcomeStore(self.engine)
+        self.fix_attempts = SqlFixAttemptStore(self.engine)
         self.users = SqlUserStore(self.engine, self.encryption)
         self.privacy = SqlPrivacyRepository(self.engine, self.encryption, self.crypto_erasure)
         self.compliance = SqlComplianceRecordStore(self.engine)
@@ -138,7 +141,7 @@ def _resolve_encryption_provider() -> EncryptionProvider:
 # can never desync again. (The pin is hardcoded rather than derived from the
 # script directory because the app runs pip-installed on Render, where the
 # migration scripts are not next to the installed package.)
-REQUIRED_ALEMBIC_REVISION = "20261006_0008"
+REQUIRED_ALEMBIC_REVISION = "20261011_0009"
 
 
 def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
@@ -166,6 +169,7 @@ def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
 def _wire_runtime_stores(persistence: PersistenceUnitOfWork) -> None:
     """Publish the persistence stores to the application's runtime registries."""
     from app.compliance.records import set_compliance_store
+    from app.fix_tracking.runtime import set_fix_attempt_store
     from app.github_app import (
         set_installation_store,
         set_webhook_audit_store,
@@ -177,6 +181,7 @@ def _wire_runtime_stores(persistence: PersistenceUnitOfWork) -> None:
     from app.projects import set_project_store
 
     set_history_store(persistence.history)  # type: ignore[arg-type]
+    set_fix_attempt_store(persistence.fix_attempts)
     set_project_store(persistence.projects)  # type: ignore[arg-type]
     set_oauth_user_store(persistence.users)
     set_compliance_store(persistence.compliance)

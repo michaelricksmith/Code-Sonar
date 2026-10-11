@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.fix_tracking.models import FixAttempt
+from app.fix_tracking.runtime import get_fix_attempt_store, set_fix_attempt_store
+from app.fix_tracking.service import reconcile_verified_fixes, user_fix_stats
+from app.fix_tracking.store import InMemoryFixAttemptStore
 from app.history import SCHEMA_VERSION
 from app.history.history_store import InMemoryHistoryStore
 from app.history.repository_identity import compute_repository_id_for_slug
@@ -120,6 +125,31 @@ def isolated_history():
         set_history_store(original)
 
 
+@pytest.fixture(autouse=True)
+def _signed_in_user(monkeypatch: pytest.MonkeyPatch):
+    import app.oauth as oauth_module
+
+    monkeypatch.setattr(
+        oauth_module, "current_user", lambda r: SimpleNamespace(id="test-user")
+    )
+
+
+@pytest.fixture()
+def isolated_fix_attempts():
+    original = get_fix_attempt_store()
+    store = InMemoryFixAttemptStore()
+    set_fix_attempt_store(store)
+    try:
+        yield store
+    finally:
+        set_fix_attempt_store(original)
+
+
+def _backdate_copies(store: InMemoryFixAttemptStore, copied_at: str) -> None:
+    for attempt in store.list_by_user("test-user"):
+        attempt.copied_at = copied_at
+
+
 class TestFixPrompt:
     def test_prompt_contains_grounding(self, isolated_home: Path) -> None:
         response = _client().post(
@@ -175,7 +205,9 @@ class TestFixPrompt:
 
 
 class TestPromptCopied:
-    def test_copied_event_logged(self, isolated_home: Path) -> None:
+    def test_copied_attempt_recorded_with_user(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
         response = _client().post(
             "/api/remediation/prompt-copied",
             json={
@@ -188,11 +220,41 @@ class TestPromptCopied:
             },
         )
         assert response.status_code == 200
-        assert response.json() == {"ok": True}
-        events = _read_events(isolated_home)
-        assert len(events) == 1
-        assert events[0]["event"] == "copied"
-        assert events[0]["finding_id"] == "finding-1"
+        body = response.json()
+        assert body["ok"] is True
+        assert body["attempt_id"]
+        attempts = isolated_fix_attempts.list_by_user("test-user")
+        assert len(attempts) == 1
+        attempt = attempts[0]
+        assert attempt.attempt_id == body["attempt_id"]
+        assert attempt.finding_id == "finding-1"
+        assert attempt.rule_id == "secrets:hardcoded"
+        assert attempt.file_path == "src/app.py"
+        assert attempt.scan_id == "scan-1"
+        assert (
+            attempt.repository_id == compute_repository_id_for_slug("owner/repo")
+        )
+        assert not attempt.verified
+
+    def test_copied_requires_sign_in(
+        self,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import app.oauth as oauth_module
+
+        monkeypatch.setattr(oauth_module, "current_user", lambda r: None)
+        response = _client().post(
+            "/api/remediation/prompt-copied",
+            json={
+                "repository": "owner/repo",
+                "finding_id": "finding-1",
+                "rule_id": "secrets:hardcoded",
+                "file_path": "src/app.py",
+            },
+        )
+        assert response.status_code == 401
+        assert isolated_fix_attempts.list_by_user("test-user") == []
 
 
 class TestPromptStatus:
@@ -215,7 +277,9 @@ class TestPromptStatus:
         assert response.status_code == 200
 
     def test_in_progress_when_no_scan_since_copy(
-        self, isolated_home: Path, isolated_history: InMemoryHistoryStore
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
     ) -> None:
         self._copy()
         response = _client().get(
@@ -228,15 +292,13 @@ class TestPromptStatus:
         assert items[0]["rule_id"] == "secrets:hardcoded"
 
     def test_resolved_when_finding_gone_from_newer_scan(
-        self, isolated_home: Path, isolated_history: InMemoryHistoryStore
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
     ) -> None:
-        # Backdate the copy event so the scan below counts as "since the copy".
+        # Backdate the copy so the scan below counts as "since the copy".
         self._copy()
-        path = _events_file(isolated_home)
-        lines = path.read_text().splitlines()
-        record = json.loads(lines[0])
-        record["at"] = "2026-01-01T00:00:00+00:00"
-        path.write_text(json.dumps(record) + "\n")
+        _backdate_copies(isolated_fix_attempts, "2026-01-01T00:00:00+00:00")
 
         repo_id = compute_repository_id_for_slug("owner/repo")
         isolated_history.append(
@@ -255,14 +317,12 @@ class TestPromptStatus:
         assert items[0]["status"] == "resolved"
 
     def test_still_open_when_finding_present_in_newer_scan(
-        self, isolated_home: Path, isolated_history: InMemoryHistoryStore
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
     ) -> None:
         self._copy()
-        path = _events_file(isolated_home)
-        lines = path.read_text().splitlines()
-        record = json.loads(lines[0])
-        record["at"] = "2026-01-01T00:00:00+00:00"
-        path.write_text(json.dumps(record) + "\n")
+        _backdate_copies(isolated_fix_attempts, "2026-01-01T00:00:00+00:00")
 
         repo_id = compute_repository_id_for_slug("owner/repo")
         isolated_history.append(
@@ -281,7 +341,9 @@ class TestPromptStatus:
         assert items[0]["status"] == "still_open"
 
     def test_old_scan_does_not_flip_in_progress(
-        self, isolated_home: Path, isolated_history: InMemoryHistoryStore
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
     ) -> None:
         # Scan predates the copy: the user hasn't rescanned since copying.
         repo_id = compute_repository_id_for_slug("owner/repo")
@@ -300,3 +362,236 @@ class TestPromptStatus:
             .json()["items"]
         )
         assert items[0]["status"] == "in_progress"
+
+    def test_status_requires_sign_in(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.oauth as oauth_module
+
+        monkeypatch.setattr(oauth_module, "current_user", lambda r: None)
+        response = _client().get(
+            "/api/remediation/prompt-status", params={"repository": "owner/repo"}
+        )
+        assert response.status_code == 401
+
+
+def _mk_attempt(**overrides: object) -> FixAttempt:
+    data: dict[str, object] = {
+        "attempt_id": "attempt-1",
+        "user_id": "test-user",
+        "repository_id": compute_repository_id_for_slug("owner/repo"),
+        "finding_id": "finding-1",
+        "rule_id": "secrets:hardcoded",
+        "file_path": "src/app.py",
+        "copied_at": "2026-01-01T00:00:00+00:00",
+        "scan_id": "scan-old",
+    }
+    data.update(overrides)
+    return FixAttempt.from_dict(data)
+
+
+class TestInMemoryFixAttemptStore:
+    def test_list_open_excludes_verified(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        store = isolated_fix_attempts
+        store.append(_mk_attempt(attempt_id="a1"))
+        store.append(_mk_attempt(attempt_id="a2", finding_id="finding-2"))
+        assert [a.attempt_id for a in store.list_open(compute_repository_id_for_slug("owner/repo"))] == ["a1", "a2"]
+        assert store.mark_verified(
+            "a1",
+            verified_at="2026-06-01T00:00:00+00:00",
+            verified_scan_id="scan-new",
+            score_delta=20,
+        )
+        assert [a.attempt_id for a in store.list_open(compute_repository_id_for_slug("owner/repo"))] == ["a2"]
+
+    def test_mark_verified_is_idempotent(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        store = isolated_fix_attempts
+        store.append(_mk_attempt())
+        assert store.mark_verified(
+            "attempt-1",
+            verified_at="2026-06-01T00:00:00+00:00",
+            verified_scan_id="scan-new",
+            score_delta=None,
+        )
+        assert not store.mark_verified(
+            "attempt-1",
+            verified_at="2026-06-02T00:00:00+00:00",
+            verified_scan_id="scan-newer",
+            score_delta=None,
+        )
+        assert not store.mark_verified(
+            "no-such-attempt",
+            verified_at="2026-06-01T00:00:00+00:00",
+            verified_scan_id="scan-new",
+            score_delta=None,
+        )
+
+    def test_list_by_user_filters(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        store = isolated_fix_attempts
+        store.append(_mk_attempt(attempt_id="a1", user_id="alice"))
+        store.append(_mk_attempt(attempt_id="a2", user_id="bob"))
+        assert [a.attempt_id for a in store.list_by_user("alice")] == ["a1"]
+        assert store.list_by_user("carol") == []
+        store.mark_verified(
+            "a1",
+            verified_at="2026-06-01T00:00:00+00:00",
+            verified_scan_id="scan-new",
+            score_delta=5,
+        )
+        assert [a.attempt_id for a in store.list_by_user("alice", verified_only=True)] == ["a1"]
+        assert store.list_by_user("bob", verified_only=True) == []
+
+
+class TestReconcileVerifiedFixes:
+    def _seed_scan(
+        self,
+        history: InMemoryHistoryStore,
+        scan_id: str,
+        scanned_at: str,
+        findings: list[FindingSnapshot],
+    ) -> ScanRecord:
+        record = _mk_record(
+            scan_id=scan_id,
+            repository_id=compute_repository_id_for_slug("owner/repo"),
+            scanned_at=scanned_at,
+            findings=findings,
+        )
+        history.append(record)
+        return record
+
+    def test_verifies_resolved_attempt(
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
+    ) -> None:
+        repo_id = compute_repository_id_for_slug("owner/repo")
+        self._seed_scan(
+            isolated_history, "scan-old", "2026-01-02T00:00:00+00:00", [_mk_snapshot()]
+        )
+        isolated_fix_attempts.append(_mk_attempt(scan_id="scan-old"))
+        after = self._seed_scan(
+            isolated_history, "scan-new", "2026-06-01T00:00:00+00:00", []
+        )
+        verified = reconcile_verified_fixes(repo_id, after, isolated_history)
+        assert verified == 1
+        (attempt,) = isolated_fix_attempts.list_by_user("test-user")
+        assert attempt.verified
+        assert attempt.verified_scan_id == "scan-new"
+        assert attempt.verified_at == "2026-06-01T00:00:00+00:00"
+
+    def test_keeps_open_when_finding_still_present(
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
+    ) -> None:
+        repo_id = compute_repository_id_for_slug("owner/repo")
+        isolated_fix_attempts.append(_mk_attempt(scan_id="scan-old"))
+        after = self._seed_scan(
+            isolated_history, "scan-new", "2026-06-01T00:00:00+00:00", [_mk_snapshot()]
+        )
+        assert reconcile_verified_fixes(repo_id, after, isolated_history) == 0
+        (attempt,) = isolated_fix_attempts.list_by_user("test-user")
+        assert not attempt.verified
+
+    def test_ignores_scan_older_than_copy(
+        self,
+        isolated_history: InMemoryHistoryStore,
+        isolated_fix_attempts: InMemoryFixAttemptStore,
+    ) -> None:
+        repo_id = compute_repository_id_for_slug("owner/repo")
+        isolated_fix_attempts.append(
+            _mk_attempt(scan_id="scan-old", copied_at="2026-06-02T00:00:00+00:00")
+        )
+        after = self._seed_scan(
+            isolated_history, "scan-new", "2026-06-01T00:00:00+00:00", []
+        )
+        assert reconcile_verified_fixes(repo_id, after, isolated_history) == 0
+
+    def test_never_raises_on_broken_store(
+        self, isolated_history: InMemoryHistoryStore
+    ) -> None:
+        class Broken:
+            def list_open(self, repository_id: str) -> list[FixAttempt]:
+                raise RuntimeError("boom")
+
+        from app.fix_tracking.runtime import set_fix_attempt_store
+
+        set_fix_attempt_store(Broken())  # type: ignore[arg-type]
+        try:
+            after = self._seed_scan(
+                isolated_history, "scan-new", "2026-06-01T00:00:00+00:00", []
+            )
+            assert (
+                reconcile_verified_fixes("repo-id", after, isolated_history) == 0
+            )
+        finally:
+            set_fix_attempt_store(InMemoryFixAttemptStore())
+
+
+class TestFixTrackingStatsApi:
+    def test_stats_require_sign_in(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.oauth as oauth_module
+
+        monkeypatch.setattr(oauth_module, "current_user", lambda r: None)
+        assert _client().get("/api/fix-tracking/stats").status_code == 401
+
+    def test_stats_empty(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        body = _client().get("/api/fix-tracking/stats").json()
+        assert body["user_id"] == "test-user"
+        assert body["total_verified"] == 0
+        assert body["verified_this_week"] == 0
+        assert body["best_week"] is None
+        assert body["in_progress"] == 0
+        assert body["per_repo"] == []
+
+    def test_stats_counts(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        from datetime import datetime, timezone
+
+        store = isolated_fix_attempts
+        now = datetime.now(timezone.utc).isoformat()
+        store.append(_mk_attempt(attempt_id="v1", copied_at="2026-01-01T00:00:00+00:00"))
+        store.append(_mk_attempt(attempt_id="v2", copied_at="2026-01-01T00:00:00+00:00"))
+        store.append(_mk_attempt(attempt_id="open1", copied_at=now))
+        for attempt_id in ("v1", "v2"):
+            assert store.mark_verified(
+                attempt_id,
+                verified_at=now,
+                verified_scan_id="scan-new",
+                score_delta=10,
+            )
+        body = _client().get("/api/fix-tracking/stats").json()
+        assert body["total_verified"] == 2
+        assert body["verified_this_week"] == 2
+        assert body["in_progress"] == 1
+        assert body["best_week"]["count"] == 2
+        assert len(body["per_repo"]) == 1
+        assert body["per_repo"][0]["verified"] == 2
+        assert body["per_repo"][0]["in_progress"] == 1
+
+    def test_user_fix_stats_direct(
+        self, isolated_fix_attempts: InMemoryFixAttemptStore
+    ) -> None:
+        store = isolated_fix_attempts
+        store.append(_mk_attempt(attempt_id="v1"))
+        store.mark_verified(
+            "v1",
+            verified_at="2026-06-01T00:00:00+00:00",
+            verified_scan_id="scan-new",
+            score_delta=15,
+        )
+        stats = user_fix_stats("test-user")
+        assert stats["total_verified"] == 1
+        assert stats["best_week"] == {"week_start": "2026-06-01", "count": 1}
+        assert user_fix_stats("nobody")["total_verified"] == 0

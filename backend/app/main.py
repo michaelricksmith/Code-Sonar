@@ -15,6 +15,7 @@ from app.ask_sonar.api import router as ask_sonar_router
 from app.billing.api import router as billing_router
 from app.compliance.api import router as compliance_router
 from app.drift import compute_drift
+from app.fix_tracking.api import router as fix_tracking_router
 from app.github_app import router as github_app_router
 from app.github_app import set_webhook_scan_handler
 from app.history import (
@@ -84,6 +85,7 @@ app.include_router(oauth_router)
 app.include_router(scan_job_router)
 app.include_router(remediation_router)
 app.include_router(remediation_prompts_router)
+app.include_router(fix_tracking_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)
 app.include_router(privacy_router)
@@ -303,6 +305,11 @@ async def scan(request: ScanRequest) -> ScanResponse:
         )
         get_history_store().append(record)
         persisted_scan_id = record.scan_id
+        from app.fix_tracking.service import reconcile_verified_fixes
+
+        reconcile_verified_fixes(
+            record.repository_id, record, get_history_store()
+        )
     except Exception:
         pass
 
@@ -376,6 +383,9 @@ async def _run_project_scan(project_id: str, owner_user_id: str | None) -> ScanR
         history_store=get_history_store(),
         project_store=get_project_store(),
     )
+    from app.fix_tracking.service import reconcile_verified_fixes
+
+    reconcile_verified_fixes(record.repository_id, record, get_history_store())
 
     return _build_scan_response(
         repository_label=f"{project.owner}/{project.name}",

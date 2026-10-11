@@ -14,6 +14,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from app.compliance.records import ComplianceRecord
+from app.fix_tracking.models import FixAttempt
 from app.github_app import (
     GitHubInstallation,
     WebhookAuditRecord,
@@ -33,6 +34,7 @@ from app.oauth import OAuthUser, OAuthUserStore
 from app.persistence.crypto import EncryptionProvider, checkout_path_aad, oauth_token_aad
 from app.persistence.schema import (
     findings,
+    fix_attempts,
     github_installations,
     projects,
     remediation_outcomes,
@@ -522,6 +524,104 @@ class SqlOutcomeStore:
 
     def get(self, outcome_id: str) -> RemediationOutcome | None:
         return next((item for item in self.load_all() if item.outcome_id == outcome_id), None)
+
+
+class SqlFixAttemptStore:
+    """Durable fix-attempt store backed by the ``fix_attempts`` table."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(self, attempt: FixAttempt) -> None:
+        tenant_id = current_tenant_id()
+        try:
+            with self.engine.begin() as connection:
+                _tenant(connection, tenant_id)
+                connection.execute(
+                    insert(fix_attempts).values(
+                        tenant_id=tenant_id,
+                        attempt_id=attempt.attempt_id,
+                        user_id=attempt.user_id,
+                        repository_id=attempt.repository_id,
+                        scan_id=attempt.scan_id,
+                        finding_id=attempt.finding_id,
+                        rule_id=attempt.rule_id,
+                        file_path=attempt.file_path,
+                        copied_at=attempt.copied_at,
+                        verified_at=attempt.verified_at,
+                        verified_scan_id=attempt.verified_scan_id,
+                        score_delta=attempt.score_delta,
+                    )
+                )
+        except IntegrityError as exc:
+            raise FileExistsError("Fix attempt exists") from exc
+
+    def _row_to_attempt(self, row: RowMapping) -> FixAttempt:
+        return FixAttempt(
+            attempt_id=row["attempt_id"],
+            user_id=row["user_id"],
+            repository_id=row["repository_id"],
+            scan_id=row["scan_id"],
+            finding_id=row["finding_id"],
+            rule_id=row["rule_id"],
+            file_path=row["file_path"],
+            copied_at=row["copied_at"],
+            verified_at=row["verified_at"],
+            verified_scan_id=row["verified_scan_id"],
+            score_delta=row["score_delta"],
+        )
+
+    def list_open(self, repository_id: str) -> list[FixAttempt]:
+        query = (
+            select(fix_attempts)
+            .where(
+                fix_attempts.c.tenant_id == current_tenant_id(),
+                fix_attempts.c.repository_id == repository_id,
+                fix_attempts.c.verified_at.is_(None),
+            )
+            .order_by(fix_attempts.c.copied_at, fix_attempts.c.attempt_id)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_attempt(row) for row in rows]
+
+    def list_by_user(
+        self, user_id: str, *, verified_only: bool = False
+    ) -> list[FixAttempt]:
+        query = select(fix_attempts).where(
+            fix_attempts.c.tenant_id == current_tenant_id(),
+            fix_attempts.c.user_id == user_id,
+        )
+        if verified_only:
+            query = query.where(fix_attempts.c.verified_at.is_not(None))
+        query = query.order_by(fix_attempts.c.copied_at, fix_attempts.c.attempt_id)
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_attempt(row) for row in rows]
+
+    def mark_verified(
+        self,
+        attempt_id: str,
+        *,
+        verified_at: str,
+        verified_scan_id: str,
+        score_delta: int | None,
+    ) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(fix_attempts)
+                .where(
+                    fix_attempts.c.tenant_id == current_tenant_id(),
+                    fix_attempts.c.attempt_id == attempt_id,
+                    fix_attempts.c.verified_at.is_(None),
+                )
+                .values(
+                    verified_at=verified_at,
+                    verified_scan_id=verified_scan_id,
+                    score_delta=score_delta,
+                )
+            )
+            return result.rowcount > 0
 
 
 def _utcnow_iso() -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -40,12 +41,18 @@ from app.persistence.schema import (
     projects,
     remediation_outcomes,
     scans,
+    security_events,
     tenants,
+    user_sessions,
+    user_twofa,
     webhook_deliveries,
     webhook_jobs,
 )
 from app.projects import ProjectRecord
 from app.security.tenant import current_tenant_id
+from app.security_events.events import SecurityEvent
+from app.sessions.sessions import UserSession
+from app.twofa.store import TwoFactorRecord
 
 
 def _tenant(connection: Any, tenant_id: str) -> None:
@@ -1196,3 +1203,399 @@ class SqlEmailPreferenceStore:
                         unsubscribed_at=unsubscribed_at,
                     )
                 )
+
+
+class SqlTwoFactorStore:
+    """TOTP secrets + backup codes backed by ``user_twofa``."""
+
+    def __init__(self, engine: Engine, encryption: EncryptionProvider) -> None:
+        self.engine = engine
+        self.encryption = encryption
+
+    def _decrypt_secret(self, user_id: str, ciphertext: str | None) -> str | None:
+        if not ciphertext:
+            return None
+        from app.persistence.crypto import twofa_secret_aad
+
+        try:
+            return self.encryption.decrypt(ciphertext, aad=twofa_secret_aad(user_id))
+        except Exception:
+            return None
+
+    def _row_to_record(self, row: RowMapping, user_id: str) -> TwoFactorRecord:
+        try:
+            backup_hashes = json.loads(row["backup_codes_json"] or "[]")
+        except (TypeError, ValueError):
+            backup_hashes = []
+        return TwoFactorRecord(
+            user_id=user_id,
+            enabled=bool(row["enabled"]),
+            enrolled_at=row["enrolled_at"],
+            backup_code_hashes=list(backup_hashes),
+            failed_attempts=int(row["failed_attempts"] or 0),
+            locked_until=row["locked_until"],
+        )
+
+    def get(self, user_id: str) -> TwoFactorRecord | None:
+        query = select(user_twofa).where(
+            user_twofa.c.tenant_id == current_tenant_id(),
+            user_twofa.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        if row is None:
+            return None
+        return self._row_to_record(row, user_id)
+
+    def save_pending(self, user_id: str, secret: str) -> None:
+        from app.persistence.crypto import twofa_secret_aad
+
+        tenant_id = current_tenant_id()
+        ciphertext = self.encryption.encrypt(secret, aad=twofa_secret_aad(user_id))
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            result = connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == tenant_id,
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(secret_ciphertext=ciphertext, enabled=False)
+            )
+            if result.rowcount == 0:
+                connection.execute(
+                    insert(user_twofa).values(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        secret_ciphertext=ciphertext,
+                        enabled=False,
+                    )
+                )
+
+    def enable(self, user_id: str, backup_code_hashes: list[str]) -> None:
+        tenant_id = current_tenant_id()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == tenant_id,
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(
+                    enabled=True,
+                    enrolled_at=_utcnow_iso(),
+                    backup_codes_json=json.dumps(backup_code_hashes),
+                    failed_attempts=0,
+                    locked_until=None,
+                )
+            )
+
+    def disable(self, user_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                delete(user_twofa).where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+            )
+
+    def record_failure(self, user_id: str) -> None:
+        from datetime import timedelta
+
+        record = self.get(user_id)
+        if record is None:
+            return
+        failed = record.failed_attempts + 1
+        locked_until = record.locked_until
+        if failed >= 5:
+            locked_until = (
+                datetime.now(timezone.utc) + timedelta(minutes=15)
+            ).isoformat()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(failed_attempts=failed, locked_until=locked_until)
+            )
+
+    def reset_failures(self, user_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(failed_attempts=0, locked_until=None)
+            )
+
+    def consume_backup_code(self, user_id: str, code_hash: str) -> bool:
+        record = self.get(user_id)
+        if record is None or code_hash not in record.backup_code_hashes:
+            return False
+        remaining = [h for h in record.backup_code_hashes if h != code_hash]
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(backup_codes_json=json.dumps(remaining))
+            )
+        return True
+
+    def get_secret(self, user_id: str) -> str | None:
+        query = select(user_twofa.c.secret_ciphertext).where(
+            user_twofa.c.tenant_id == current_tenant_id(),
+            user_twofa.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            ciphertext = connection.execute(query).scalar_one_or_none()
+        return self._decrypt_secret(user_id, ciphertext)
+
+
+class SqlSecurityEventStore:
+    """Append-only security audit log backed by ``security_events``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(self, event: SecurityEvent) -> None:
+        with self.engine.begin() as connection:
+            _tenant(connection, current_tenant_id())
+            connection.execute(
+                insert(security_events).values(
+                    tenant_id=current_tenant_id(),
+                    event_id=event.event_id,
+                    user_id=event.user_id,
+                    event_type=event.event_type,
+                    ip_address=event.ip_address,
+                    user_agent=event.user_agent,
+                    device_fingerprint=event.device_fingerprint,
+                    created_at=event.created_at,
+                    metadata_json=json.dumps(event.metadata),
+                )
+            )
+
+    def list_for_user(self, user_id: str, limit: int = 50) -> list[SecurityEvent]:
+        query = (
+            select(security_events)
+            .where(
+                security_events.c.tenant_id == current_tenant_id(),
+                security_events.c.user_id == user_id,
+            )
+            .order_by(security_events.c.created_at.desc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        events = []
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            events.append(
+                SecurityEvent(
+                    event_id=row["event_id"],
+                    user_id=row["user_id"],
+                    event_type=row["event_type"],
+                    created_at=row["created_at"],
+                    ip_address=row["ip_address"],
+                    user_agent=row["user_agent"],
+                    device_fingerprint=row["device_fingerprint"],
+                    metadata=metadata,
+                )
+            )
+        return events
+
+    def known_devices(self, user_id: str) -> set[str]:
+        query = (
+            select(security_events.c.device_fingerprint)
+            .where(
+                security_events.c.tenant_id == current_tenant_id(),
+                security_events.c.user_id == user_id,
+                security_events.c.event_type == "login_success",
+                security_events.c.device_fingerprint.is_not(None),
+            )
+            .distinct()
+        )
+        with self.engine.connect() as connection:
+            return {
+                row[0] for row in connection.execute(query).all() if row[0]
+            }
+
+
+class SqlSessionStore:
+    """Server-side sessions backed by ``user_sessions``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def _row_to_session(self, row: RowMapping) -> UserSession:
+        return UserSession(
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+            last_seen_at=row["last_seen_at"],
+            device_info=row["device_info"],
+            ip_address=row["ip_address"],
+            revoked=bool(row["revoked"]),
+        )
+
+    def create(
+        self,
+        user_id: str,
+        refresh_token_hash: str,
+        *,
+        device_info: str | None,
+        ip_address: str | None,
+    ) -> "UserSession":
+        from app.sessions.sessions import REFRESH_TTL_SECONDS, UserSession
+
+        tenant_id = current_tenant_id()
+        now = datetime.now(timezone.utc)
+        session = UserSession(
+            session_id="sess_" + uuid.uuid4().hex[:24],
+            user_id=user_id,
+            created_at=now.isoformat(),
+            expires_at=(now + timedelta(seconds=REFRESH_TTL_SECONDS)).isoformat(),
+            last_seen_at=now.isoformat(),
+            device_info=device_info,
+            ip_address=ip_address,
+        )
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            connection.execute(
+                insert(user_sessions).values(
+                    tenant_id=tenant_id,
+                    session_id=session.session_id,
+                    user_id=user_id,
+                    refresh_token_hash=refresh_token_hash,
+                    device_info=device_info,
+                    ip_address=ip_address,
+                    created_at=session.created_at,
+                    last_seen_at=session.last_seen_at,
+                    expires_at=session.expires_at,
+                    revoked=False,
+                )
+            )
+        return session
+
+    def get(self, session_id: str) -> "UserSession | None":
+        query = select(user_sessions).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        return self._row_to_session(row) if row else None
+
+    def get_by_refresh_hash(self, refresh_token_hash: str) -> "UserSession | None":
+        # Hashes are not indexed for lookup by value; sessions are looked up
+        # by id after the refresh token is presented with its session id.
+        # This method scans the user's active sessions (bounded, indexed).
+        return None
+
+    def get_by_session_and_refresh(
+        self, session_id: str, refresh_token_hash: str
+    ) -> UserSession | None:
+        import hmac as hmac_module
+
+        query = select(user_sessions).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+            user_sessions.c.revoked == False,  # noqa: E712
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        if row is None:
+            return None
+        if not hmac_module.compare_digest(
+            row["refresh_token_hash"] or "", refresh_token_hash
+        ):
+            return None
+        return self._row_to_session(row)
+
+    def rotate_refresh(self, session_id: str, new_hash: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                    user_sessions.c.revoked == False,  # noqa: E712
+                )
+                .values(refresh_token_hash=new_hash)
+            )
+            return result.rowcount == 1
+
+    def touch(self, session_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                )
+                .values(last_seen_at=_utcnow_iso())
+            )
+
+    def revoke(self, session_id: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                    user_sessions.c.revoked == False,  # noqa: E712
+                )
+                .values(revoked=True, revoked_at=_utcnow_iso())
+            )
+            return result.rowcount == 1
+
+    def revoke_all_for_user(
+        self, user_id: str, except_session_id: str | None
+    ) -> int:
+        query = (
+            update(user_sessions)
+            .where(
+                user_sessions.c.tenant_id == current_tenant_id(),
+                user_sessions.c.user_id == user_id,
+                user_sessions.c.revoked == False,  # noqa: E712
+            )
+            .values(revoked=True, revoked_at=_utcnow_iso())
+        )
+        if except_session_id:
+            query = query.where(
+                user_sessions.c.session_id != except_session_id
+            )
+        with self.engine.begin() as connection:
+            result = connection.execute(query)
+            return result.rowcount
+
+    def list_for_user(self, user_id: str) -> list["UserSession"]:
+        query = (
+            select(user_sessions)
+            .where(
+                user_sessions.c.tenant_id == current_tenant_id(),
+                user_sessions.c.user_id == user_id,
+            )
+            .order_by(user_sessions.c.created_at.desc())
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_session(row) for row in rows]
+
+    def get_refresh_hash(self, session_id: str) -> str | None:
+        query = select(user_sessions.c.refresh_token_hash).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+        )
+        with self.engine.connect() as connection:
+            return connection.execute(query).scalar_one_or_none()

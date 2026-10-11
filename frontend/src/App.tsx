@@ -36,6 +36,7 @@ import { fetchPromptStatus } from "./api/prompts";
 import { AskSonarDrawer } from "./components/AskSonarDrawer";
 import { AgeGate } from "./components/AgeGate";
 import { Dashboard } from "./components/Dashboard";
+import { TwoFAVerify } from "./components/TwoFAVerify";
 import { FixesView } from "./components/FixesView";
 import { IssueDetail } from "./components/IssueDetail";
 import { IssuesView } from "./components/IssuesView";
@@ -59,7 +60,8 @@ type Route =
   | { name: "fixes" }
   | { name: "pricing" }
   | { name: "admin" }
-  | { name: "legal"; page: LegalPageId };
+  | { name: "legal"; page: LegalPageId }
+  | { name: "twofa" };
 
 const LAST_SCAN_KEY = "code-sonar:last-scan";
 
@@ -67,6 +69,9 @@ function parseRoute(): Route {
   const hash = window.location.hash.replace(/^#/, "");
   if (window.location.pathname.startsWith("/app") && (hash === "" || hash === "/")) {
     return { name: "app" };
+  }
+  if (window.location.pathname === "/2fa/verify") {
+    return { name: "twofa" };
   }
   if (hash === "" || hash === "/") return { name: "landing" };
   if (hash === "/pricing") return { name: "pricing" };
@@ -339,7 +344,9 @@ export default function App() {
   useEffect(() => {
     if (!authChecked) return;
     // Pricing and the legal pages are public: signed-out visitors can read them.
-    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal") navigate("/");
+    // The 2FA verify page is public too: it completes a login that has no
+    // session cookie yet.
+    if (!user && route.name !== "landing" && route.name !== "pricing" && route.name !== "legal" && route.name !== "twofa") navigate("/");
     if (user && route.name === "landing") navigate("/app");
     // The admin console is only for admins; everyone else goes back to the app.
     if (user && route.name === "admin" && !user.is_admin) navigate("/app");
@@ -698,6 +705,8 @@ export default function App() {
         {route.name === "pricing" && (
           <PricingView user={user} billing={billing} billingLoading={billingLoading} />
         )}
+
+        {route.name === "twofa" && <TwoFAVerify />}
 
         {route.name === "admin" && user.is_admin && <AdminConsole currentUserId={user.id} />}
 

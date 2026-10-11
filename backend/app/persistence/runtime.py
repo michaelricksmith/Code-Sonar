@@ -36,6 +36,9 @@ from app.persistence.repositories import (
     SqlHistoryStore,
     SqlOutcomeStore,
     SqlProjectStore,
+    SqlSecurityEventStore,
+    SqlSessionStore,
+    SqlTwoFactorStore,
     SqlUserStore,
     SqlWebhookAuditStore,
     SqlWebhookScanJobStore,
@@ -69,6 +72,9 @@ class PersistenceUnitOfWork:
         self.outcomes = SqlOutcomeStore(self.engine)
         self.fix_attempts = SqlFixAttemptStore(self.engine)
         self.email_preferences = SqlEmailPreferenceStore(self.engine)
+        self.two_factor = SqlTwoFactorStore(self.engine, self.encryption)
+        self.security_events = SqlSecurityEventStore(self.engine)
+        self.sessions = SqlSessionStore(self.engine)
         self.users = SqlUserStore(self.engine, self.encryption)
         self.privacy = SqlPrivacyRepository(self.engine, self.encryption, self.crypto_erasure)
         self.compliance = SqlComplianceRecordStore(self.engine)
@@ -143,7 +149,7 @@ def _resolve_encryption_provider() -> EncryptionProvider:
 # can never desync again. (The pin is hardcoded rather than derived from the
 # script directory because the app runs pip-installed on Render, where the
 # migration scripts are not next to the installed package.)
-REQUIRED_ALEMBIC_REVISION = "20261011_0010"
+REQUIRED_ALEMBIC_REVISION = "20261011_0013"
 
 
 def _initialize_schema(engine: Engine, config: PersistenceConfig) -> None:
@@ -182,10 +188,16 @@ def _wire_runtime_stores(persistence: PersistenceUnitOfWork) -> None:
     from app.ml.outcomes.runtime import set_outcome_store
     from app.oauth import set_oauth_user_store
     from app.projects import set_project_store
+    from app.security_events.events import set_security_event_store
+    from app.sessions.sessions import set_session_store
+    from app.twofa.store import set_two_factor_store
 
     set_history_store(persistence.history)  # type: ignore[arg-type]
     set_fix_attempt_store(persistence.fix_attempts)
     set_email_preference_store(persistence.email_preferences)
+    set_two_factor_store(persistence.two_factor)
+    set_security_event_store(persistence.security_events)
+    set_session_store(persistence.sessions)
     set_project_store(persistence.projects)  # type: ignore[arg-type]
     set_oauth_user_store(persistence.users)
     set_compliance_store(persistence.compliance)

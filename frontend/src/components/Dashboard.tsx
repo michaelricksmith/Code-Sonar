@@ -8,6 +8,8 @@
 import { useMemo } from "react";
 
 import { ProgressStrip } from "./ProgressStrip";
+import { TwoFASettings } from "./TwoFASettings";
+import { SessionsSettings } from "./SessionsSettings";
 import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity } from "../api/analyzers";
 import {
   AREA_NOTE,
@@ -317,6 +319,9 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
           <pre>{rawJson({ grade: result.grade, category_scores: result.category_scores, severity_distribution: result.severity_distribution })}</pre>
         </div>
       </NerdsDetails>
+
+      <TwoFASettings />
+      <SessionsSettings />
     </div>
   );
 }

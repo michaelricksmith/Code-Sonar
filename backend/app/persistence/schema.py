@@ -271,3 +271,42 @@ email_preferences.append_column(
     Column("digest_enabled", Boolean(), nullable=False, server_default="1")
 )
 email_preferences.append_column(Column("unsubscribed_at", String(64)))
+
+user_twofa = _tenant_table("user_twofa", "user_id")
+user_twofa.append_column(Column("secret_ciphertext", Text()))
+user_twofa.append_column(Column("enabled", Boolean(), nullable=False, server_default="0"))
+user_twofa.append_column(Column("enrolled_at", String(64)))
+user_twofa.append_column(Column("backup_codes_json", Text()))
+user_twofa.append_column(Column("failed_attempts", Integer(), nullable=False, server_default="0"))
+user_twofa.append_column(Column("locked_until", String(64)))
+
+security_events = _tenant_table("security_events", "event_id")
+security_events.append_column(Column("user_id", String(128)))
+security_events.append_column(Column("event_type", String(64), nullable=False))
+security_events.append_column(Column("ip_address", String(64)))
+security_events.append_column(Column("user_agent", String(512)))
+security_events.append_column(Column("device_fingerprint", String(64)))
+security_events.append_column(Column("created_at", String(64), nullable=False))
+security_events.append_column(Column("metadata_json", Text()))
+Index(
+    "ix_security_events_user_time",
+    security_events.c.tenant_id,
+    security_events.c.user_id,
+    security_events.c.created_at,
+)
+
+user_sessions = _tenant_table("user_sessions", "session_id")
+user_sessions.append_column(Column("user_id", String(128), nullable=False))
+user_sessions.append_column(Column("refresh_token_hash", String(64), nullable=False))
+user_sessions.append_column(Column("device_info", String(512)))
+user_sessions.append_column(Column("ip_address", String(64)))
+user_sessions.append_column(Column("created_at", String(64), nullable=False))
+user_sessions.append_column(Column("last_seen_at", String(64)))
+user_sessions.append_column(Column("expires_at", String(64), nullable=False))
+user_sessions.append_column(Column("revoked", Boolean(), nullable=False, server_default="0"))
+user_sessions.append_column(Column("revoked_at", String(64)))
+Index(
+    "ix_user_sessions_user",
+    user_sessions.c.tenant_id,
+    user_sessions.c.user_id,
+)

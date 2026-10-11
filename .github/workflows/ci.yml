@@ -81,6 +81,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: npm audit (fail on high/critical)
+        run: npm audit --audit-level=high
+        working-directory: frontend
+
       - name: Type check (tsc)
         run: npx tsc --noEmit
 

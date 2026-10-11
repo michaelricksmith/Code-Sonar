@@ -170,3 +170,29 @@ def test_grounding_attaches_advisory_prediction_and_similarity() -> None:
     assert cases[0]["scan_id"] == "scan-near"
     assert all(case["scan_id"] != "scan-current" for case in cases)
     assert cases[0]["label_trust_tier"] == "remediation_outcome"
+
+
+def test_score_projection_scores_snapshot_findings_as_findings() -> None:
+    """Regression: _score_projection must feed real Findings to the scorer.
+
+    ScanRecord stores FindingSnapshot objects (category/severity as plain
+    strings); calculate_score requires list[Finding] with enum fields.
+    """
+    context = build_grounding_context(_record(), top_findings_limit=1)
+
+    projection = context["deterministic"]["score_projection"]
+    assert projection["status"] == "available"
+    assert projection["findings_fixed"] == 1
+    assert isinstance(projection["projected_score"], int)
+    assert projection["score_gain"] >= 0
+
+
+def test_snapshot_to_finding_restores_enums() -> None:
+    from app.models.finding import FindingCategory, FindingSeverity
+
+    finding = _finding("x", severity="critical", debt_points=5, file_path="a.py").to_finding()
+
+    assert finding.id == "x"
+    assert finding.category is FindingCategory.MAINTAINABILITY
+    assert finding.severity is FindingSeverity.CRITICAL
+    assert finding.debt_points == 5

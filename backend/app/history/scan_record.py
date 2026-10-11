@@ -109,6 +109,17 @@ class FindingSnapshot:
             "metadata": dict(self.metadata),
         }
 
+    def to_finding(self) -> Finding:
+        """Rebuild a normalized ``Finding`` from this snapshot.
+
+        The deterministic scorer's contract is ``list[Finding]``: it groups
+        by the ``FindingCategory`` enum and reads enum ``.value`` attributes,
+        while the snapshot stores category/severity as plain strings.
+        Pydantic coerces the string values back to the enums, so the
+        round-trip is lossless for everything the scorer reads.
+        """
+        return Finding.model_validate(self.to_dict())
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FindingSnapshot":
         snap = cls.__new__(cls)

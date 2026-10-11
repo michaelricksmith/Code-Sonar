@@ -95,3 +95,7 @@ def checkout_path_aad(tenant_id: str, project_id: str) -> bytes:
 
 def oauth_token_aad(user_id: str) -> bytes:
     return f"code-sonar:v1:users:{user_id}:github_token".encode()
+
+
+def twofa_secret_aad(user_id: str) -> bytes:
+    return f"code-sonar:v1:users:{user_id}:totp_secret".encode()

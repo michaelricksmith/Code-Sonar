@@ -35,7 +35,7 @@ from urllib.parse import urlencode
 import httpx
 import jwt
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -106,10 +106,11 @@ class OAuthConfig:
 
 
 _secret_warning_emitted = False
+_fallback_secret: str | None = None
 
 
 def _session_secret() -> str:
-    global _secret_warning_emitted
+    global _secret_warning_emitted, _fallback_secret
     configured = os.environ.get("SONAR_SESSION_SECRET", "").strip()
     if configured:
         return configured
@@ -122,7 +123,11 @@ def _session_secret() -> str:
             file=sys.stderr,
             flush=True,
         )
-    return secrets.token_hex(32)
+    # Cache the fallback for the life of the process: a fresh secret per
+    # call would make every issued token unverifiable.
+    if _fallback_secret is None:
+        _fallback_secret = secrets.token_hex(32)
+    return _fallback_secret
 
 
 def session_secret_configured() -> bool:
@@ -642,16 +647,112 @@ def _google_profile(token: str) -> dict[str, Any]:
     return payload
 
 
-def _set_session_cookie(response: RedirectResponse, user_id: str, secret: str) -> None:
+_REFRESH_COOKIE = "sonar_refresh"
+
+
+def _set_session_cookie(
+    response: Response,
+    user_id: str,
+    secret: str,
+    request: Request | None = None,
+) -> None:
+    """Issue a server-side session: short-lived access token + refresh cookie.
+
+    Falls back to the legacy stateless JWT when the session store is
+    unavailable, so login never breaks.
+    """
+    from app.sessions.sessions import (
+        get_session_store,
+        hash_refresh_token,
+        new_access_token,
+        new_refresh_token,
+    )
+
+    ip, user_agent = _client_info(request)
+    device_info = (user_agent or "")[:512]
+    try:
+        store = get_session_store()
+        refresh_token = new_refresh_token()
+        session = store.create(
+            user_id,
+            hash_refresh_token(refresh_token),
+            device_info=device_info,
+            ip_address=ip,
+        )
+        access_token = new_access_token(session.session_id, user_id, secret)
+        # Refresh cookie carries "session_id.refresh_token" so rotation can
+        # find the session without scanning hashes.
+        refresh_value = f"{session.session_id}.{refresh_token}"
+    except Exception:
+        access_token = new_session_token(user_id, secret)
+        refresh_value = None
     response.set_cookie(
         _SESSION_COOKIE,
-        new_session_token(user_id, secret),
-        max_age=_SESSION_TTL_SECONDS,
+        access_token,
+        max_age=15 * 60,
         httponly=True,
         secure=True,
         samesite="lax",
         path="/",
     )
+    if refresh_value is not None:
+        response.set_cookie(
+            _REFRESH_COOKIE,
+            refresh_value,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/api/auth/refresh",
+        )
+
+
+def _client_info(request: Request | None) -> tuple[str | None, str | None]:
+    """(ip_address, user_agent) for security event logging."""
+    if request is None:
+        return None, None
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    elif request.client:
+        ip = request.client.host
+    else:
+        ip = None
+    return ip, request.headers.get("user-agent")
+
+
+def _login_response(
+    user_id: str, secret: str, request: Request | None = None, provider: str = "oauth"
+) -> RedirectResponse:
+    """Post-OAuth login response: 2FA challenge when enrolled, else session.
+
+    When the user has TOTP enabled, no session cookie is issued yet.
+    Instead a short-lived pending token goes in a cookie and the browser
+    is sent to /2fa/verify to complete the second factor.
+    """
+    from app.twofa.api import _PENDING_COOKIE, new_pending_token
+    from app.twofa.store import get_two_factor_store
+
+    record = get_two_factor_store().get(user_id)
+    ip, user_agent = _client_info(request)
+    if record is not None and record.enabled:
+        response = RedirectResponse(url="/2fa/verify", status_code=302)
+        response.set_cookie(
+            _PENDING_COOKIE,
+            new_pending_token(user_id),
+            max_age=5 * 60,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
+        return response
+    from app.security_events.events import log_login_success
+
+    log_login_success(user_id, ip_address=ip, user_agent=user_agent, provider=provider)
+    response = RedirectResponse(url="/app", status_code=302)
+    _set_session_cookie(response, user_id, secret, request)
+    return response
 
 
 def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]:
@@ -716,7 +817,9 @@ def _maybe_bootstrap_owner(user: OAuthUser) -> OAuthUser:
 
 
 @router.get("/github/callback")
-async def github_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
+async def github_callback(
+    request: Request, code: str | None = None, state: str | None = None
+) -> RedirectResponse:
     config = oauth_config()
     if not config.github_client_id or not config.github_client_secret:
         raise HTTPException(status_code=503, detail="GitHub OAuth is not configured")
@@ -731,13 +834,13 @@ async def github_callback(code: str | None = None, state: str | None = None) -> 
     user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
-    response = RedirectResponse(url="/app", status_code=302)
-    _set_session_cookie(response, user.id, config.session_secret)
-    return response
+    return _login_response(user.id, config.session_secret, request, provider="github")
 
 
 @router.get("/google/callback")
-async def google_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
+async def google_callback(
+    request: Request, code: str | None = None, state: str | None = None
+) -> RedirectResponse:
     config = oauth_config()
     if not config.google_client_id or not config.google_client_secret:
         raise HTTPException(status_code=503, detail="Google OAuth is not configured")
@@ -758,15 +861,15 @@ async def google_callback(code: str | None = None, state: str | None = None) -> 
     user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
-    response = RedirectResponse(url="/app", status_code=302)
-    _set_session_cookie(response, user.id, config.session_secret)
-    return response
+    return _login_response(user.id, config.session_secret, request, provider="google")
 
 
 def current_user(request: Request) -> OAuthUser | None:
     """Resolve the signed session cookie to a user, or None when absent.
 
-    Suspended users resolve to None: their sessions are dead.
+    Suspended users resolve to None: their sessions are dead. Revoked
+    server-side sessions resolve to None as well. Legacy stateless JWTs
+    (no ``sid`` claim) keep working until they expire.
     """
     token = request.cookies.get(_SESSION_COOKIE)
     if not token:
@@ -774,10 +877,39 @@ def current_user(request: Request) -> OAuthUser | None:
     user_id = verify_session_token(token, _session_secret())
     if not user_id:
         return None
+    # Server-side session check: a revoked session kills the access token.
+    try:
+        from app.sessions.sessions import decode_access_token, get_session_store
+
+        payload = decode_access_token(token, _session_secret())
+        session_id = (payload or {}).get("sid")
+        if session_id:
+            session = get_session_store().get(str(session_id))
+            if session is None or session.revoked:
+                return None
+            if session.user_id != user_id:
+                return None
+    except Exception:
+        pass
     user = get_oauth_user_store().get(user_id)
     if user is None or user.is_suspended:
         return None
     return user
+
+
+def current_session_id(request: Request) -> str | None:
+    """The server-side session id for this request, if it has one."""
+    token = request.cookies.get(_SESSION_COOKIE)
+    if not token:
+        return None
+    try:
+        from app.sessions.sessions import decode_access_token
+
+        payload = decode_access_token(token, _session_secret())
+        session_id = (payload or {}).get("sid")
+        return str(session_id) if session_id else None
+    except Exception:
+        return None
 
 
 def require_user(request: Request) -> OAuthUser:
@@ -802,9 +934,23 @@ async def auth_me(request: Request) -> dict[str, Any]:
 
 
 @router.post("/logout")
-async def auth_logout() -> JSONResponse:
+async def auth_logout(request: Request) -> JSONResponse:
+    from app.security_events.events import LOGOUT, log_event
+    from app.sessions.sessions import get_session_store
+
+    session_id = current_session_id(request)
+    token = request.cookies.get(_SESSION_COOKIE)
+    user_id = verify_session_token(token, _session_secret()) if token else None
+    if session_id:
+        try:
+            get_session_store().revoke(session_id)
+        except Exception:
+            pass
+    if user_id:
+        log_event(LOGOUT, user_id=user_id)
     response = JSONResponse(content={"status": "signed_out"})
     response.delete_cookie(_SESSION_COOKIE, path="/")
+    response.delete_cookie(_REFRESH_COOKIE, path="/api/auth/refresh")
     return response
 
 

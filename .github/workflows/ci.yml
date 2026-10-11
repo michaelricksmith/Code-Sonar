@@ -81,6 +81,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: npm audit (high/critical)
+        # Advisory for now: the sandbox cannot reach the npm audit endpoint
+        # to identify the specific CVEs. Dependabot (see dependabot.yml)
+        # files PRs for vulnerable dependencies. Flip continue-on-error to
+        # false once the current high/critical findings are resolved.
+        continue-on-error: true
+        run: npm audit --audit-level=high
+        working-directory: frontend
+
       - name: Type check (tsc)
         run: npx tsc --noEmit
 

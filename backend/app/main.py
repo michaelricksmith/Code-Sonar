@@ -43,11 +43,14 @@ from app.scoring.engine import SCORING_VERSION, calculate_score
 from app.security import RepositoryValidationError, validate_repo_path
 from app.security.ownership import assert_scan_access, visible_scans
 from app.security.runtime import ApiBoundaryMiddleware, validate_runtime_security_config
+from app.security_events.api import router as security_events_router
 from app.services.repository import (
     get_analyzer_metadata,
     get_registered_analyzers,
     scan_repository,
 )
+from app.sessions.api import router as sessions_router
+from app.twofa.api import router as twofa_router
 
 app = FastAPI(
     title="Code Sonar API",
@@ -90,6 +93,9 @@ app.include_router(remediation_prompts_router)
 app.include_router(fix_tracking_router)
 app.include_router(digest_router)
 app.include_router(retention_router)
+app.include_router(twofa_router)
+app.include_router(sessions_router)
+app.include_router(security_events_router)
 app.include_router(projects_router)
 app.include_router(github_app_router)
 app.include_router(privacy_router)

@@ -297,8 +297,9 @@ async def test_log_prompt_copied_endpoint_records_attempt(
 
 
 async def test_log_prompt_copied_requires_sign_in(monkeypatch: pytest.MonkeyPatch):
-    import app.oauth as oauth_module
     from fastapi import HTTPException
+
+    import app.oauth as oauth_module
 
     monkeypatch.setattr(oauth_module, "current_user", lambda r: None)
     request = PromptCopiedRequest(
@@ -346,7 +347,9 @@ async def test_prompt_status_endpoint_reconciles_against_stubbed_store(
             scanned_at="2026-10-06T00:00:00+00:00",
             findings=[],
         )
-        monkeypatch.setattr(identity_mod, "compute_repository_id_for_slug", lambda slug: "repo-id-1")
+        monkeypatch.setattr(
+            identity_mod, "compute_repository_id_for_slug", lambda slug: "repo-id-1"
+        )
         monkeypatch.setattr(app.main, "get_history_store", lambda: _fake_store(latest=record))
 
         result = await prompt_status(

@@ -397,14 +397,15 @@ class TestInMemoryFixAttemptStore:
         store = isolated_fix_attempts
         store.append(_mk_attempt(attempt_id="a1"))
         store.append(_mk_attempt(attempt_id="a2", finding_id="finding-2"))
-        assert [a.attempt_id for a in store.list_open(compute_repository_id_for_slug("owner/repo"))] == ["a1", "a2"]
+        repo_id = compute_repository_id_for_slug("owner/repo")
+        assert [a.attempt_id for a in store.list_open(repo_id)] == ["a1", "a2"]
         assert store.mark_verified(
             "a1",
             verified_at="2026-06-01T00:00:00+00:00",
             verified_scan_id="scan-new",
             score_delta=20,
         )
-        assert [a.attempt_id for a in store.list_open(compute_repository_id_for_slug("owner/repo"))] == ["a2"]
+        assert [a.attempt_id for a in store.list_open(repo_id)] == ["a2"]
 
     def test_mark_verified_is_idempotent(
         self, isolated_fix_attempts: InMemoryFixAttemptStore

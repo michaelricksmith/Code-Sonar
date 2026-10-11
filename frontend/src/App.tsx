@@ -16,8 +16,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { DriftResult, Finding, ScanResponse } from "./api/analyzers";
-import { fetchDrift, fetchHistoryCount, fetchScan } from "./api/analyzers";
+import type { DriftResult, Finding, ScanResponse, ScoreTrend } from "./api/analyzers";
+import { fetchDrift, fetchHistoryCount, fetchScan, fetchTrend } from "./api/analyzers";
 import { assertBillingUrl, stripSensitiveKeys } from "./utils/security";
 import { fetchMe, logout } from "./api/auth";
 import type { User } from "./api/auth";
@@ -107,6 +107,8 @@ export default function App() {
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [repoLabel, setRepoLabel] = useState<string | null>(null);
   const [drift, setDrift] = useState<DriftResult | null>(null);
+  /** Per-repo score-over-time trend for the "Your score over time" panel. */
+  const [trend, setTrend] = useState<ScoreTrend | null>(null);
   /** Local scan-over-scan diff (score delta + fixed/new counts), computed
    *  from the previous in-memory scan. Used when the backend drift API has
    *  no history to compare (e.g. after a server-side data reset). */
@@ -385,12 +387,18 @@ export default function App() {
     } catch {
       setDrift(null);
     }
+    try {
+      setTrend(await fetchTrend(label));
+    } catch {
+      setTrend(null);
+    }
   }, []);
 
   const handleOnboardingComplete = useCallback(
     (scanResult: ScanResponse, label: string) => {
       persistScan(scanResult, label);
       setDrift(null);
+      setTrend(null);
       void refreshDrift(label);
       // The first scan consumed quota — refresh the sidebar usage block.
       setUsageTick((t) => t + 1);
@@ -479,6 +487,7 @@ export default function App() {
     setResult(null);
     setRepoLabel(null);
     setDrift(null);
+    setTrend(null);
     setScanDiff(null);
     try {
       window.localStorage.removeItem(LAST_SCAN_KEY);
@@ -713,6 +722,7 @@ export default function App() {
             result={result}
             repoLabel={repoLabel ?? result.repository}
             drift={drift}
+            trend={trend}
             scanDiff={scanDiff}
             onOpenIssue={openIssue}
             onOpenSonar={openSonar}

@@ -277,6 +277,29 @@ export async function fetchDrift(
   return data as DriftResult;
 }
 
+export interface TrendPoint {
+  scan_id: string;
+  scanned_at: string;
+  score: number;
+  grade: string;
+  finding_count: number;
+}
+
+export interface ScoreTrend {
+  count: number;
+  /** Latest score minus the previous scan's score; null with fewer than two scans. */
+  delta: number | null;
+  points: TrendPoint[];
+}
+
+export async function fetchTrend(repoPath: string, limit = 30): Promise<ScoreTrend> {
+  const params = new URLSearchParams({ repo_path: repoPath, limit: String(limit) });
+  const res = await fetch(`${API_BASE}/history/trend?${params.toString()}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? `Trend fetch failed (HTTP ${res.status})`);
+  return data as ScoreTrend;
+}
+
 export function severityRank(severity: Severity): number {
   switch (severity) {
     case "critical": return 4;

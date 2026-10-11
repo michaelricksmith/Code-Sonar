@@ -7,7 +7,7 @@
 
 import { useMemo } from "react";
 
-import type { DriftResult, Finding, ScanResponse, Severity } from "../api/analyzers";
+import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity } from "../api/analyzers";
 import {
   AREA_NOTE,
   AREA_ORDER,
@@ -34,6 +34,8 @@ interface DashboardProps {
   result: ScanResponse;
   repoLabel: string;
   drift: DriftResult | null;
+  /** Full per-repo score history for the "Your score over time" panel. */
+  trend: ScoreTrend | null;
   /** Local scan-over-scan diff, used when the backend drift API has no
    *  history to compare. Takes precedence only when drift is unavailable. */
   scanDiff: { scoreDelta: number; fixedCount: number; newCount: number } | null;
@@ -135,7 +137,7 @@ function HealthByArea({ result }: { result: ScanResponse }) {
   );
 }
 
-export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onOpenSonar, onRescan, onAddRepo, onShowAllIssues }: DashboardProps) {
+export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIssue, onOpenSonar, onRescan, onAddRepo, onShowAllIssues }: DashboardProps) {
   const ranked = useMemo(() => rankIssues(result.findings), [result]);
   const top = ranked[0] ?? null;
   const grade = gradeForScore(result.score);
@@ -152,9 +154,9 @@ export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onO
   const fileCount = new Set(result.findings.map((f) => f.file_path)).size;
 
   const spark = useMemo(() => {
-    if (!drift) return null;
-    return [drift.summary.baseline.score, drift.summary.current.score];
-  }, [drift]);
+    if (!trend || trend.points.length < 2) return null;
+    return trend.points;
+  }, [trend]);
 
   return (
     <div className="page">
@@ -243,23 +245,22 @@ export function Dashboard({ result, repoLabel, drift, scanDiff, onOpenIssue, onO
           {spark ? (
             <>
               <div className="sparkline">
-                {spark.map((s, i) => (
+                {spark.map((p, i) => (
                   <div
-                    key={i}
+                    key={p.scan_id}
                     className={`sparkbar ${i < spark.length - 1 ? "old" : ""}`}
-                    style={{ height: `${Math.max(8, ((s - 300) / 550) * 100)}%` }}
-                    title={`Score ${s}`}
+                    style={{ height: `${Math.max(8, ((p.score - 300) / 550) * 100)}%` }}
+                    title={`Score ${p.score} — ${timeAgo(p.scanned_at)}`}
                   />
                 ))}
               </div>
               <div className="spark-lbls">
-                <span>{timeAgo(drift!.summary.baseline.scanned_at)}</span>
+                <span>{timeAgo(spark[0].scanned_at)}</span>
                 <span>Today</span>
               </div>
               <p className="trend-note">
-                <b>{deltaText(delta ?? 0)}.</b>{" "}
-                {drift!.summary.resolved_count > 0 && `${drift!.summary.resolved_count} ${copy.findings} fixed. `}
-                {drift!.summary.new_count > 0 && `${drift!.summary.new_count} new ${drift!.summary.new_count === 1 ? copy.finding : copy.findings} appeared.`}
+                <b>{deltaText(trend?.delta ?? 0)}.</b>{" "}
+                {spark.length} {spark.length === 1 ? "scan" : "scans"} tracked.
               </p>
             </>
           ) : (

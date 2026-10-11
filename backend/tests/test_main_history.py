@@ -30,10 +30,10 @@ from app.models.finding import Finding
 from app.scoring.engine import ScoringResult
 
 
-def _mk_scoring() -> ScoringResult:
+def _mk_scoring(*, score: int = 72, grade: str = "C") -> ScoringResult:
     return ScoringResult(
-        score=72,
-        grade="C",
+        score=score,
+        grade=grade,
         total_debt_points=14,
         finding_count=3,
         category_scores={"maintainability": 72},
@@ -50,12 +50,14 @@ def _mk_record(
     repository_id: str,
     findings: list[Finding],
     scanned_at: str,
+    score: int = 72,
+    grade: str = "C",
 ) -> ScanRecord:
     return build_scan_record(
         repository_id=repository_id,
         repository_path="/tmp/fake-repo",
         findings=findings,
-        scoring=_mk_scoring(),
+        scoring=_mk_scoring(score=score, grade=grade),
         scan_id=scan_id,
         scanned_at=scanned_at,
         owner_user_id="test-user",
@@ -69,12 +71,16 @@ def _seed(
     repository_id: str,
     findings: list[Finding],
     scanned_at: str,
+    score: int = 72,
+    grade: str = "C",
 ) -> ScanRecord:
     record = _mk_record(
         scan_id=scan_id,
         repository_id=repository_id,
         findings=findings,
         scanned_at=scanned_at,
+        score=score,
+        grade=grade,
     )
     store.append(record)
     return record
@@ -305,3 +311,107 @@ class TestDriftRoute:
             params={"repo_path": str(tmp_path), "to_scan_id": "no-such-scan"},
         )
         assert response.status_code == 404
+
+
+class TestHistoryTrendRoute:
+    def test_trend_404_without_history(self, client, history_store, tmp_path):
+        response = client.get("/api/history/trend", params={"repo_path": str(tmp_path)})
+        assert response.status_code == 404
+
+    def test_trend_single_scan_delta_null(
+        self, client, history_store, sample_findings_fixture, tmp_path
+    ):
+        repository_id = compute_repository_id(tmp_path)
+        _seed(
+            history_store,
+            scan_id="scan-a",
+            repository_id=repository_id,
+            findings=sample_findings_fixture,
+            scanned_at="2026-09-20T00:00:00+00:00",
+            score=593,
+            grade="C",
+        )
+        response = client.get("/api/history/trend", params={"repo_path": str(tmp_path)})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 1
+        assert data["delta"] is None
+        point = data["points"][0]
+        assert point["scan_id"] == "scan-a"
+        assert point["scanned_at"] == "2026-09-20T00:00:00+00:00"
+        assert point["score"] == 593
+        assert point["grade"] == "C"
+        assert point["finding_count"] == 3
+
+    def test_trend_points_chronological_with_delta(
+        self, client, history_store, sample_findings_fixture, tmp_path
+    ):
+        repository_id = compute_repository_id(tmp_path)
+        for scan_id, scanned_at, score in [
+            ("scan-a", "2026-09-20T00:00:00+00:00", 600),
+            ("scan-b", "2026-09-21T00:00:00+00:00", 640),
+            ("scan-c", "2026-09-22T00:00:00+00:00", 620),
+        ]:
+            _seed(
+                history_store,
+                scan_id=scan_id,
+                repository_id=repository_id,
+                findings=sample_findings_fixture,
+                scanned_at=scanned_at,
+                score=score,
+            )
+        response = client.get("/api/history/trend", params={"repo_path": str(tmp_path)})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 3
+        assert [p["score"] for p in data["points"]] == [600, 640, 620]
+        assert [p["scan_id"] for p in data["points"]] == ["scan-a", "scan-b", "scan-c"]
+        assert data["delta"] == -20
+
+    def test_trend_respects_limit(
+        self, client, history_store, sample_findings_fixture, tmp_path
+    ):
+        repository_id = compute_repository_id(tmp_path)
+        for i in range(5):
+            _seed(
+                history_store,
+                scan_id=f"scan-{i}",
+                repository_id=repository_id,
+                findings=sample_findings_fixture,
+                scanned_at=f"2026-09-2{i}T00:00:00+00:00",
+                score=600 + i,
+            )
+        response = client.get(
+            "/api/history/trend", params={"repo_path": str(tmp_path), "limit": 2}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+        assert [p["scan_id"] for p in data["points"]] == ["scan-3", "scan-4"]
+        assert data["delta"] == 1
+
+    def test_trend_supports_repo_slug_identity(
+        self, client, history_store, sample_findings_fixture
+    ):
+        slug_id = compute_repository_id_for_slug("owner/name")
+        _seed(
+            history_store,
+            scan_id="scan-a",
+            repository_id=slug_id,
+            findings=sample_findings_fixture,
+            scanned_at="2026-09-20T00:00:00+00:00",
+            score=600,
+        )
+        _seed(
+            history_store,
+            scan_id="scan-b",
+            repository_id=slug_id,
+            findings=sample_findings_fixture,
+            scanned_at="2026-09-21T00:00:00+00:00",
+            score=650,
+        )
+        response = client.get("/api/history/trend", params={"repo_path": "owner/name"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+        assert data["delta"] == 50

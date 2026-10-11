@@ -1,3 +1,14 @@
+## Unreleased — Phase 2: push-triggered rescan with drift + debounce
+
+- **Scan records now carry a `drift_summary`**: new / resolved / persistent
+  issue counts plus score delta, computed against the previous scan at
+  scan time and persisted in history. Exposed in scan responses, the
+  project dashboard, and history endpoints.
+- **Push-scan debounce**: at most one push-triggered rescan per repo per
+  15 minutes. Debounced deliveries are audited, not queued.
+- **Quota policy**: push-triggered rescans never consume the user's monthly
+  scan quota (system-initiated); abuse is contained by the debounce.
+
 ## Unreleased — Durable fix tracking (fix_attempts table)
 
 - **New `fix_attempts` Postgres table** (migration 20261011_0009): every

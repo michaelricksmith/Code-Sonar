@@ -149,6 +149,11 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
             <div className="notice warning">
               <b>Couldn&rsquo;t load your repos</b>
               {reposError} — you can still paste a repo URL below.
+              <div style={{ marginTop: 12 }}>
+                <a className="btn btn-ghost btn-sm" href="/api/auth/github/connect">
+                  Connect GitHub
+                </a>
+              </div>
             </div>
           )}
           {!reposLoading && !reposError && (

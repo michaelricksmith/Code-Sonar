@@ -17,6 +17,7 @@ rest); otherwise they fall back to the local JSON user store under
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -35,7 +36,7 @@ from urllib.parse import urlencode
 import httpx
 import jwt
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -106,11 +107,10 @@ class OAuthConfig:
 
 
 _secret_warning_emitted = False
-_fallback_secret: str | None = None
 
 
 def _session_secret() -> str:
-    global _secret_warning_emitted, _fallback_secret
+    global _secret_warning_emitted
     configured = os.environ.get("SONAR_SESSION_SECRET", "").strip()
     if configured:
         return configured
@@ -123,11 +123,7 @@ def _session_secret() -> str:
             file=sys.stderr,
             flush=True,
         )
-    # Cache the fallback for the life of the process: a fresh secret per
-    # call would make every issued token unverifiable.
-    if _fallback_secret is None:
-        _fallback_secret = secrets.token_hex(32)
-    return _fallback_secret
+    return secrets.token_hex(32)
 
 
 def session_secret_configured() -> bool:
@@ -179,6 +175,65 @@ def verify_state(state: str | None, secret: str) -> bool:
     except ValueError:
         return False
     return 0 <= age <= _STATE_TTL_SECONDS
+
+
+def new_github_connect_state(secret: str, user_id: str) -> str:
+    """Issue a signed OAuth state binding a GitHub-connect flow to a user.
+
+    Unlike the login flow (which mints a brand-new session), the connect flow
+    attaches the GitHub OAuth token to the already-signed-in account. The
+    user id travels inside the HMAC-signed payload so the callback can verify
+    the person completing the flow is the one who started it. Same 10-minute
+    TTL as login states.
+    """
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "mode": "connect",
+                    "user_id": user_id,
+                    "nonce": secrets.token_urlsafe(16),
+                }
+            ).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+    issued_at = str(int(time.time()))
+    return _sign_state(f"{payload}.{issued_at}", secret)
+
+
+def parse_github_connect_state(state: str | None, secret: str) -> str | None:
+    """Return the bound user id when ``state`` is a valid connect state.
+
+    Returns None for login states, tampered states, and expired states.
+    """
+    if not state:
+        return None
+    try:
+        payload_b64, issued_at, digest = state.rsplit(".", 2)
+    except ValueError:
+        return None
+    expected = hmac.new(
+        secret.encode("utf-8"), f"{payload_b64}.{issued_at}".encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(digest, expected):
+        return None
+    try:
+        age = time.time() - int(issued_at)
+    except ValueError:
+        return None
+    if not 0 <= age <= _STATE_TTL_SECONDS:
+        return None
+    try:
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("mode") != "connect":
+        return None
+    user_id = payload.get("user_id")
+    return str(user_id) if user_id else None
 
 
 def new_session_token(user_id: str, secret: str) -> str:
@@ -273,27 +328,32 @@ class UserStore(Protocol):
         """
         ...
 
-    # -- email/password auth (SqlUserStore only; JSON store lacks these) --
-
-    def get_by_email(self, email: str) -> OAuthUser | None: ...
-    def create_email_user(
-        self, email: str, name: str, password_hash: str
-    ) -> OAuthUser: ...
-    def get_password_hash(self, user_id: str) -> str | None: ...
-    def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
-    def is_email_verified(self, user_id: str) -> bool: ...
-    def set_email_verified(self, user_id: str, verified: bool = True) -> None: ...
-    def set_email_verify_token(
-        self, user_id: str, token_hash: str | None
-    ) -> None: ...
-    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None: ...
-    def set_password_reset_token(
-        self, user_id: str, token_hash: str | None, expires_at: str | None
-    ) -> None: ...
-    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None: ...
-
     def delete_user(self, user_id: str) -> bool:
         """Permanently delete a user record (admin action)."""
+        ...
+
+    def link_github(
+        self,
+        user_id: str,
+        *,
+        github_id: str,
+        github_username: str,
+        github_access_token: str,
+    ) -> OAuthUser | None:
+        """Attach GitHub OAuth credentials to an existing user record.
+
+        Used by the account-linking flow: the user stays on their current
+        account (plan, flags, and history untouched) and gains the GitHub
+        token needed for repo listing and private-repo clones. Returns the
+        updated user, or None when the user does not exist.
+        """
+        ...
+
+    def unlink_github(self, user_id: str) -> OAuthUser | None:
+        """Remove GitHub OAuth credentials from a user record.
+
+        Returns the updated user, or None when the user does not exist.
+        """
         ...
 
 
@@ -490,6 +550,51 @@ class OAuthUserStore:
                     return updated
         return None
 
+    def link_github(
+        self,
+        user_id: str,
+        *,
+        github_id: str,
+        github_username: str,
+        github_access_token: str,
+    ) -> OAuthUser | None:
+        """Attach GitHub OAuth credentials to an existing user record."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(
+                        existing,
+                        github_id=github_id,
+                        github_username=github_username,
+                        github_access_token=github_access_token,
+                        updated_at=now,
+                    )
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def unlink_github(self, user_id: str) -> OAuthUser | None:
+        """Remove GitHub OAuth credentials from a user record."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(
+                        existing,
+                        github_id="",
+                        github_username="",
+                        github_access_token="",
+                        updated_at=now,
+                    )
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
     def scrub_underage(self, user_id: str) -> bool:
         """Delete a just-created under-13 account (age-gate block)."""
         with self._lock:
@@ -509,53 +614,6 @@ class OAuthUserStore:
                 return False
             self._save(kept)
             return True
-
-    # -- email/password auth: not supported by the JSON store ---------
-
-    def _email_unsupported(self) -> None:
-        raise RuntimeError("Email/password auth requires the SQL user store.")
-
-    def get_by_email(self, email: str) -> OAuthUser | None:
-        self._email_unsupported()
-        return None
-
-    def create_email_user(
-        self, email: str, name: str, password_hash: str
-    ) -> OAuthUser:
-        self._email_unsupported()
-        raise RuntimeError("unreachable")
-
-    def get_password_hash(self, user_id: str) -> str | None:
-        self._email_unsupported()
-        return None
-
-    def set_password_hash(self, user_id: str, password_hash: str) -> None:
-        self._email_unsupported()
-
-    def is_email_verified(self, user_id: str) -> bool:
-        self._email_unsupported()
-        return False
-
-    def set_email_verified(self, user_id: str, verified: bool = True) -> None:
-        self._email_unsupported()
-
-    def set_email_verify_token(
-        self, user_id: str, token_hash: str | None
-    ) -> None:
-        self._email_unsupported()
-
-    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None:
-        self._email_unsupported()
-        return None
-
-    def set_password_reset_token(
-        self, user_id: str, token_hash: str | None, expires_at: str | None
-    ) -> None:
-        self._email_unsupported()
-
-    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None:
-        self._email_unsupported()
-        return None
 
 
 _user_store: UserStore = OAuthUserStore()
@@ -713,112 +771,16 @@ def _google_profile(token: str) -> dict[str, Any]:
     return payload
 
 
-_REFRESH_COOKIE = "sonar_refresh"
-
-
-def _set_session_cookie(
-    response: Response,
-    user_id: str,
-    secret: str,
-    request: Request | None = None,
-) -> None:
-    """Issue a server-side session: short-lived access token + refresh cookie.
-
-    Falls back to the legacy stateless JWT when the session store is
-    unavailable, so login never breaks.
-    """
-    from app.sessions.sessions import (
-        get_session_store,
-        hash_refresh_token,
-        new_access_token,
-        new_refresh_token,
-    )
-
-    ip, user_agent = _client_info(request)
-    device_info = (user_agent or "")[:512]
-    try:
-        store = get_session_store()
-        refresh_token = new_refresh_token()
-        session = store.create(
-            user_id,
-            hash_refresh_token(refresh_token),
-            device_info=device_info,
-            ip_address=ip,
-        )
-        access_token = new_access_token(session.session_id, user_id, secret)
-        # Refresh cookie carries "session_id.refresh_token" so rotation can
-        # find the session without scanning hashes.
-        refresh_value = f"{session.session_id}.{refresh_token}"
-    except Exception:
-        access_token = new_session_token(user_id, secret)
-        refresh_value = None
+def _set_session_cookie(response: RedirectResponse, user_id: str, secret: str) -> None:
     response.set_cookie(
         _SESSION_COOKIE,
-        access_token,
-        max_age=15 * 60,
+        new_session_token(user_id, secret),
+        max_age=_SESSION_TTL_SECONDS,
         httponly=True,
         secure=True,
         samesite="lax",
         path="/",
     )
-    if refresh_value is not None:
-        response.set_cookie(
-            _REFRESH_COOKIE,
-            refresh_value,
-            max_age=30 * 24 * 60 * 60,
-            httponly=True,
-            secure=True,
-            samesite="lax",
-            path="/api/auth/refresh",
-        )
-
-
-def _client_info(request: Request | None) -> tuple[str | None, str | None]:
-    """(ip_address, user_agent) for security event logging."""
-    if request is None:
-        return None, None
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
-    elif request.client:
-        ip = request.client.host
-    else:
-        ip = None
-    return ip, request.headers.get("user-agent")
-
-
-def _login_response(
-    user_id: str, secret: str, request: Request | None = None, provider: str = "oauth"
-) -> RedirectResponse:
-    """Post-OAuth login response: 2FA challenge when enrolled, else session.
-
-    When the user has TOTP enabled, no session cookie is issued yet.
-    Instead a short-lived pending token goes in a cookie and the browser
-    is sent to /2fa/verify to complete the second factor.
-    """
-    from app.twofa.api import _PENDING_COOKIE, new_pending_token
-    from app.twofa.store import get_two_factor_store
-
-    record = get_two_factor_store().get(user_id)
-    ip, user_agent = _client_info(request)
-    if record is not None and record.enabled:
-        response = RedirectResponse(url="/2fa/verify", status_code=302)
-        response.set_cookie(
-            _PENDING_COOKIE,
-            new_pending_token(user_id),
-            max_age=5 * 60,
-            httponly=True,
-            secure=True,
-            samesite="lax",
-            path="/",
-        )
-        return response
-    from app.security_events.events import log_login_success
-
-    log_login_success(user_id, ip_address=ip, user_agent=user_agent, provider=provider)
-    response = RedirectResponse(url="/app", status_code=302)
-    _set_session_cookie(response, user_id, secret, request)
-    return response
 
 
 def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]:
@@ -882,6 +844,42 @@ def _maybe_bootstrap_owner(user: OAuthUser) -> OAuthUser:
         return user
 
 
+@router.get("/github/connect")
+async def github_connect(request: Request) -> RedirectResponse:
+    """Start GitHub account linking for the signed-in user.
+
+    Unlike ``/github/login`` (which mints a brand-new session), this attaches
+    the GitHub OAuth token to the caller's existing account so repo listing
+    and private-repo clones work without switching logins.
+    """
+    user = require_user(request)
+    config = oauth_config()
+    if not config.github_client_id:
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub OAuth is not configured: set GITHUB_OAUTH_CLIENT_ID",
+        )
+    params = urlencode(
+        {
+            "client_id": config.github_client_id,
+            "redirect_uri": _github_redirect_uri(config),
+            "state": new_github_connect_state(config.session_secret, user.id),
+            "scope": "read:user repo",
+        }
+    )
+    return RedirectResponse(url=f"{_GITHUB_AUTHORIZE_URL}?{params}", status_code=302)
+
+
+@router.post("/github/disconnect")
+async def github_disconnect(request: Request) -> dict[str, Any]:
+    """Remove the linked GitHub account from the signed-in user."""
+    user = require_user(request)
+    updated = get_oauth_user_store().unlink_github(user.id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"status": "disconnected"}
+
+
 @router.get("/github/callback")
 async def github_callback(
     request: Request, code: str | None = None, state: str | None = None
@@ -896,17 +894,35 @@ async def github_callback(
 
     token = _exchange_github_code(config, code)
     profile = _github_profile(token)
+
+    connect_user_id = parse_github_connect_state(state, config.session_secret)
+    if connect_user_id is not None:
+        # Account-linking flow: attach the token to the signed-in account.
+        # Never mints a session, never changes plan/flags, never bootstraps.
+        user = require_user(request)
+        if user.id != connect_user_id:
+            raise HTTPException(status_code=403, detail="OAuth session mismatch")
+        updated = get_oauth_user_store().link_github(
+            user.id,
+            github_id=str(profile["id"]),
+            github_username=str(profile.get("login") or ""),
+            github_access_token=token,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return RedirectResponse(url="/app", status_code=302)
+
     user = get_oauth_user_store().upsert(**_github_upsert_fields(profile, token))
     user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
-    return _login_response(user.id, config.session_secret, request, provider="github")
+    response = RedirectResponse(url="/app", status_code=302)
+    _set_session_cookie(response, user.id, config.session_secret)
+    return response
 
 
 @router.get("/google/callback")
-async def google_callback(
-    request: Request, code: str | None = None, state: str | None = None
-) -> RedirectResponse:
+async def google_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
     config = oauth_config()
     if not config.google_client_id or not config.google_client_secret:
         raise HTTPException(status_code=503, detail="Google OAuth is not configured")
@@ -927,15 +943,15 @@ async def google_callback(
     user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
         raise HTTPException(status_code=403, detail="Account is suspended")
-    return _login_response(user.id, config.session_secret, request, provider="google")
+    response = RedirectResponse(url="/app", status_code=302)
+    _set_session_cookie(response, user.id, config.session_secret)
+    return response
 
 
 def current_user(request: Request) -> OAuthUser | None:
     """Resolve the signed session cookie to a user, or None when absent.
 
-    Suspended users resolve to None: their sessions are dead. Revoked
-    server-side sessions resolve to None as well. Legacy stateless JWTs
-    (no ``sid`` claim) keep working until they expire.
+    Suspended users resolve to None: their sessions are dead.
     """
     token = request.cookies.get(_SESSION_COOKIE)
     if not token:
@@ -943,39 +959,10 @@ def current_user(request: Request) -> OAuthUser | None:
     user_id = verify_session_token(token, _session_secret())
     if not user_id:
         return None
-    # Server-side session check: a revoked session kills the access token.
-    try:
-        from app.sessions.sessions import decode_access_token, get_session_store
-
-        payload = decode_access_token(token, _session_secret())
-        session_id = (payload or {}).get("sid")
-        if session_id:
-            session = get_session_store().get(str(session_id))
-            if session is None or session.revoked:
-                return None
-            if session.user_id != user_id:
-                return None
-    except Exception:
-        pass
     user = get_oauth_user_store().get(user_id)
     if user is None or user.is_suspended:
         return None
     return user
-
-
-def current_session_id(request: Request) -> str | None:
-    """The server-side session id for this request, if it has one."""
-    token = request.cookies.get(_SESSION_COOKIE)
-    if not token:
-        return None
-    try:
-        from app.sessions.sessions import decode_access_token
-
-        payload = decode_access_token(token, _session_secret())
-        session_id = (payload or {}).get("sid")
-        return str(session_id) if session_id else None
-    except Exception:
-        return None
 
 
 def require_user(request: Request) -> OAuthUser:
@@ -1000,23 +987,9 @@ async def auth_me(request: Request) -> dict[str, Any]:
 
 
 @router.post("/logout")
-async def auth_logout(request: Request) -> JSONResponse:
-    from app.security_events.events import LOGOUT, log_event
-    from app.sessions.sessions import get_session_store
-
-    session_id = current_session_id(request)
-    token = request.cookies.get(_SESSION_COOKIE)
-    user_id = verify_session_token(token, _session_secret()) if token else None
-    if session_id:
-        try:
-            get_session_store().revoke(session_id)
-        except Exception:
-            pass
-    if user_id:
-        log_event(LOGOUT, user_id=user_id)
+async def auth_logout() -> JSONResponse:
     response = JSONResponse(content={"status": "signed_out"})
     response.delete_cookie(_SESSION_COOKIE, path="/")
-    response.delete_cookie(_REFRESH_COOKIE, path="/api/auth/refresh")
     return response
 
 

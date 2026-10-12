@@ -264,6 +264,17 @@ class UserStore(Protocol):
         """
         ...
 
+    def set_github_access_token(
+        self, user_id: str, github_access_token: str, github_username: str = ""
+    ) -> OAuthUser | None:
+        """Attach (or refresh) a GitHub OAuth token on an existing account.
+
+        Used to link GitHub to a session signed in via another provider
+        (e.g., Google) without switching accounts. Returns the updated
+        user, or None when the user does not exist.
+        """
+        ...
+
     def scrub_underage(self, user_id: str) -> bool:
         """Delete a just-created under-13 account (age-gate block).
 
@@ -457,6 +468,26 @@ class OAuthUserStore:
                         existing,
                         plan=plan,
                         stripe_customer_id=stripe_customer_id or existing.stripe_customer_id,
+                        updated_at=now,
+                    )
+                    records[index] = updated
+                    self._save(records)
+                    return updated
+        return None
+
+    def set_github_access_token(
+        self, user_id: str, github_access_token: str, github_username: str = ""
+    ) -> OAuthUser | None:
+        """Attach (or refresh) a GitHub OAuth token on an existing account."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._lock:
+            records = self._load()
+            for index, existing in enumerate(records):
+                if existing.id == user_id:
+                    updated = replace(
+                        existing,
+                        github_access_token=github_access_token,
+                        github_username=github_username or existing.github_username,
                         updated_at=now,
                     )
                     records[index] = updated
@@ -896,6 +927,21 @@ async def github_callback(
 
     token = _exchange_github_code(config, code)
     profile = _github_profile(token)
+
+    # Link mode: the browser already holds a signed-in session (e.g., a
+    # Google-signed-in user connecting GitHub from onboarding). Attach the
+    # token to that account and keep the session, instead of creating or
+    # switching to a separate GitHub-provider account.
+    existing = current_user(request)
+    if existing is not None and not existing.is_suspended:
+        linked = get_oauth_user_store().set_github_access_token(
+            existing.id, token, str(profile.get("login") or "")
+        )
+        if linked is not None:
+            logger.info("Linked GitHub account to existing user %s", existing.id)
+            return RedirectResponse(url="/app", status_code=302)
+        # The store could not update by id; fall through to the sign-in path.
+
     user = get_oauth_user_store().upsert(**_github_upsert_fields(profile, token))
     user = _maybe_bootstrap_owner(user)
     if user.is_suspended:
@@ -1026,7 +1072,7 @@ async def auth_repos(request: Request) -> dict[str, Any]:
     if not user.github_access_token:
         raise HTTPException(
             status_code=409,
-            detail="No GitHub account is connected; sign in with GitHub first",
+            detail="No GitHub account is connected; connect GitHub to list your repositories",
         )
     status, payload = _http_get(
         f"{_GITHUB_REPOS_URL}?per_page=100&sort=pushed",

@@ -359,3 +359,76 @@ class TestRepos:
             "/api/auth/repos", headers={"Cookie": f"sonar_session={cookie}"}
         )
         assert response.status_code == 409
+
+
+class TestGitHubLinkMode:
+    """GitHub OAuth callback while already signed in (e.g., via Google)."""
+
+    def _google_session_cookie(self, client, oauth_http) -> str:
+        state = new_state(_TEST_SECRET)
+        callback = client.get(
+            "/api/auth/google/callback",
+            params={"code": "google-code", "state": state},
+            follow_redirects=False,
+        )
+        return _session_cookie_value(callback)
+
+    def test_callback_links_token_to_existing_session_user(
+        self, client, oauth_http, oauth_store
+    ):
+        cookie = self._google_session_cookie(client, oauth_http)
+        state = new_state(_TEST_SECRET)
+        link = client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            headers={"Cookie": f"sonar_session={cookie}"},
+            follow_redirects=False,
+        )
+        assert link.status_code == 302
+        assert link.headers["location"] == "/app"
+
+        # No second account was created; the token landed on the Google user.
+        records = oauth_store._load()
+        assert len(records) == 1
+        stored = records[0]
+        assert stored.provider == "google"
+        assert stored.github_access_token == "gh-oauth-token"
+        assert stored.github_username == "mike"
+
+    def test_linked_session_still_resolves_to_original_user(
+        self, client, oauth_http, oauth_store
+    ):
+        cookie = self._google_session_cookie(client, oauth_http)
+        state = new_state(_TEST_SECRET)
+        client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            headers={"Cookie": f"sonar_session={cookie}"},
+            follow_redirects=False,
+        )
+        me = client.get("/api/auth/me", headers={"Cookie": f"sonar_session={cookie}"})
+        assert me.status_code == 200
+        assert me.json()["provider"] == "google"
+
+    def test_repos_work_after_linking(self, client, oauth_http, oauth_store):
+        cookie = self._google_session_cookie(client, oauth_http)
+        state = new_state(_TEST_SECRET)
+        client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            headers={"Cookie": f"sonar_session={cookie}"},
+            follow_redirects=False,
+        )
+        response = client.get(
+            "/api/auth/repos", headers={"Cookie": f"sonar_session={cookie}"}
+        )
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+
+    def test_409_detail_points_to_connect(self, client, oauth_http, oauth_store):
+        cookie = self._google_session_cookie(client, oauth_http)
+        response = client.get(
+            "/api/auth/repos", headers={"Cookie": f"sonar_session={cookie}"}
+        )
+        assert response.status_code == 409
+        assert "connect GitHub" in response.json()["detail"]

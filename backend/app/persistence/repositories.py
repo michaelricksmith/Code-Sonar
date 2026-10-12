@@ -995,6 +995,31 @@ class SqlUserStore:
                 raise LookupError("User not found")
             return self._get_or_raise(connection, user_id)
 
+    def set_github_access_token(
+        self, user_id: str, github_access_token: str, github_username: str = ""
+    ) -> OAuthUser | None:
+        """Attach (or refresh) a GitHub OAuth token on an existing account.
+
+        Used to link GitHub to a session signed in via another provider
+        (e.g., Google) without switching accounts. Returns the updated
+        user, or None when the user does not exist.
+        """
+        with self.engine.begin() as connection:
+            values: dict[str, Any] = {
+                "github_token_ciphertext": self._encrypt_token(
+                    user_id, github_access_token
+                ),
+                "updated_at": _utcnow_iso(),
+            }
+            if github_username:
+                values["github_username"] = github_username
+            updated = connection.execute(
+                update(users).where(users.c.id == user_id).values(**values)
+            )
+            if updated.rowcount != 1:
+                return None
+            return self._get_or_raise(connection, user_id)
+
     def set_billing(self, user_id: str, *, plan: str, stripe_customer_id: str) -> OAuthUser | None:
         """Update a user's billing plan (and Stripe customer id when given).
 

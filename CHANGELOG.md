@@ -1,5 +1,14 @@
 ## Unreleased — Phases 3+4: weekly digest infra, streaks, churn nudges
 
+- **GitHub connect from onboarding**: the repo picker no longer dead-ends
+  for users signed in via Google. `GET /api/auth/github/callback` now
+  links the GitHub OAuth token onto the existing session account
+  (new `UserStore.set_github_access_token`, implemented for both the
+  JSON and SQL stores) instead of forking a separate GitHub-provider
+  account. The onboarding "Couldn't load your repos" notice shows a
+  **Connect GitHub** button for the 409 not-connected case, and the
+  409 detail no longer tells signed-in users to "sign in with GitHub
+  first".
 - **Weekly digest (Phase 3)**: `email_preferences` table (opted in by
   default, one-tap HMAC-signed unsubscribe that bypasses the API auth
   boundary). Digest content service with score trend, fixes verified

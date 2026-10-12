@@ -59,8 +59,24 @@ export async function logout(): Promise<void> {
 
 export async function fetchAuthRepos(): Promise<RepoOption[]> {
   const res = await fetch("/api/auth/repos", { credentials: "same-origin" });
+  if (res.status === 409) {
+    // Signed in, but no GitHub account linked: the wizard shows a
+    // "Connect GitHub" button for this case instead of a dead-end error.
+    const data = await res.json().catch(() => null);
+    throw new GitHubNotConnectedError(
+      data?.detail ?? "No GitHub account is connected"
+    );
+  }
   const data = await decode(res, "Failed to load your repositories");
   return (data.repos ?? data ?? []) as RepoOption[];
+}
+
+/** Thrown by {@link fetchAuthRepos} when the user is signed in but has no GitHub token linked. */
+export class GitHubNotConnectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitHubNotConnectedError";
+  }
 }
 
 /** Accept "owner/name" or a full GitHub URL; normalizes to "owner/name". */

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScanResponse } from "../api/analyzers";
 import { fetchAuthRepos, normalizeRepoInput } from "../api/auth";
 import type { RepoOption } from "../api/auth";
+import { GITHUB_LOGIN_URL, GitHubNotConnectedError } from "../api/auth";
 import { createScanJob, pollScanJob } from "../api/scanJobs";
 import type { ScanJobState } from "../api/scanJobs";
 import { isQuotaError } from "../api/errors";
@@ -36,6 +37,7 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [reposLoading, setReposLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
+  const [githubNotConnected, setGithubNotConnected] = useState(false);
   const [search, setSearch] = useState("");
   const [urlInput, setUrlInput] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -48,7 +50,12 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
   useEffect(() => {
     fetchAuthRepos()
       .then(setRepos)
-      .catch((e) => setReposError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        if (e instanceof GitHubNotConnectedError) {
+          setGithubNotConnected(true);
+        }
+        setReposError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => setReposLoading(false));
   }, []);
 
@@ -148,7 +155,18 @@ export function OnboardingWizard({ userName, onComplete, onQuotaExceeded }: Onbo
           {reposError && (
             <div className="notice warning">
               <b>Couldn&rsquo;t load your repos</b>
-              {reposError} — you can still paste a repo URL below.
+              {githubNotConnected ? (
+                <>
+                  {reposError}{" "}
+                  <a className="btn btn-primary btn-sm" href={GITHUB_LOGIN_URL} style={{ marginLeft: 8 }}>
+                    Connect GitHub
+                  </a>
+                </>
+              ) : (
+                <>
+                  {reposError} — you can still paste a repo URL below.
+                </>
+              )}
             </div>
           )}
           {!reposLoading && !reposError && (

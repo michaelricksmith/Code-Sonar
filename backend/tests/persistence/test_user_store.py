@@ -167,6 +167,46 @@ class TestAdmin:
         assert store.set_plan(user.id, "pro").plan == "pro"
 
 
+class TestGitHubTokenLinking:
+    def test_set_github_access_token_on_google_user(self, store: SqlUserStore) -> None:
+        user = _github_upsert(
+            store,
+            provider="google",
+            provider_user_id="google-123",
+            github_access_token="",
+            github_username="",
+        )
+        assert user.github_access_token == ""
+        linked = store.set_github_access_token(user.id, "gh-new-token", "mikes")
+        assert linked is not None
+        assert linked.github_access_token == "gh-new-token"
+        assert linked.github_username == "mikes"
+        assert linked.provider == "google"
+        # Persisted: a fresh read sees the token.
+        assert store.get(user.id).github_access_token == "gh-new-token"
+
+    def test_set_github_access_token_refreshes(self, store: SqlUserStore) -> None:
+        user = _github_upsert(store)
+        refreshed = store.set_github_access_token(user.id, "gh-token-2", "mikes2")
+        assert refreshed is not None
+        assert refreshed.github_access_token == "gh-token-2"
+        assert refreshed.github_username == "mikes2"
+
+    def test_set_github_access_token_keeps_username_when_blank(
+        self, store: SqlUserStore
+    ) -> None:
+        user = _github_upsert(store)
+        updated = store.set_github_access_token(user.id, "gh-token-3")
+        assert updated is not None
+        assert updated.github_access_token == "gh-token-3"
+        assert updated.github_username == "mikes"
+
+    def test_set_github_access_token_missing_user_returns_none(
+        self, store: SqlUserStore
+    ) -> None:
+        assert store.set_github_access_token("nope", "gh-token") is None
+
+
 def _write_legacy_json(path: Path) -> bytes:
     records = [
         {

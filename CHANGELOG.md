@@ -1,55 +1,14 @@
-## Unreleased — Phases 3+4: weekly digest infra, streaks, churn nudges
+## Unreleased — GitHub account linking
 
-- **Weekly digest (Phase 3)**: `email_preferences` table (opted in by
-  default, one-tap HMAC-signed unsubscribe that bypasses the API auth
-  boundary). Digest content service with score trend, fixes verified
-  this week, open issues, and one clear CTA. Resend client behind
-  `RESEND_API_KEY` + `DIGEST_FROM_ADDRESS`; the sender refuses to run
-  unconfigured. Endpoints: `/api/digest/preview` (dry-run),
-  `/api/digest/status`, `/api/digest/preferences`, `/api/digest/unsubscribe`.
-- **Streaks + win-back (Phase 4)**: verified-fix weekly streaks (current
-  and longest) in fix-tracking stats. Churn signals from stored state
-  (`scanned_once_no_fix`, `fix_no_rescan`, `dormant`), tailored nudges
-  tied to actual repo state via `/api/retention/nudge`. Dashboard
-  `ProgressStrip` shows fix stats, streak, and the nudge banner.
-- Live sending is not yet enabled: it needs the Resend API key and a
-  verified sending domain set as Render env vars.
-
-## Unreleased — Phase 2: push-triggered rescan with drift + debounce
-
-- **Scan records now carry a `drift_summary`**: new / resolved / persistent
-  issue counts plus score delta, computed against the previous scan at
-  scan time and persisted in history. Exposed in scan responses, the
-  project dashboard, and history endpoints.
-- **Push-scan debounce**: at most one push-triggered rescan per repo per
-  15 minutes. Debounced deliveries are audited, not queued.
-- **Quota policy**: push-triggered rescans never consume the user's monthly
-  scan quota (system-initiated); abuse is contained by the debounce.
-
-## Unreleased — Durable fix tracking (fix_attempts table)
-
-- **New `fix_attempts` Postgres table** (migration 20261011_0009): every
-  copied fix prompt is recorded with the user's identity, replacing the
-  ephemeral `prompt-events.jsonl` file that Render wiped on every deploy.
-- **Verified fixes are now persisted**: when a rescan newer than the copy
-  no longer contains the finding, the attempt is marked verified with the
-  score delta. Best-effort hook on every scan completion; never breaks scans.
-- **New `GET /api/fix-tracking/stats`**: per-user totals, verified this
-  week, best week, in-progress count, and per-repo breakdown. Raw material
-  for streaks, the weekly digest, and win-back prompts.
-- **`prompt-copied` / `prompt-status` now require sign-in** and are scoped
-  to the current user.
-
-## Unreleased — Score trend API + score-over-time chart
-
-- **New `GET /api/history/trend?repo_path=` endpoint**: returns per-scan
-  points (`scanned_at`, `score`, `grade`, `finding_count`) in chronological
-  order plus the latest score delta. Powers retention Phase 1.
-- **Dashboard "Your score over time" panel now charts the full scan history**
-  as a sparkline with delta text ("▲ +20 since last scan · 5 scans tracked"),
-  replacing the previous 2-point drift view.
-- **mypy fix**: `_score_projection` now converts `FindingSnapshot` to
-  `Finding` before calling the deterministic scorer (strict mypy green).
+- **Connect GitHub to an existing account** (`GET /api/auth/github/connect`):
+  a signed-in user can now link their GitHub account without signing out and
+  back in. The onboarding wizard shows a "Connect GitHub" button when repo
+  listing fails, and `POST /api/auth/github/disconnect` removes the link.
+  The OAuth callback reuses the existing redirect URI and distinguishes the
+  linking flow via an HMAC-signed state binding the initiating user id
+  (10-minute TTL, session-mismatch rejected with 403). Linking attaches the
+  token to the current record only — no new session, no plan/flag changes.
+  New tests: `tests/api/test_github_connect.py` (14 passed).
 
 ## Unreleased — Admin console: plan grants, quota reset, user deletion
 

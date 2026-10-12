@@ -530,6 +530,8 @@ The first-run experience is built for people who are not engineers:
 
 1. **Sign in** with GitHub or Google (OAuth — no password).
 2. **Pick a repo** from your GitHub repositories, or paste a repo URL.
+   Signed in with Google? Hit **Connect GitHub** in the onboarding wizard to
+   link your GitHub account without switching logins.
 3. **First scan** runs with an animated progress screen, then reveals your
    score with a plain-language explanation of what it means.
 4. **Fix the top issue** — every issue has a guided, step-by-step fix flow,

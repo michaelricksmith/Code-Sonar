@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from app.compliance.records import ComplianceRecord
+from app.fix_tracking.models import FixAttempt
 from app.github_app import (
     GitHubInstallation,
     WebhookAuditRecord,
@@ -32,17 +34,25 @@ from app.models.user import (
 from app.oauth import OAuthUser, OAuthUserStore
 from app.persistence.crypto import EncryptionProvider, checkout_path_aad, oauth_token_aad
 from app.persistence.schema import (
+    email_preferences,
     findings,
+    fix_attempts,
     github_installations,
     projects,
     remediation_outcomes,
     scans,
+    security_events,
     tenants,
+    user_sessions,
+    user_twofa,
     webhook_deliveries,
     webhook_jobs,
 )
 from app.projects import ProjectRecord
 from app.security.tenant import current_tenant_id
+from app.security_events.events import SecurityEvent
+from app.sessions.sessions import UserSession
+from app.twofa.store import TwoFactorRecord
 
 
 def _tenant(connection: Any, tenant_id: str) -> None:
@@ -522,6 +532,104 @@ class SqlOutcomeStore:
 
     def get(self, outcome_id: str) -> RemediationOutcome | None:
         return next((item for item in self.load_all() if item.outcome_id == outcome_id), None)
+
+
+class SqlFixAttemptStore:
+    """Durable fix-attempt store backed by the ``fix_attempts`` table."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(self, attempt: FixAttempt) -> None:
+        tenant_id = current_tenant_id()
+        try:
+            with self.engine.begin() as connection:
+                _tenant(connection, tenant_id)
+                connection.execute(
+                    insert(fix_attempts).values(
+                        tenant_id=tenant_id,
+                        attempt_id=attempt.attempt_id,
+                        user_id=attempt.user_id,
+                        repository_id=attempt.repository_id,
+                        scan_id=attempt.scan_id,
+                        finding_id=attempt.finding_id,
+                        rule_id=attempt.rule_id,
+                        file_path=attempt.file_path,
+                        copied_at=attempt.copied_at,
+                        verified_at=attempt.verified_at,
+                        verified_scan_id=attempt.verified_scan_id,
+                        score_delta=attempt.score_delta,
+                    )
+                )
+        except IntegrityError as exc:
+            raise FileExistsError("Fix attempt exists") from exc
+
+    def _row_to_attempt(self, row: RowMapping) -> FixAttempt:
+        return FixAttempt(
+            attempt_id=row["attempt_id"],
+            user_id=row["user_id"],
+            repository_id=row["repository_id"],
+            scan_id=row["scan_id"],
+            finding_id=row["finding_id"],
+            rule_id=row["rule_id"],
+            file_path=row["file_path"],
+            copied_at=row["copied_at"],
+            verified_at=row["verified_at"],
+            verified_scan_id=row["verified_scan_id"],
+            score_delta=row["score_delta"],
+        )
+
+    def list_open(self, repository_id: str) -> list[FixAttempt]:
+        query = (
+            select(fix_attempts)
+            .where(
+                fix_attempts.c.tenant_id == current_tenant_id(),
+                fix_attempts.c.repository_id == repository_id,
+                fix_attempts.c.verified_at.is_(None),
+            )
+            .order_by(fix_attempts.c.copied_at, fix_attempts.c.attempt_id)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_attempt(row) for row in rows]
+
+    def list_by_user(
+        self, user_id: str, *, verified_only: bool = False
+    ) -> list[FixAttempt]:
+        query = select(fix_attempts).where(
+            fix_attempts.c.tenant_id == current_tenant_id(),
+            fix_attempts.c.user_id == user_id,
+        )
+        if verified_only:
+            query = query.where(fix_attempts.c.verified_at.is_not(None))
+        query = query.order_by(fix_attempts.c.copied_at, fix_attempts.c.attempt_id)
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_attempt(row) for row in rows]
+
+    def mark_verified(
+        self,
+        attempt_id: str,
+        *,
+        verified_at: str,
+        verified_scan_id: str,
+        score_delta: int | None,
+    ) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(fix_attempts)
+                .where(
+                    fix_attempts.c.tenant_id == current_tenant_id(),
+                    fix_attempts.c.attempt_id == attempt_id,
+                    fix_attempts.c.verified_at.is_(None),
+                )
+                .values(
+                    verified_at=verified_at,
+                    verified_scan_id=verified_scan_id,
+                    score_delta=score_delta,
+                )
+            )
+            return result.rowcount > 0
 
 
 def _utcnow_iso() -> str:
@@ -1017,6 +1125,128 @@ class SqlUserStore:
                 connection.execute(insert(users).values(**self._legacy_insert_values(record)))
         return len(order)
 
+    def create_email_user(
+        self, email: str, name: str, password_hash: str
+    ) -> OAuthUser:
+        """Create a user with email/password credentials (provider='email')."""
+        from app.models.user import PLAN_FREE, STATUS_ACTIVE
+
+        email_norm = _normalize_email(email)
+        user_id = "user_" + uuid.uuid4().hex[:24]
+        now = _utcnow_iso()
+        with self.engine.begin() as connection:
+            _tenant(connection, current_tenant_id())
+            connection.execute(
+                insert(users).values(
+                    id=user_id,
+                    email=email_norm,
+                    display_name=name,
+                    avatar_url="",
+                    provider="email",
+                    plan=PLAN_FREE,
+                    status=STATUS_ACTIVE,
+                    is_admin=False,
+                    is_staff=False,
+                    password_hash=password_hash,
+                    email_verified=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            return self._get_or_raise(connection, user_id)
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        with self.engine.connect() as connection:
+            return connection.execute(
+                select(users.c.password_hash).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(password_hash=password_hash, updated_at=_utcnow_iso())
+            )
+
+    def is_email_verified(self, user_id: str) -> bool:
+        with self.engine.connect() as connection:
+            value = connection.execute(
+                select(users.c.email_verified).where(users.c.id == user_id)
+            ).scalar_one_or_none()
+        return bool(value)
+
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(
+                    email_verified=verified,
+                    email_verify_token_hash=None,
+                    updated_at=_utcnow_iso(),
+                )
+            )
+
+    def set_email_verify_token(self, user_id: str, token_hash: str | None) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(email_verify_token_hash=token_hash, updated_at=_utcnow_iso())
+            )
+
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(users).where(users.c.email_verify_token_hash == token_hash)
+                )
+                .mappings()
+                .first()
+            )
+        return self._row_to_user(row) if row else None
+
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == user_id)
+                .values(
+                    password_reset_token_hash=token_hash,
+                    password_reset_expires_at=expires_at,
+                    updated_at=_utcnow_iso(),
+                )
+            )
+
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(users).where(users.c.password_reset_token_hash == token_hash)
+                )
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        # Check expiry.
+        from datetime import datetime, timezone
+
+        expires_at = row["password_reset_expires_at"]
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at)
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > expiry:
+                    return None
+            except ValueError:
+                return None
+        return self._row_to_user(row)
+
 
 class SqlComplianceRecordStore:
     """SQL implementation of the append-only compliance record store."""
@@ -1101,3 +1331,444 @@ class SqlComplianceRecordStore:
             )
             for row in rows
         ]
+
+
+class SqlEmailPreferenceStore:
+    """Per-user digest email preferences backed by ``email_preferences``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def is_digest_enabled(self, user_id: str) -> bool:
+        """True unless the user explicitly unsubscribed. Default opted in."""
+        query = select(email_preferences.c.digest_enabled).where(
+            email_preferences.c.tenant_id == current_tenant_id(),
+            email_preferences.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            value = connection.execute(query).scalar_one_or_none()
+        return bool(value) if value is not None else True
+
+    def set_digest_enabled(self, user_id: str, enabled: bool) -> None:
+        tenant_id = current_tenant_id()
+        unsubscribed_at = None if enabled else _utcnow_iso()
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            result = connection.execute(
+                update(email_preferences)
+                .where(
+                    email_preferences.c.tenant_id == tenant_id,
+                    email_preferences.c.user_id == user_id,
+                )
+                .values(
+                    digest_enabled=enabled,
+                    unsubscribed_at=unsubscribed_at,
+                )
+            )
+            if result.rowcount == 0:
+                connection.execute(
+                    insert(email_preferences).values(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        digest_enabled=enabled,
+                        unsubscribed_at=unsubscribed_at,
+                    )
+                )
+
+
+class SqlTwoFactorStore:
+    """TOTP secrets + backup codes backed by ``user_twofa``."""
+
+    def __init__(self, engine: Engine, encryption: EncryptionProvider) -> None:
+        self.engine = engine
+        self.encryption = encryption
+
+    def _decrypt_secret(self, user_id: str, ciphertext: str | None) -> str | None:
+        if not ciphertext:
+            return None
+        from app.persistence.crypto import twofa_secret_aad
+
+        try:
+            return self.encryption.decrypt(ciphertext, aad=twofa_secret_aad(user_id))
+        except Exception:
+            return None
+
+    def _row_to_record(self, row: RowMapping, user_id: str) -> TwoFactorRecord:
+        try:
+            backup_hashes = json.loads(row["backup_codes_json"] or "[]")
+        except (TypeError, ValueError):
+            backup_hashes = []
+        return TwoFactorRecord(
+            user_id=user_id,
+            enabled=bool(row["enabled"]),
+            enrolled_at=row["enrolled_at"],
+            backup_code_hashes=list(backup_hashes),
+            failed_attempts=int(row["failed_attempts"] or 0),
+            locked_until=row["locked_until"],
+        )
+
+    def get(self, user_id: str) -> TwoFactorRecord | None:
+        query = select(user_twofa).where(
+            user_twofa.c.tenant_id == current_tenant_id(),
+            user_twofa.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        if row is None:
+            return None
+        return self._row_to_record(row, user_id)
+
+    def save_pending(self, user_id: str, secret: str) -> None:
+        from app.persistence.crypto import twofa_secret_aad
+
+        tenant_id = current_tenant_id()
+        ciphertext = self.encryption.encrypt(secret, aad=twofa_secret_aad(user_id))
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            result = connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == tenant_id,
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(secret_ciphertext=ciphertext, enabled=False)
+            )
+            if result.rowcount == 0:
+                connection.execute(
+                    insert(user_twofa).values(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        secret_ciphertext=ciphertext,
+                        enabled=False,
+                    )
+                )
+
+    def enable(self, user_id: str, backup_code_hashes: list[str]) -> None:
+        tenant_id = current_tenant_id()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == tenant_id,
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(
+                    enabled=True,
+                    enrolled_at=_utcnow_iso(),
+                    backup_codes_json=json.dumps(backup_code_hashes),
+                    failed_attempts=0,
+                    locked_until=None,
+                )
+            )
+
+    def disable(self, user_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                delete(user_twofa).where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+            )
+
+    def record_failure(self, user_id: str) -> None:
+        from datetime import timedelta
+
+        record = self.get(user_id)
+        if record is None:
+            return
+        failed = record.failed_attempts + 1
+        locked_until = record.locked_until
+        if failed >= 5:
+            locked_until = (
+                datetime.now(timezone.utc) + timedelta(minutes=15)
+            ).isoformat()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(failed_attempts=failed, locked_until=locked_until)
+            )
+
+    def reset_failures(self, user_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(failed_attempts=0, locked_until=None)
+            )
+
+    def consume_backup_code(self, user_id: str, code_hash: str) -> bool:
+        record = self.get(user_id)
+        if record is None or code_hash not in record.backup_code_hashes:
+            return False
+        remaining = [h for h in record.backup_code_hashes if h != code_hash]
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_twofa)
+                .where(
+                    user_twofa.c.tenant_id == current_tenant_id(),
+                    user_twofa.c.user_id == user_id,
+                )
+                .values(backup_codes_json=json.dumps(remaining))
+            )
+        return True
+
+    def get_secret(self, user_id: str) -> str | None:
+        query = select(user_twofa.c.secret_ciphertext).where(
+            user_twofa.c.tenant_id == current_tenant_id(),
+            user_twofa.c.user_id == user_id,
+        )
+        with self.engine.connect() as connection:
+            ciphertext = connection.execute(query).scalar_one_or_none()
+        return self._decrypt_secret(user_id, ciphertext)
+
+
+class SqlSecurityEventStore:
+    """Append-only security audit log backed by ``security_events``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def append(self, event: SecurityEvent) -> None:
+        with self.engine.begin() as connection:
+            _tenant(connection, current_tenant_id())
+            connection.execute(
+                insert(security_events).values(
+                    tenant_id=current_tenant_id(),
+                    event_id=event.event_id,
+                    user_id=event.user_id,
+                    event_type=event.event_type,
+                    ip_address=event.ip_address,
+                    user_agent=event.user_agent,
+                    device_fingerprint=event.device_fingerprint,
+                    created_at=event.created_at,
+                    metadata_json=json.dumps(event.metadata),
+                )
+            )
+
+    def list_for_user(self, user_id: str, limit: int = 50) -> list[SecurityEvent]:
+        query = (
+            select(security_events)
+            .where(
+                security_events.c.tenant_id == current_tenant_id(),
+                security_events.c.user_id == user_id,
+            )
+            .order_by(security_events.c.created_at.desc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        events = []
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            events.append(
+                SecurityEvent(
+                    event_id=row["event_id"],
+                    user_id=row["user_id"],
+                    event_type=row["event_type"],
+                    created_at=row["created_at"],
+                    ip_address=row["ip_address"],
+                    user_agent=row["user_agent"],
+                    device_fingerprint=row["device_fingerprint"],
+                    metadata=metadata,
+                )
+            )
+        return events
+
+    def known_devices(self, user_id: str) -> set[str]:
+        query = (
+            select(security_events.c.device_fingerprint)
+            .where(
+                security_events.c.tenant_id == current_tenant_id(),
+                security_events.c.user_id == user_id,
+                security_events.c.event_type == "login_success",
+                security_events.c.device_fingerprint.is_not(None),
+            )
+            .distinct()
+        )
+        with self.engine.connect() as connection:
+            return {
+                row[0] for row in connection.execute(query).all() if row[0]
+            }
+
+
+    # -- email/password auth ------------------------------------------
+
+class SqlSessionStore:
+    """Server-side sessions backed by ``user_sessions``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def _row_to_session(self, row: RowMapping) -> UserSession:
+        return UserSession(
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+            last_seen_at=row["last_seen_at"],
+            device_info=row["device_info"],
+            ip_address=row["ip_address"],
+            revoked=bool(row["revoked"]),
+        )
+
+    def create(
+        self,
+        user_id: str,
+        refresh_token_hash: str,
+        *,
+        device_info: str | None,
+        ip_address: str | None,
+    ) -> "UserSession":
+        from app.sessions.sessions import REFRESH_TTL_SECONDS, UserSession
+
+        tenant_id = current_tenant_id()
+        now = datetime.now(timezone.utc)
+        session = UserSession(
+            session_id="sess_" + uuid.uuid4().hex[:24],
+            user_id=user_id,
+            created_at=now.isoformat(),
+            expires_at=(now + timedelta(seconds=REFRESH_TTL_SECONDS)).isoformat(),
+            last_seen_at=now.isoformat(),
+            device_info=device_info,
+            ip_address=ip_address,
+        )
+        with self.engine.begin() as connection:
+            _tenant(connection, tenant_id)
+            connection.execute(
+                insert(user_sessions).values(
+                    tenant_id=tenant_id,
+                    session_id=session.session_id,
+                    user_id=user_id,
+                    refresh_token_hash=refresh_token_hash,
+                    device_info=device_info,
+                    ip_address=ip_address,
+                    created_at=session.created_at,
+                    last_seen_at=session.last_seen_at,
+                    expires_at=session.expires_at,
+                    revoked=False,
+                )
+            )
+        return session
+
+    def get(self, session_id: str) -> "UserSession | None":
+        query = select(user_sessions).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        return self._row_to_session(row) if row else None
+
+    def get_by_refresh_hash(self, refresh_token_hash: str) -> "UserSession | None":
+        # Hashes are not indexed for lookup by value; sessions are looked up
+        # by id after the refresh token is presented with its session id.
+        # This method scans the user's active sessions (bounded, indexed).
+        return None
+
+    def get_by_session_and_refresh(
+        self, session_id: str, refresh_token_hash: str
+    ) -> UserSession | None:
+        import hmac as hmac_module
+
+        query = select(user_sessions).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+            user_sessions.c.revoked == False,  # noqa: E712
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(query).mappings().first()
+        if row is None:
+            return None
+        if not hmac_module.compare_digest(
+            row["refresh_token_hash"] or "", refresh_token_hash
+        ):
+            return None
+        return self._row_to_session(row)
+
+    def rotate_refresh(self, session_id: str, new_hash: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                    user_sessions.c.revoked == False,  # noqa: E712
+                )
+                .values(refresh_token_hash=new_hash)
+            )
+            return result.rowcount == 1
+
+    def touch(self, session_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                )
+                .values(last_seen_at=_utcnow_iso())
+            )
+
+    def revoke(self, session_id: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(user_sessions)
+                .where(
+                    user_sessions.c.tenant_id == current_tenant_id(),
+                    user_sessions.c.session_id == session_id,
+                    user_sessions.c.revoked == False,  # noqa: E712
+                )
+                .values(revoked=True, revoked_at=_utcnow_iso())
+            )
+            return result.rowcount == 1
+
+    def revoke_all_for_user(
+        self, user_id: str, except_session_id: str | None
+    ) -> int:
+        query = (
+            update(user_sessions)
+            .where(
+                user_sessions.c.tenant_id == current_tenant_id(),
+                user_sessions.c.user_id == user_id,
+                user_sessions.c.revoked == False,  # noqa: E712
+            )
+            .values(revoked=True, revoked_at=_utcnow_iso())
+        )
+        if except_session_id:
+            query = query.where(
+                user_sessions.c.session_id != except_session_id
+            )
+        with self.engine.begin() as connection:
+            result = connection.execute(query)
+            return result.rowcount
+
+    def list_for_user(self, user_id: str) -> list["UserSession"]:
+        query = (
+            select(user_sessions)
+            .where(
+                user_sessions.c.tenant_id == current_tenant_id(),
+                user_sessions.c.user_id == user_id,
+            )
+            .order_by(user_sessions.c.created_at.desc())
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+        return [self._row_to_session(row) for row in rows]
+
+    def get_refresh_hash(self, session_id: str) -> str | None:
+        query = select(user_sessions.c.refresh_token_hash).where(
+            user_sessions.c.tenant_id == current_tenant_id(),
+            user_sessions.c.session_id == session_id,
+        )
+        with self.engine.connect() as connection:
+            return connection.execute(query).scalar_one_or_none()

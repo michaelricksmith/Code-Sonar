@@ -31,7 +31,7 @@ from app.models.user import (
     STATUS_SUSPENDED,
     users,
 )
-from app.oauth import OAuthUser, OAuthUserStore
+from app.oauth import GitHubIdentityConflictError, OAuthUser, OAuthUserStore
 from app.persistence.crypto import EncryptionProvider, checkout_path_aad, oauth_token_aad
 from app.persistence.schema import (
     email_preferences,
@@ -791,6 +791,19 @@ class SqlUserStore:
             return None
         return self._row_to_user(row)
 
+    def get_by_github_id(self, github_id: str) -> OAuthUser | None:
+        if not github_id:
+            return None
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(select(users).where(users.c.github_id == github_id))
+                .mappings()
+                .first()
+            )
+        if row is None:
+            return None
+        return self._row_to_user(row)
+
     def get_by_email(self, email: str) -> OAuthUser | None:
         email_norm = _normalize_email(email)
         if not email_norm:
@@ -1001,6 +1014,13 @@ class SqlUserStore:
                 return self._get_or_raise(connection, user_id)
         except LookupError:
             return None
+        except IntegrityError as exc:
+            # The GitHub identity is already linked to a different account
+            # (unique constraint on github_id). Report the conflict cleanly
+            # so callers never surface a raw 500.
+            raise GitHubIdentityConflictError(
+                "GitHub identity is already linked to a different account"
+            ) from exc
 
     def unlink_github(self, user_id: str) -> OAuthUser | None:
         """Remove GitHub OAuth credentials from a user record."""

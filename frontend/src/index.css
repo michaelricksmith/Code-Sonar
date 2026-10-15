@@ -42,7 +42,8 @@
 html { -webkit-text-size-adjust: 100%; }
 
 body {
-  font-family: Inter, ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, ui-sans-serif, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "cv05", "cv11";
   background:
     radial-gradient(1200px 520px at 50% -10%, rgba(255, 255, 255, 0.05), transparent 60%),
     var(--bg);
@@ -803,3 +804,356 @@ button { font-family: inherit; }
 }
 .site-footer-compact a { font-size: 11.5px; color: var(--faint); text-decoration: none; }
 .site-footer-compact a:hover { color: var(--teal); text-decoration: underline; }
+
+/* ============================================================
+   Apple Design pass 1 — HIG semantic tokens, type scale, glass.
+   Pure monochrome: near-black to white only. Tint = white accent,
+   carried by the existing --teal alias (white).
+   ============================================================ */
+
+:root {
+  /* HIG semantic dark tokens (app default) */
+  --hig-base: #000000;
+  --hig-elevated: #1c1c1e;
+  --hig-tertiary: #2c2c2e;
+  --hig-label: #f5f5f7;
+  --hig-label2: rgba(235, 235, 245, 0.60);
+  --hig-label3: rgba(235, 235, 245, 0.30);
+  --hig-separator: rgba(84, 84, 88, 0.60);
+  /* Light set (light zone of the Descent landing) */
+  --hig-light-bg: #ffffff;
+  --hig-light-grouped: #f2f2f7;
+  --hig-light-label: #000000;
+  --hig-light-label2: rgba(60, 60, 67, 0.60);
+  --hig-light-separator: rgba(60, 60, 67, 0.29);
+
+  --radius-card: 22px;
+  --radius-panel: 26px;
+  --radius-pill: 980px;
+  --ease-apple: cubic-bezier(0.28, 0.11, 0.32, 1);
+  --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* Liquid glass (chrome only — never on content cards) */
+  --glass-bg: rgba(30, 30, 32, 0.55);
+  --glass-blur: blur(24px) saturate(180%);
+  --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 0.5px rgba(255, 255, 255, 0.25);
+}
+
+/* Type scale (HIG app UI). Tracking tightens as size grows. */
+.t-large-title { font-size: 34px; line-height: 41px; letter-spacing: -0.01em; font-weight: 700; }
+.t-title1 { font-size: 28px; line-height: 34px; letter-spacing: -0.012em; font-weight: 700; }
+.t-title2 { font-size: 22px; line-height: 28px; letter-spacing: -0.012em; font-weight: 600; }
+.t-title3 { font-size: 20px; line-height: 25px; font-weight: 600; }
+.t-headline { font-size: 17px; line-height: 22px; font-weight: 600; }
+.t-body { font-size: 17px; line-height: 22px; }
+.t-callout { font-size: 16px; line-height: 21px; }
+.t-subhead { font-size: 15px; line-height: 20px; }
+.t-footnote { font-size: 13px; line-height: 18px; }
+.t-caption { font-size: 12px; line-height: 16px; }
+
+/* Score / stat numerals: monospace-feel digits without layout shift. */
+.num { font-variant-numeric: tabular-nums; }
+
+/* Display numeral hero for the score (desktop Overview). */
+.score-numeral {
+  font-size: clamp(88px, 12vw, 132px);
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  line-height: 1;
+  margin: 6px 0 2px;
+  text-shadow: 0 0 40px rgba(255, 255, 255, 0.35);
+}
+.score-grade-line { font-size: 15px; color: var(--muted); margin-bottom: 6px; }
+.score-grade-line b { color: var(--ink); font-weight: 700; }
+
+/* The hero already shows the numeral + grade line above the trace; the
+   vitals widget's own number, grade chip and labels are hidden there —
+   visual-only, the component is untouched. */
+.score-hero .vitals-num { display: none; }
+.score-hero .vitals-head { display: none; }
+
+/* Marketing headline grammar. */
+h1.hero, h1.hero-h1 {
+  font-size: clamp(64px, 7vw, 96px);
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  line-height: 1.05;
+}
+
+/* Liquid glass utility — chrome only (bars, tab bars, sticky bars). */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: 28px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), var(--glass-rim);
+}
+.glass-pill { border-radius: var(--radius-pill); }
+
+/* Scroll edge fade: content fading beneath a floating top chrome. */
+.scroll-edge {
+  position: fixed; left: 0; right: 0; top: 0; height: 96px;
+  pointer-events: none; z-index: 30;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  mask-image: linear-gradient(to bottom, black 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 30%, transparent 100%);
+}
+
+/* Inside the transformed mobile tab bar, fixed positioning anchors to
+   the pill instead of the viewport — anchor the fade strip just above
+   the pill, sized to cover where content dives under it. */
+.mobile-tabbar .scroll-edge-bottom {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(100% + 2px); width: max(340px, 94vw); height: 72px;
+  pointer-events: none; z-index: -1;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  mask-image: linear-gradient(to top, black 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to top, black 30%, transparent 100%);
+}
+
+/* Floating glass sidebar (desktop app shell). Content keeps scrolling in
+   the grid column; the sidebar itself is inset, rounded, glass. */
+.sidebar {
+  position: sticky;
+  top: 16px;
+  height: calc(100vh - 32px);
+  margin: 16px 0 16px 16px;
+  border: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), var(--glass-rim);
+  overflow: hidden auto;
+}
+.shell { column-gap: 8px; }
+
+/* Floating glass capsule tab bar (mobile). */
+.mobile-tabbar { display: none; }
+@media (max-width: 960px) {
+  .mobile-tabbar {
+    display: flex;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: max(14px, env(safe-area-inset-bottom));
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: var(--radius-pill);
+    z-index: 40;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), var(--glass-rim);
+    animation: tabbar-in 0.35s var(--ease-apple);
+  }
+  @keyframes tabbar-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  .tab-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px;
+    min-width: 58px; min-height: 48px;
+    padding: 6px 10px;
+    border: none; background: none; border-radius: var(--radius-pill);
+    color: var(--muted); font-size: 10.5px; font-weight: 600; font-family: inherit;
+    cursor: pointer; flex: none;
+  }
+  .tab-item svg { width: 22px; height: 22px; }
+  .tab-item:active { transform: scale(0.96); transition: transform 0.15s var(--ease-apple); }
+  .tab-item.active { background: #fafafa; color: #000; }
+  .tab-item.active .tab-label { color: #000; }
+  /* More overflow menu floats above the tab bar. */
+  .tab-more-wrap { position: relative; }
+  .tab-more-menu {
+    position: absolute; bottom: calc(100% + 12px); left: 50%;
+    transform: translateX(-50%);
+    min-width: 220px; padding: 8px; border-radius: 20px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), var(--glass-rim);
+    z-index: 41;
+    animation: tabbar-in 0.25s var(--ease-apple);
+  }
+  .tab-more-menu a, .tab-more-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 12px 14px; min-height: 48px; border: none; background: none;
+    border-radius: 14px; color: var(--ink); font-size: 15px; font-weight: 550;
+    text-decoration: none; font-family: inherit; cursor: pointer; text-align: left;
+  }
+  .tab-more-menu a:hover, .tab-more-menu button:hover { background: rgba(255, 255, 255, 0.08); }
+  .tab-more-menu hr { border: none; border-top: 1px solid var(--line); margin: 6px 8px; }
+  /* Clear the floating bar. */
+  .main { padding-bottom: 120px; }
+  /* The global Ask Sonar FAB is retired on mobile — Ask is a tab now. */
+  .fab { display: none; }
+  /* Press states dim — never ripple. */
+  .btn:active { transform: scale(0.97); opacity: 0.85; }
+}
+
+/* Score-drain factors under the numeral hero (grouped cells). */
+.drains { margin-top: 18px; }
+.drains-label { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; }
+.drain-group { background: var(--hig-elevated); border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--line); }
+.drain-row { display: flex; align-items: center; gap: 16px; padding: 15px 20px; min-height: 44px; }
+.drain-row + .drain-row { border-top: 0.5px solid var(--hig-separator); }
+.drain-count { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; min-width: 56px; }
+.drain-body b { display: block; font-size: 15.5px; letter-spacing: -0.01em; }
+.drain-body span { font-size: 13px; color: var(--muted); }
+
+/* Grouped findings preview: flat elevated cells, hairline separators,
+   no shadows (applies everywhere IssueCard renders). */
+.grouped-cards { background: var(--hig-elevated); border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; }
+.grouped-cards .issue-card {
+  background: transparent; border: none; border-radius: 0; box-shadow: none;
+  margin-bottom: 0; padding: 20px 22px;
+}
+.grouped-cards .issue-card + .issue-card { border-top: 0.5px solid var(--hig-separator); }
+.grouped-cards .issue-card:hover { transform: none; background: rgba(255, 255, 255, 0.04); border-color: transparent; }
+.grouped-cards .issue-card + .issue-card:hover { border-top: 0.5px solid var(--hig-separator); }
+
+/* Floating glass pill for the landing nav (appears on scroll). */
+.landing-nav.is-pill {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1140px, calc(100% - 32px));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), var(--glass-rim);
+  transition: box-shadow 0.3s var(--ease-apple), background 0.3s var(--ease-apple);
+}
+.landing-nav.is-pill .landing-nav-in { height: 56px; padding: 0 12px 0 22px; }
+.landing-nav.is-pill .landing-links { display: none; }
+
+/* ============================================================
+   Apple Design pass 2 — remaining chrome surfaces (glass on
+   drawer header, compose bar, scan-terminal header, sticky
+   Copy-prompt bar) + scroll-edge wiring. All visual only;
+   no behavior, routing, or copy changes.
+   ============================================================ */
+
+/* Scroll edge fade for content scrolling beneath a floating BOTTOM
+   chrome (mobile tab bar, sticky bars). Mirrors the top .scroll-edge. */
+.scroll-edge-bottom {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 96px;
+  pointer-events: none; z-index: 30;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  mask-image: linear-gradient(to top, black 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to top, black 30%, transparent 100%);
+}
+
+/* Ask Sonar drawer header — Liquid Glass (regular material, more
+   opaque for legibility). Messages scroll beneath it inside .chat,
+   so the chat's top mask below doubles as the scroll-edge fade. */
+.drawer-head {
+  position: relative; z-index: 2;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: none;
+  box-shadow: var(--glass-rim);
+}
+.drawer-close { min-width: 44px; min-height: 44px; }
+
+/* Drawer input bar — glass chrome, safe-area aware. */
+.compose {
+  position: relative; z-index: 2;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-top: none;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35), var(--glass-rim);
+  padding: 14px 20px max(18px, env(safe-area-inset-bottom));
+}
+
+/* Scroll-edge fades where drawer messages meet the glass chrome. */
+.chat {
+  mask-image: linear-gradient(to bottom, transparent 0, black 28px, black calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 28px, black calc(100% - 28px), transparent 100%);
+}
+
+/* Sticky Copy-prompt bar (issue detail). Floating glass pill that
+   sticks to the viewport bottom while the pushed view scrolls.
+   Carries the single primary action of the fix flow. */
+.copy-bar {
+  position: sticky;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 25;
+  margin-top: 24px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 10px 10px 20px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), var(--glass-rim);
+  animation: copybar-in 0.3s var(--ease-apple);
+}
+@keyframes copybar-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.copy-bar .copy-bar-cap { flex: 1; min-width: 0; }
+.copy-bar .copy-bar-cap b { display: block; font-size: 14px; letter-spacing: -0.01em; }
+.copy-bar .copy-bar-cap span { display: block; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.copy-bar .btn { min-height: 44px; }
+.copy-bar .copied-flag { font-size: 13px; font-weight: 600; color: #fafafa; white-space: nowrap; padding-right: 12px; }
+/* Scroll-edge fade above the bar: content melts before diving under it. */
+.copy-bar::before {
+  content: ""; position: absolute; left: 10%; right: 10%;
+  bottom: calc(100% + 2px); height: 56px; z-index: -1;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  mask-image: linear-gradient(to top, black 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to top, black 30%, transparent 100%);
+}
+/* Clear the floating mobile tab bar on small screens. */
+@media (max-width: 960px) {
+  .copy-bar { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 92px); }
+}
+
+/* Scan terminal — floating glass header over the live readout.
+   Lines scroll beneath it; the body's top mask is the scroll edge. */
+.scan-terminal { position: relative; }
+.scan-terminal-head {
+  position: absolute; top: 10px; left: 10px; right: 10px; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), var(--glass-rim);
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 12.5px; letter-spacing: 0.02em;
+}
+.scan-terminal-head .st-dot { width: 8px; height: 8px; border-radius: 50%; background: #fafafa; flex: none; }
+.scan-terminal-head .st-dot.live { animation: st-pulse 1.2s ease-in-out infinite; }
+@keyframes st-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(255, 255, 255, 0.9); }
+  50% { opacity: 0.35; box-shadow: none; }
+}
+.scan-terminal-head .st-status { color: #fafafa; font-weight: 600; }
+.scan-terminal-head .st-repo { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
+.scan-terminal-body {
+  padding-top: 60px;
+  mask-image: linear-gradient(to bottom, transparent 0, black 56px, black calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 56px, black calc(100% - 10px), transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-tabbar { animation: none; }
+}

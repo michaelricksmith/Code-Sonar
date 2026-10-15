@@ -359,22 +359,12 @@ export function IssueDetail({
               own assistant, let it change your real code, then <b>re-scan</b> here
               to verify the fix landed.
             </p>
-            {!fixPrompt ? (
-              <>
-                {promptError && (
-                  <div className="notice danger" style={{ position: "relative", marginTop: 16 }}>
-                    <b>Something went wrong</b>{promptError}
-                  </div>
-                )}
-                <button
-                  className="btn btn-fix"
-                  onClick={() => void generatePrompt()}
-                  disabled={promptLoading}
-                >
-                  {promptLoading ? "Writing the prompt…" : "Generate fix prompt"}
-                </button>
-              </>
-            ) : (
+            {!fixPrompt && promptError && (
+              <div className="notice danger" style={{ position: "relative", marginTop: 16 }}>
+                <b>Something went wrong</b>{promptError}
+              </div>
+            )}
+            {fixPrompt && (
               <>
                 <textarea
                   className="prompt-box"
@@ -388,18 +378,6 @@ export function IssueDetail({
                     <b>Something went wrong</b>{promptError}
                   </div>
                 )}
-                <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn btn-fix" onClick={() => void copyPrompt()}>
-                    ⧉ Copy prompt
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ background: "transparent", color: "#fff", borderColor: "#3A4450", alignSelf: "center" }}
-                    onClick={() => { setFixPrompt(null); setPromptCopied(false); }}
-                  >
-                    Regenerate
-                  </button>
-                </div>
                 {promptCopied && (
                   <p className="copied-note" style={{ marginTop: 12 }}>
                     Copied — paste it into your LLM, then re-scan to verify.
@@ -455,6 +433,46 @@ export function IssueDetail({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Sticky glass bottom bar — the fix flow's single primary action.
+          Behavior identical to the inline buttons it carries. */}
+      <div className="copy-bar" role="group" aria-label="Fix prompt actions">
+        <div className="copy-bar-cap">
+          {fixPrompt ? (
+            <>
+              <b>Fix prompt ready</b>
+              <span>{promptCopied ? "Copied — paste it into your LLM, then re-scan to verify." : "Copy it into Cursor, Claude, or your own assistant."}</span>
+            </>
+          ) : (
+            <>
+              <b>Fix prompt</b>
+              <span>Sonar writes it from this exact issue — file, lines, and what to change.</span>
+            </>
+          )}
+        </div>
+        {promptCopied && <span className="copied-flag">Copied ✓</span>}
+        {fixPrompt ? (
+          <>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setFixPrompt(null); setPromptCopied(false); }}
+            >
+              Regenerate
+            </button>
+            <button className="btn btn-fix" onClick={() => void copyPrompt()}>
+              ⧉ Copy prompt
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn-fix"
+            onClick={() => void generatePrompt()}
+            disabled={promptLoading}
+          >
+            {promptLoading ? "Writing the prompt…" : "Generate fix prompt"}
+          </button>
+        )}
       </div>
     </div>
   );

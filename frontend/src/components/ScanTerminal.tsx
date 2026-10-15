@@ -68,8 +68,22 @@ export function ScanTerminal({ job, repoLabel }: ScanTerminalProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [lines]);
 
+  const statusText = !job
+    ? "Starting scan"
+    : job.status === "error"
+      ? "Scan failed"
+      : job.status === "done"
+        ? "Scan complete"
+        : "Scanning";
+  const live = !job || job.status === "running";
+
   return (
     <div className="scan-terminal" role="log" aria-live="polite" aria-label="Scan progress">
+      <div className="scan-terminal-head" aria-hidden="true">
+        <span className={`st-dot${live ? " live" : ""}`} />
+        <span className="st-status">{statusText}</span>
+        <span className="st-repo">$ sonar scan {repoLabel || "repository"}</span>
+      </div>
       <div className="scan-terminal-body" ref={bodyRef}>
         {lines.map((line, i) => (
           <div key={i} className="scan-terminal-line">

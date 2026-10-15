@@ -296,6 +296,16 @@ class OAuthUser:
         }
 
 
+class GitHubIdentityConflictError(Exception):
+    """A GitHub identity is already linked to a different Code Sonar account.
+
+    The ``users`` table enforces uniqueness on ``github_id``. When the
+    account-linking flow tries to attach a GitHub identity that another
+    account already owns, stores raise this instead of leaking a raw
+    database IntegrityError (500). Callers map it to an honest 409.
+    """
+
+
 class UserStore(Protocol):
     """Structural interface for user account stores.
 
@@ -356,6 +366,15 @@ class UserStore(Protocol):
         """Permanently delete a user record (admin action)."""
         ...
 
+    def get_by_github_id(self, github_id: str) -> OAuthUser | None:
+        """Return the account that owns a GitHub identity, or None.
+
+        Used by the account-linking flow to detect a conflict before
+        writing: a GitHub identity can belong to exactly one Code Sonar
+        account.
+        """
+        ...
+
     def link_github(
         self,
         user_id: str,
@@ -369,7 +388,9 @@ class UserStore(Protocol):
         Used by the account-linking flow: the user stays on their current
         account (plan, flags, and history untouched) and gains the GitHub
         token needed for repo listing and private-repo clones. Returns the
-        updated user, or None when the user does not exist.
+        updated user, or None when the user does not exist. Raises
+        ``GitHubIdentityConflictError`` when the identity is already linked to a
+        different account.
         """
         ...
 
@@ -487,6 +508,12 @@ class OAuthUserStore:
         with self._lock:
             return next((u for u in self._load() if u.id == user_id), None)
 
+    def get_by_github_id(self, github_id: str) -> OAuthUser | None:
+        if not github_id:
+            return None
+        with self._lock:
+            return next((u for u in self._load() if u.github_id == github_id), None)
+
     def upsert(
         self,
         *,
@@ -586,6 +613,15 @@ class OAuthUserStore:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._lock:
             records = self._load()
+            if github_id:
+                owner = next(
+                    (u for u in records if u.github_id == github_id and u.id != user_id),
+                    None,
+                )
+                if owner is not None:
+                    raise GitHubIdentityConflictError(
+                        "GitHub identity is already linked to a different account"
+                    )
             for index, existing in enumerate(records):
                 if existing.id == user_id:
                     updated = replace(
@@ -1069,12 +1105,36 @@ async def github_callback(
         user = require_user(request)
         if user.id != connect_user_id:
             raise HTTPException(status_code=403, detail="OAuth session mismatch")
-        updated = get_oauth_user_store().link_github(
-            user.id,
-            github_id=str(profile["id"]),
-            github_username=str(profile.get("login") or ""),
-            github_access_token=token,
-        )
+        store = get_oauth_user_store()
+        github_id = str(profile["id"])
+        owner = store.get_by_github_id(github_id)
+        if owner is not None and owner.id != user.id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This GitHub account is already linked to a different "
+                    "Code Sonar account. Sign in with GitHub to use that "
+                    "account, or disconnect GitHub there first."
+                ),
+            )
+        try:
+            updated = store.link_github(
+                user.id,
+                github_id=github_id,
+                github_username=str(profile.get("login") or ""),
+                github_access_token=token,
+            )
+        except GitHubIdentityConflictError:
+            # Lost a race between the pre-check and the write (or a store
+            # that enforces uniqueness itself): same honest outcome, no 500.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This GitHub account is already linked to a different "
+                    "Code Sonar account. Sign in with GitHub to use that "
+                    "account, or disconnect GitHub there first."
+                ),
+            )
         if updated is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return RedirectResponse(url="/app", status_code=302)

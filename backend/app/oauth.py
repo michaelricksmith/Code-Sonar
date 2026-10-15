@@ -35,7 +35,7 @@ from urllib.parse import urlencode
 
 import httpx
 import jwt
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -43,6 +43,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 _SESSION_COOKIE = "sonar_session"
+_REFRESH_COOKIE = "sonar_refresh"
 _SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 _STATE_TTL_SECONDS = 10 * 60
 
@@ -109,8 +110,11 @@ class OAuthConfig:
 _secret_warning_emitted = False
 
 
+_fallback_secret: str | None = None
+
+
 def _session_secret() -> str:
-    global _secret_warning_emitted
+    global _secret_warning_emitted, _fallback_secret
     configured = os.environ.get("SONAR_SESSION_SECRET", "").strip()
     if configured:
         return configured
@@ -123,7 +127,11 @@ def _session_secret() -> str:
             file=sys.stderr,
             flush=True,
         )
-    return secrets.token_hex(32)
+    # Cache the fallback for the life of the process: a fresh secret per
+    # call would make every issued token unverifiable.
+    if _fallback_secret is None:
+        _fallback_secret = secrets.token_hex(32)
+    return _fallback_secret
 
 
 def session_secret_configured() -> bool:
@@ -327,6 +335,21 @@ class UserStore(Protocol):
         retained. Returns True when a record was deleted.
         """
         ...
+
+    # -- email/password auth (SqlUserStore only; JSON store lacks these) --
+
+    def get_by_email(self, email: str) -> OAuthUser | None: ...
+    def create_email_user(self, email: str, name: str, password_hash: str) -> OAuthUser: ...
+    def get_password_hash(self, user_id: str) -> str | None: ...
+    def set_password_hash(self, user_id: str, password_hash: str) -> None: ...
+    def is_email_verified(self, user_id: str) -> bool: ...
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None: ...
+    def set_email_verify_token(self, user_id: str, token_hash: str | None) -> None: ...
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None: ...
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None: ...
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None: ...
 
     def delete_user(self, user_id: str) -> bool:
         """Permanently delete a user record (admin action)."""
@@ -615,6 +638,49 @@ class OAuthUserStore:
             self._save(kept)
             return True
 
+    # -- email/password auth: not supported by the JSON store ---------
+
+    def _email_unsupported(self) -> None:
+        raise RuntimeError("Email/password auth requires the SQL user store.")
+
+    def get_by_email(self, email: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
+
+    def create_email_user(self, email: str, name: str, password_hash: str) -> OAuthUser:
+        self._email_unsupported()
+        raise RuntimeError("unreachable")
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        self._email_unsupported()
+        return None
+
+    def set_password_hash(self, user_id: str, password_hash: str) -> None:
+        self._email_unsupported()
+
+    def is_email_verified(self, user_id: str) -> bool:
+        self._email_unsupported()
+        return False
+
+    def set_email_verified(self, user_id: str, verified: bool = True) -> None:
+        self._email_unsupported()
+
+    def set_email_verify_token(self, user_id: str, token_hash: str | None) -> None:
+        self._email_unsupported()
+
+    def get_by_verify_token(self, token_hash: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
+
+    def set_password_reset_token(
+        self, user_id: str, token_hash: str | None, expires_at: str | None
+    ) -> None:
+        self._email_unsupported()
+
+    def get_by_reset_token(self, token_hash: str) -> OAuthUser | None:
+        self._email_unsupported()
+        return None
+
 
 _user_store: UserStore = OAuthUserStore()
 
@@ -682,9 +748,7 @@ async def google_login() -> RedirectResponse:
     return RedirectResponse(url=f"{_GOOGLE_AUTHORIZE_URL}?{params}", status_code=302)
 
 
-def _exchange_error_detail(
-    provider: str, status: int, payload: dict[str, Any]
-) -> str:
+def _exchange_error_detail(provider: str, status: int, payload: dict[str, Any]) -> str:
     """Build an honest token-exchange failure detail from the provider's body.
 
     OAuth token endpoints return ``error`` / ``error_description`` on failure
@@ -771,16 +835,75 @@ def _google_profile(token: str) -> dict[str, Any]:
     return payload
 
 
-def _set_session_cookie(response: RedirectResponse, user_id: str, secret: str) -> None:
+def _set_session_cookie(
+    response: Response,
+    user_id: str,
+    secret: str,
+    request: Request | None = None,
+) -> None:
+    """Issue a server-side session: short-lived access token + refresh cookie.
+
+    Falls back to the legacy stateless JWT when the session store is
+    unavailable, so login never breaks.
+    """
+    from app.sessions.sessions import (
+        get_session_store,
+        hash_refresh_token,
+        new_access_token,
+        new_refresh_token,
+    )
+
+    ip, user_agent = _client_info(request)
+    device_info = (user_agent or "")[:512]
+    try:
+        store = get_session_store()
+        refresh_token = new_refresh_token()
+        session = store.create(
+            user_id,
+            hash_refresh_token(refresh_token),
+            device_info=device_info,
+            ip_address=ip,
+        )
+        access_token = new_access_token(session.session_id, user_id, secret)
+        # Refresh cookie carries "session_id.refresh_token" so rotation can
+        # find the session without scanning hashes.
+        refresh_value = f"{session.session_id}.{refresh_token}"
+    except Exception:
+        access_token = new_session_token(user_id, secret)
+        refresh_value = None
     response.set_cookie(
         _SESSION_COOKIE,
-        new_session_token(user_id, secret),
-        max_age=_SESSION_TTL_SECONDS,
+        access_token,
+        max_age=15 * 60,
         httponly=True,
         secure=True,
         samesite="lax",
         path="/",
     )
+    if refresh_value is not None:
+        response.set_cookie(
+            _REFRESH_COOKIE,
+            refresh_value,
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/api/auth/refresh",
+        )
+
+
+def _client_info(request: Request | None) -> tuple[str | None, str | None]:
+    """(ip_address, user_agent) for security event logging."""
+    if request is None:
+        return None, None
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    elif request.client:
+        ip = request.client.host
+    else:
+        ip = None
+    return ip, request.headers.get("user-agent")
 
 
 def _github_upsert_fields(profile: dict[str, Any], token: str) -> dict[str, Any]:
@@ -963,6 +1086,21 @@ def current_user(request: Request) -> OAuthUser | None:
     if user is None or user.is_suspended:
         return None
     return user
+
+
+def current_session_id(request: Request) -> str | None:
+    """The server-side session id for this request, if it has one."""
+    token = request.cookies.get(_SESSION_COOKIE)
+    if not token:
+        return None
+    try:
+        from app.sessions.sessions import decode_access_token
+
+        payload = decode_access_token(token, _session_secret())
+        session_id = (payload or {}).get("sid")
+        return str(session_id) if session_id else None
+    except Exception:
+        return None
 
 
 def require_user(request: Request) -> OAuthUser:

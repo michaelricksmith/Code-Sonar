@@ -63,10 +63,20 @@ function DriftSparkline() {
 export function LandingPage() {
   const sample = useCountUp(SAMPLE_SCORE);
   const grade = gradeForScore(SAMPLE_SCORE);
+  // Floating glass pill nav: solid bar at the very top, glass pill on scroll.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <div className="descent" id="main-content" tabIndex={-1}>
-      <nav className="landing-nav" aria-label="Site">
+      {/* Scroll-edge fade: content melts beneath the floating glass pill nav. */}
+      {scrolled && <div className="scroll-edge" aria-hidden="true" />}
+      <nav className={`landing-nav${scrolled ? " is-pill" : ""}`} aria-label="Site">
         <div className="wrap landing-nav-in">
           <a className="brand" href="#/">
             <span className="brand-mark" />
@@ -89,7 +99,7 @@ export function LandingPage() {
           <i />
           <span><b>New</b>&nbsp;&nbsp;Drift tracking across every scan</span>
         </span>
-        <h1>
+        <h1 className="hero-h1">
           What&rsquo;s your code&rsquo;s <span className="accent">credit score?</span>
         </h1>
         <p className="lede">

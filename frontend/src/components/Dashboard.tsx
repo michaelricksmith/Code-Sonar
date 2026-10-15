@@ -11,7 +11,7 @@ import { ProgressStrip } from "./ProgressStrip";
 import { TwoFASettings } from "./TwoFASettings";
 import { SessionsSettings } from "./SessionsSettings";
 import { ChangePassword } from "./ChangePassword";
-import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity } from "../api/analyzers";
+import type { DriftResult, Finding, ScanResponse, ScoreTrend, Severity, Category } from "../api/analyzers";
 import {
   AREA_NOTE,
   AREA_ORDER,
@@ -81,6 +81,17 @@ export function IssueCard({ finding, onOpen }: { finding: Finding; onOpen: (f: F
     </button>
   );
 }
+
+/** Human labels for the score-drain factors (aggregated from the findings the
+ *  component already has — findings_by_category — no new data source). */
+const DRAIN_META: Record<Category, { title: string; blurb: string }> = {
+  testing: { title: "Testing debt", blurb: "Modules with no tests covering them" },
+  complexity: { title: "Complexity hotspots", blurb: "Too many decision paths and deep nesting" },
+  maintainability: { title: "Oversized code", blurb: "Files and functions doing too much" },
+  security: { title: "Security exposure", blurb: "Secrets and unsafe patterns" },
+  staleness: { title: "Stale code", blurb: "Leftover markers and dead code" },
+  duplication: { title: "Duplicated logic", blurb: "Repeated code that drifts apart" },
+};
 
 interface FileRisk {
   file_path: string;
@@ -156,6 +167,18 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
   const dist = result.severity_distribution;
   const urgentCount = dist.critical ?? 0;
   const fileCount = new Set(result.findings.map((f) => f.file_path)).size;
+  // Top 2–3 score-drain factors, aggregated from the findings array's
+  // existing per-category counts (findings_by_category) — no new source.
+  const drains = useMemo(() => {
+    const entries = Object.entries(result.findings_by_category ?? {})
+      .filter(([, n]) => (n ?? 0) > 0)
+      .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+      .slice(0, 3);
+    return entries.map(([category, count]) => ({
+      category: category as Category,
+      count: count ?? 0,
+    }));
+  }, [result]);
 
   const spark = useMemo(() => {
     if (!trend || trend.points.length < 2) return null;
@@ -183,6 +206,12 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
       <section className="score-hero">
         <div className="score-hero-left">
           <div className="lbl">Sonar score</div>
+          <div className="score-numeral num" aria-label={`Score ${result.score}`}>
+            {result.score}
+          </div>
+          <div className="score-grade-line">
+            Grade <b>{grade}</b> · {GRADE_WORDS[grade]}
+          </div>
           <div style={{ display: "flex", justifyContent: "center", margin: "10px 0 2px" }}>
             <VitalsTrace score={result.score} findings={result.findings} width={300} />
           </div>
@@ -202,6 +231,22 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
                   {fixedNew.newCount} new
                 </span>
               )}
+            </div>
+          )}
+          {drains.length > 0 && (
+            <div className="drains">
+              <div className="drains-label">What&rsquo;s draining your score</div>
+              <div className="drain-group">
+                {drains.map(({ category, count }) => (
+                  <div className="drain-row" key={category}>
+                    <div className="drain-count num">{count}</div>
+                    <div className="drain-body">
+                      <b>{DRAIN_META[category].title}</b>
+                      <span>{DRAIN_META[category].blurb}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -239,9 +284,13 @@ export function Dashboard({ result, repoLabel, drift, trend, scanDiff, onOpenIss
       {ranked.length === 0 && (
         <div className="empty-panel">No {copy.findings} found — your code is clean. 🎉</div>
       )}
-      {ranked.slice(0, 3).map((finding) => (
-        <IssueCard key={finding.id} finding={finding} onOpen={onOpenIssue} />
-      ))}
+      {ranked.length > 0 && (
+        <div className="grouped-cards">
+          {ranked.slice(0, 3).map((finding) => (
+            <IssueCard key={finding.id} finding={finding} onOpen={onOpenIssue} />
+          ))}
+        </div>
+      )}
 
       <div className="two-col" style={{ marginTop: 38 }}>
         <div className="panel">

@@ -3,6 +3,7 @@
  * Mirrors the mockup sidebar (Overview / Issues / Files, Progress).
  */
 
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { User } from "../api/auth";
@@ -57,6 +58,7 @@ export function Shell({
   children,
 }: ShellProps) {
   const rescanLabel = rescanning ? "↻ Scanning…" : "↻ Re-scan";
+  const [moreOpen, setMoreOpen] = useState(false);
   const paid = isPaidPlan(billing?.plan);
   return (
     <div className="shell">
@@ -205,7 +207,122 @@ export function Shell({
       </aside>
 
       <main className="main" id="main-content" tabIndex={-1}>{children}</main>
+
+      <MobileTabBar
+        view={view}
+        isAdmin={user.is_admin ?? false}
+        repoLabel={repoLabel}
+        onNavigate={(v) => { setMoreOpen(false); onNavigate(v); }}
+        onOpenSonar={onOpenSonar}
+        onRescan={() => { setMoreOpen(false); onRescan(); }}
+        onSignOut={onSignOut}
+        moreOpen={moreOpen}
+        onToggleMore={() => setMoreOpen((o) => !o)}
+      />
     </div>
+  );
+}
+
+/** Five uniform tab glyphs (Lucide-style stroke icons, one family). */
+function TabIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+/**
+ * Floating glass capsule tab bar (mobile). Maps to the five existing app
+ * surfaces: Overview, Issues, Fixes navigate; Ask opens the existing Ask
+ * Sonar drawer; More holds the plan/billing, admin, re-scan and sign-out
+ * actions that already live in the sidebar.
+ */
+function MobileTabBar({
+  view,
+  isAdmin,
+  repoLabel,
+  onNavigate,
+  onOpenSonar,
+  onRescan,
+  onSignOut,
+  moreOpen,
+  onToggleMore,
+}: {
+  view: ShellView;
+  isAdmin: boolean;
+  repoLabel: string | null;
+  onNavigate: (view: ShellView) => void;
+  onOpenSonar: () => void;
+  onRescan: () => void;
+  onSignOut: () => void;
+  moreOpen: boolean;
+  onToggleMore: () => void;
+}) {
+  const navTabs: { id: string; label: string; d: string; view: ShellView }[] = [
+    { id: "overview", label: "Overview", d: "M3 12l9-9 9 9M5 10v10h14V10", view: "overview" },
+    { id: "issues", label: "Issues", d: "M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z", view: "issues" },
+    { id: "fixes", label: "Fixes", d: "M20 6L9 17l-5-5", view: "fixes" },
+  ];
+  return (
+    <nav className="mobile-tabbar" aria-label="Primary">
+      {/* Scroll-edge fade: content melts beneath the floating tab bar. */}
+      <div className="scroll-edge-bottom" aria-hidden="true" />
+      {navTabs.slice(0, 2).map((t) => (
+        <button
+          key={t.id}
+          className={`tab-item ${view === t.view ? "active" : ""}`}
+          onClick={() => onNavigate(t.view)}
+          aria-label={t.label}
+          aria-current={view === t.view ? "page" : undefined}
+        >
+          <TabIcon d={t.d} />
+          <span className="tab-label">{t.label}</span>
+        </button>
+      ))}
+      {/* Ask is a normal center tab (not raised) — it opens the Ask drawer. */}
+      <button className="tab-item" onClick={onOpenSonar} aria-label="Ask Sonar">
+        <TabIcon d="M21 12a8 8 0 01-8 8H5l-2 2V12a8 8 0 018-8h2a8 8 0 018 8z" />
+        <span className="tab-label">Ask</span>
+      </button>
+      {navTabs.slice(2, 3).map((t) => (
+        <button
+          key={t.id}
+          className={`tab-item ${view === t.view ? "active" : ""}`}
+          onClick={() => onNavigate(t.view)}
+          aria-label={t.label}
+          aria-current={view === t.view ? "page" : undefined}
+        >
+          <TabIcon d={t.d} />
+          <span className="tab-label">{t.label}</span>
+        </button>
+      ))}
+      <div className="tab-more-wrap">
+        {moreOpen && (
+          <div className="tab-more-menu" role="menu" aria-label="More">
+            <a href="#/pricing" role="menuitem">Plan &amp; billing</a>
+            {isAdmin && (
+              <button role="menuitem" onClick={() => onNavigate("admin")}>Admin console</button>
+            )}
+            {repoLabel && (
+              <button role="menuitem" onClick={onRescan}>↻ Re-scan repo</button>
+            )}
+            <hr />
+            <button role="menuitem" onClick={onSignOut}>Sign out</button>
+          </div>
+        )}
+        <button
+          className="tab-item"
+          onClick={onToggleMore}
+          aria-label="More"
+          aria-expanded={moreOpen}
+          aria-haspopup="menu"
+        >
+          <TabIcon d="M5 12h.01M12 12h.01M19 12h.01" />
+          <span className="tab-label">More</span>
+        </button>
+      </div>
+    </nav>
   );
 }
 

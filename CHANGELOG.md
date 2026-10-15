@@ -1,3 +1,48 @@
+## Unreleased — UI redesign pass 2 (Apple Design, unpushed branch `redesign-apple-v1`)
+
+- **Ask Sonar drawer** (`AskSonarDrawer.tsx`, styles in `index.css`): drawer
+  header is now Liquid Glass (regular material); messages scroll beneath it
+  with a mask-based scroll-edge fade; the compose bar is glass with
+  safe-area padding. Send keeps the single filled-control treatment.
+- **Issue detail** (`IssueDetail.tsx`): the fix flow's primary action moved
+  into a sticky floating glass pill bar ("Generate fix prompt" → "⧉ Copy
+  prompt" + Regenerate) with its own scroll-edge fade; same prompt text,
+  same copy behavior, same Copied confirmation. Clears the mobile tab bar.
+- **Scan terminal** (`ScanTerminal.tsx`): floating glass header pill with a
+  truthful live status ("Starting scan" / "Scanning" / "Scan complete" /
+  "Scan failed") and repo label; lines scroll beneath it with a scroll-edge
+  fade; live analyzer behavior untouched.
+- **Scroll-edge wiring** (`Shell.tsx`, `LandingPage.tsx`, `index.css`): the
+  pass-1 `.scroll-edge` fades are now live — top fade behind the floating
+  landing pill nav on scroll, bottom fade above the mobile tab bar, plus
+  mask fades on drawer chat and terminal body.
+
+## Unreleased — UI redesign pass 1 (Apple Design, unpushed branch `redesign-apple-v1`)
+
+- **Apple Design tokens** (`frontend/src/index.css`): HIG semantic tokens
+  (dark base `#000`, elevated `#1c1c1e`, tertiary `#2c2c2e`, label
+  `#f5f5f7` + secondary/tertiary opacities, hairline separator; light set),
+  type scale classes 34→12, liquid-glass utilities for chrome only,
+  spring easings, tabular-nums, system SF font stack with Inter fallback.
+- **App shell** (`Shell.tsx`): desktop sidebar is now inset floating
+  liquid-glass; mobile gets a floating glass capsule tab bar with five
+  uniform tabs (Overview, Issues, Ask, Fixes, More) at ≥44px targets with
+  safe-area inset — Ask opens the existing Ask Sonar drawer, More holds
+  the existing plan/admin/rescan/sign-out actions. No nav behavior changed.
+- **Dashboard**: score is a display-scale numeral hero with the VitalsTrace
+  trace beneath in hairline monochrome; top 2–3 score-drain factors
+  aggregated from `findings_by_category` sit under the score; findings
+  preview is a grouped list (#1c1c1e cells, hairline separators). All
+  actions (rescan, ask, copy prompt) unchanged.
+- **Landing**: top nav rests solid at the very top and becomes a floating
+  glass pill on scroll; hero headline scales to `clamp(64px, 7vw, 96px)`
+  with -0.022em tracking. Descent order, all copy claims, and both OAuth
+  buttons at equal weight are unchanged.
+- Verified: `npx tsc --noEmit` and `npm run build` pass; smoke screenshots
+  (landing 1440 + scrolled, dashboard 1440, mobile overview 402×874)
+  under `goals/code-sonar-ui-redesign/files/impl-pass1/` against the local
+  backend serving the built bundle.
+
 ## Unreleased — GitHub account linking
 
 - **Connect GitHub to an existing account** (`GET /api/auth/github/connect`):

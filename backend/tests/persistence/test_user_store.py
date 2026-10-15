@@ -16,8 +16,11 @@ from app import oauth
 from app.main import app
 from app.models.user import users  # noqa: F401 - registers table on metadata
 from app.oauth import (
+    GitHubIdentityConflictError,
     OAuthUser,
     OAuthUserStore,
+    new_github_connect_state,
+    new_session_token,
     new_state,
     set_oauth_transport,
     set_oauth_user_store,
@@ -296,6 +299,48 @@ class TestOAuthCallbacksWithDb:
             follow_redirects=False,
         )
 
+    def test_connect_conflict_end_to_end_against_sql_store(
+        self, db_env: SqlUserStore
+    ) -> None:
+        """Full stack: the connect callback must 409 on a SQL unique conflict.
+
+        Mirrors the production failure — a Google user linking a GitHub
+        identity that another account already owns.
+        """
+        store = db_env
+        store.upsert(
+            provider="github",
+            provider_user_id="4242",
+            name="Mike GH",
+            email="mikegh@example.com",
+            avatar_url="https://img/z.png",
+            github_access_token="old-token",
+            github_username="mikes",
+        )
+        other = store.upsert(
+            provider="google",
+            provider_user_id="google-9",
+            name="Mike G",
+            email="mikeg@gmail.com",
+            avatar_url="https://img/y.png",
+        )
+        client = TestClient(app)
+        client.cookies.set("sonar_session", new_session_token(other.id, "test-secret"))
+        state = new_github_connect_state("test-secret", other.id)
+
+        response = client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 409
+        assert "already linked" in response.json()["detail"]
+        assert store.get(other.id).github_id == ""
+        owner = store.get_by_github_id("4242")
+        assert owner is not None
+        assert owner.github_access_token == "old-token"
+
     def test_callback_creates_db_user(self, db_env: SqlUserStore) -> None:
         client = TestClient(app)
         response = self._callback(client)
@@ -337,3 +382,40 @@ class TestOAuthCallbacksWithDb:
         assert user is not None
         db_env.set_status(user.id, "suspended")
         assert client.get("/api/auth/me").status_code == 401
+
+
+class TestLinkGithubConflict:
+    def _google_user(self, store: SqlUserStore) -> OAuthUser:
+        return store.upsert(
+            provider="google",
+            provider_user_id="google-9",
+            name="Mike G",
+            email="mikeg@gmail.com",
+            avatar_url="https://img/y.png",
+        )
+
+    def test_conflicting_identity_raises_controlled_error(self, store: SqlUserStore) -> None:
+        owner = _github_upsert(store)  # github_id "gh-1"
+        other = self._google_user(store)
+
+        with pytest.raises(GitHubIdentityConflictError):
+            store.link_github(
+                other.id,
+                github_id="gh-1",
+                github_username="mikes",
+                github_access_token="gh-token-9",
+            )
+
+        # Neither account may be modified by the failed link attempt.
+        assert store.get(other.id).github_id == ""
+        assert store.get(owner.id).github_access_token == "gh-token-1"
+
+    def test_lookup_by_github_id(self, store: SqlUserStore) -> None:
+        owner = _github_upsert(store)
+        self._google_user(store)  # second, unrelated account
+
+        found = store.get_by_github_id("gh-1")
+        assert found is not None
+        assert found.id == owner.id
+        assert store.get_by_github_id("nope") is None
+        assert store.get_by_github_id("") is None

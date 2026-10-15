@@ -206,6 +206,70 @@ class TestConnectCallback:
         assert stored.provider == "github"
 
 
+class TestConnectConflict:
+    def _github_user(self, oauth_store: OAuthUserStore):
+        # User B signed in with GitHub: the identity (github_id "4242")
+        # already belongs to B. A distinct email keeps the accounts separate
+        # (the SQL store merges cross-provider duplicates by email).
+        return oauth_store.upsert(
+            provider="github",
+            provider_user_id="4242",
+            name="Mike GH",
+            email="mikegh@example.com",
+            avatar_url="https://img/z.png",
+            github_access_token="old-token",
+            github_username="mike",
+        )
+
+    def test_identity_owned_by_another_account_returns_409_not_500(
+        self, client, oauth_env, oauth_http, oauth_store
+    ):
+        user_b = self._github_user(oauth_store)
+        user_a = _google_user(oauth_store)
+        _signed_in(client, user_a.id)
+        state = new_github_connect_state(_TEST_SECRET, user_a.id)
+
+        response = client.get(
+            "/api/auth/github/callback",
+            params={"code": "auth-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 409
+        assert "already linked" in response.json()["detail"]
+        # Neither account may be modified by the failed link attempt.
+        stored_a = oauth_store.get(user_a.id)
+        assert stored_a is not None
+        assert stored_a.github_id == ""
+        assert stored_a.github_access_token == ""
+        stored_b = oauth_store.get(user_b.id)
+        assert stored_b is not None
+        assert stored_b.github_id == "4242"
+        assert stored_b.github_access_token == "old-token"
+
+    def test_relink_same_identity_to_owner_is_idempotent(
+        self, client, oauth_env, oauth_http, oauth_store
+    ):
+        user = _google_user(oauth_store)
+        _signed_in(client, user.id)
+
+        for _ in range(2):
+            state = new_github_connect_state(_TEST_SECRET, user.id)
+            response = client.get(
+                "/api/auth/github/callback",
+                params={"code": "auth-code", "state": state},
+                follow_redirects=False,
+            )
+            assert response.status_code == 302
+            assert response.headers["location"] == "/app"
+
+        stored = oauth_store.get(user.id)
+        assert stored is not None
+        assert stored.github_id == "4242"
+        assert stored.github_username == "mike"
+        assert len(oauth_store._load()) == 1
+
+
 class TestDisconnect:
     def test_requires_login(self, client, oauth_env, oauth_store):
         response = client.post("/api/auth/github/disconnect")

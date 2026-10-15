@@ -1,3 +1,19 @@
+## Unreleased — GitHub account-link conflict fix (branch `fix/github-link-conflict`)
+
+- **Fixed**: connecting GitHub on an account whose GitHub identity is
+  already linked to a different Code Sonar account returned a bare 500
+  "Internal Server Error". The callback now answers 409 with a plain-English
+  explanation ("This GitHub account is already linked to a different Code
+  Sonar account. Sign in with GitHub to use that account, or disconnect
+  GitHub there first."). Defense in depth: the SQL store converts the
+  unique-constraint violation into the same controlled outcome instead of a
+  raw 500; new `get_by_github_id` lookup on both stores (and the
+  `UserStore` protocol). Re-linking the same identity to its owning account
+  still works idempotently. Sign-in behavior unchanged; accounts are not
+  merged.
+- Regression tests: conflict → 409 with neither account modified, and
+  conflicting SQL writes raise a controlled error instead of IntegrityError.
+
 ## Unreleased — UI redesign pass 2 (Apple Design, unpushed branch `redesign-apple-v1`)
 
 - **Ask Sonar drawer** (`AskSonarDrawer.tsx`, styles in `index.css`): drawer

@@ -2,9 +2,7 @@
    Pure monochrome: black and white only. Priority is encoded in brightness,
    not hue. The landing page descends from black to white. */
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 :root {
   --bg: #0a0a0a;
